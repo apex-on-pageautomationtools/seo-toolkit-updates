@@ -14,7 +14,7 @@ BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUTH_FILE = os.path.join(BUNDLE_DIR, ".auth_token")
 
 # Replace with your deployed Apps Script web app URL
-AUTH_API_URL = "https://script.google.com/macros/s/AKfycbx7LpIKuX-Y8hOJzU_kSOFmxWA7ycx4rR6wCAuPCUln2iA7v0--NrLmmhL9IJ2sWFwTgQ/exec"  # <-- Paste your Apps Script URL here
+AUTH_API_URL = "https://script.google.com/macros/s/AKfycbzqCGuSSfGThDoI1N88BtRxNjwiLbD2RCVsKaDAV6J171WKvFHv574j3hEHbCwiFLpC/exec"  # <-- Paste your Apps Script URL here
 
 APP_VERSION = "3.2"
 
