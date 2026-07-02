@@ -15,7 +15,18 @@ from datetime import datetime, timedelta
 from io import BytesIO
 
 BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
-GSC_AUTH_FILE = os.path.join(BUNDLE_DIR, ".gsc_accounts")
+
+def _gsc_auth_file():
+    script_dir = BUNDLE_DIR
+    pf = os.environ.get("ProgramFiles", "C:\\Program Files").lower()
+    pfx86 = os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)").lower()
+    if script_dir.lower().startswith(pf) or script_dir.lower().startswith(pfx86):
+        appdata = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "SEO Toolkit Pro")
+        os.makedirs(appdata, exist_ok=True)
+        return os.path.join(appdata, ".gsc_accounts")
+    return os.path.join(script_dir, ".gsc_accounts")
+
+GSC_AUTH_FILE = _gsc_auth_file()
 
 OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -226,7 +237,14 @@ def get_access_token(email):
 
 
 def _load_gsc_config():
-    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    pf = os.environ.get("ProgramFiles", "C:\\Program Files").lower()
+    pfx86 = os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)").lower()
+    if script_dir.lower().startswith(pf) or script_dir.lower().startswith(pfx86):
+        cfg_path = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+                                "SEO Toolkit Pro", "config.json")
+    else:
+        cfg_path = os.path.join(script_dir, "config.json")
     try:
         if os.path.exists(cfg_path):
             with open(cfg_path, "r", encoding="utf-8") as f:
@@ -820,26 +838,39 @@ def build_james_full(data, out_path, log_fn=None):
               opp_rows or [["No keyword opportunities found", "", "", "", ""]],
               [5.5, 1.7, 1.4, 1.4, 2.3])
 
-    # --- Slides 16-18: Screenshots ---
-    for shot_key, title in [("manual", "Manual Action"), ("security", "Security Issues"),
-                            ("removals", "Removals")]:
-        s = header_slide(title)
+    # --- Screenshot slides with definitions (matches extension format) ---
+    SHOT_SLIDES = [
+        ("sitemap", "Sitemap Status",
+         "A sitemap is a file on your site that tells Google which pages we should know about. "
+         "It helps search engines crawl your site more efficiently."),
+        ("performance", "Performance",
+         "The Performance report shows clicks, impressions, CTR, and average position from Google Search. "
+         "Use it to understand how your site performs in search results."),
+        ("manual", "Manual Action",
+         "Google issues a manual action against a site when a human reviewer at Google has determined "
+         "that pages on the site are not compliant with Google's webmaster quality guidelines."),
+        ("security", "Security Issues",
+         "If a Google evaluation determines that a site was hacked, or exhibits behaviour that could "
+         "harm visitors, the Security Issues report will show Google's findings."),
+        ("removals", "Check Any Page Found in Removal",
+         "Checks for any pages that have been temporarily or permanently removed from Google Search results."),
+    ]
+    for shot_key, title, desc in SHOT_SLIDES:
+        s = header_slide(title, desc)
         img_path = screenshots.get(shot_key, "")
         if img_path and os.path.exists(img_path):
-            _add_image_slide.__wrapped__ if hasattr(_add_image_slide, '__wrapped__') else None
-            # Add image directly to this slide
             from PIL import Image
             with Image.open(img_path) as im:
                 iw, ih = im.size
             aspect = iw / ih
             target_w = Inches(12.33)
-            target_h = Inches(5.1)
-            if aspect > (12.33 / 5.1):
+            target_h = Inches(4.6)
+            if aspect > (12.33 / 4.6):
                 fw = target_w; fh = int(target_w / aspect)
             else:
                 fh = target_h; fw = int(target_h * aspect)
             cx = Inches(0.5) + (target_w - fw) // 2
-            cy = Inches(1.8) + (target_h - fh) // 2
+            cy = Inches(2.2) + (target_h - fh) // 2
             s.shapes.add_picture(img_path, cx, cy, fw, fh)
         else:
             _text(s, "Screenshot not available. Please check Google Search Console.",
@@ -916,35 +947,56 @@ def build_james_short(data, out_path, log_fn=None):
     s = prs.slides.add_slide(prs.slide_layouts[6])
     _rect(s, 0, 0, 13.33, 7.5, "#00292E")
     _rect(s, 0, 0, 3.2, 7.5, "#054854")
-    _rect(s, 3.15, 0, 0.15, 7.5, "#F0CDA1")
-    _text(s, "GOOGLE SEARCH CONSOLE", 4.0, 2.0, 8.0, 0.8, 38, "Calibri", WHITE, bold=True)
-    _text(s, "AUDIT REPORT", 4.0, 2.8, 8.0, 0.8, 38, "Calibri", BEIGE, bold=True)
+    _rect(s, 3.2, 0, 0.06, 7.5, "#F0CDA1")
+    _text(s, "GOOGLE SEARCH CONSOLE", 4.0, 2.5, 9.0, 0.85, 38, "Calibri", WHITE, bold=True)
+    _rect(s, 4.0, 3.43, 4.5, 0.06, "#F0CDA1")
+    _text(s, "AUDIT REPORT", 4.0, 3.5, 9.0, 0.85, 38, "Calibri", WHITE, bold=True)
     _rect(s, 4.0, 4.72, 7.0, 0.65, "#107082")
-    _text(s, domain, 4.2, 4.77, 6.6, 0.55, 18, "Calibri", BEIGE, italic=True)
+    _text(s, domain, 4.1, 4.72, 6.8, 0.65, 18, "Calibri", BEIGE, bold=True, italic=True)
+    _rect(s, 4.0, 5.42, 3.2, 0.05, "#F0CDA1")
 
     # Slide 2: Introduction
     s = prs.slides.add_slide(prs.slide_layouts[6])
     _rect(s, 0, 0, 13.33, 7.5, "#00292E")
     _rect(s, 8.35, 0, 4.98, 7.5, "#054854")
-    _rect(s, 1.255, 2.988, 7.549, 3.838, "#107082")
-    _text(s, "INTRODUCTION", 1.5, 3.2, 7.0, 0.8, 44, "Calibri", WHITE, bold=True)
-    _text(s, f"This report provides a GSC audit overview for {domain}, "
-             "covering sitemaps, performance, manual actions, security issues, and removals.",
-          1.5, 4.2, 7.0, 2.0, 13, "Calibri", TEAL_MD)
+    _rect(s, 7.0, 1.75, 1.1, 1.1, "#F0CDA1")
+    _rect(s, 7.15, 1.9, 0.85, 0.85, "#107082")
+    _rect(s, 1.255, 2.988, 7.549, 3.838, "#054854")
+    _text(s, "INTRODUCTION", 3.089, 3.498, 5.015, 0.818, 44, "Calibri", WHITE, bold=True)
+    _rect(s, 1.961, 4.738, 4.488, 0.05, "#F0CDA1")
+    _text(s, "Reviewing the search console for the website is one of the major aspects of our work as we "
+             "check the webmaster for all the important parameters like traffic, manual action, security issue, "
+             "etc. to check if all are performing well or not so that we can take steps if required. "
+             "This 3rd phase report is just for acknowledgment!",
+          1.34, 4.88, 7.2, 1.82, 13, "Calibri", WHITE)
+    _rect(s, 1.717, 6.457, 6.625, 0.05, "#F0CDA1")
 
     # Slides 3-7: Screenshots
-    screenshot_slide("Sitemap Status", "Overview of submitted sitemaps", "sitemap")
-    screenshot_slide("Performance Overview", "Search performance analytics", "perf")
-    screenshot_slide("Manual Action", "Manual actions status", "manual")
-    screenshot_slide("Security Issues", "Security issues status", "security")
-    screenshot_slide("Removals", "URL removals status", "removals")
+    screenshot_slide("SITEMAP",
+        "A sitemap is a file on your site that tells Google which pages we should know about.",
+        "sitemap")
+    screenshot_slide("PERFORMANCE",
+        "The Performance report shows clicks, impressions, CTR, and average position from Google Search.",
+        "perf")
+    screenshot_slide("MANUAL ACTION",
+        "Google issues a manual action against a site when a human reviewer at Google has determined "
+        "that pages on the site are not compliant with Google's webmaster quality guidelines.",
+        "manual")
+    screenshot_slide("SECURITY ISSUE",
+        "If a Google evaluation determines that a site was hacked, or exhibits behaviour that could "
+        "harm visitors, the Security Issues report will show Google's finding.",
+        "security")
+    screenshot_slide("CHECK ANY PAGE FOUND IN REMOVAL",
+        "Checks for any pages that have been temporarily or permanently removed from Google Search results.",
+        "removals")
 
     # Slide 8: Thank You
     s = prs.slides.add_slide(prs.slide_layouts[6])
     _rect(s, 0, 0, 13.33, 7.5, "#00292E")
     _rect(s, 9.8, 0, 3.53, 7.5, "#054854")
-    _text(s, "THANK YOU", 1.0, 3.0, 8.0, 1.0, 60, "Calibri", WHITE, bold=True)
-    _rect(s, 1.0, 4.3, 5, 0.06, "#F0CDA1")
+    _rect(s, 9.8, 0, 0.06, 7.5, "#64B2C1")
+    _text(s, "THANK YOU", 0.9, 2.6, 9.3, 1.4, 60, "Calibri", WHITE, bold=True)
+    _rect(s, 1.317, 4.147, 3.796, 0.05, "#F0CDA1")
 
     prs.save(out_path)
     log_fn(f"  James Short report saved: {os.path.basename(out_path)}")
@@ -1048,16 +1100,19 @@ def build_sigma(data, out_path, log_fn=None):
     # Slide 2: Introduction
     s = header_slide("Introduction")
     _rect(s, 0.689, 1.5, 0.12, 4.5, "#E6C069")
-    _text(s, f"This audit report covers the Google Search Console data for {domain}. "
-             "It includes performance metrics, top queries, top pages, sitemap status, "
-             "manual actions, security issues, and removals.",
+    _text(s, "Reviewing the Search Console for the website is one of the major aspects of our work. "
+             "We check the webmaster for all the important parameters — traffic & performance, "
+             "sitemaps, manual actions, security issues and removals — to confirm everything is "
+             "performing well, so corrective steps can be taken if required. "
+             "This report is shared for acknowledgement of the website's current Search Console health.",
           1.0, 1.6, 11.5, 3.0, 18, "Calibri", INK)
 
     # Slide 3: Performance screenshot
-    screenshot_slide("Performance Overview", "perf", "Search performance analytics")
+    screenshot_slide("PERFORMANCE", "perf",
+        "The Performance report shows clicks, impressions, CTR and average position from Google Search over the reporting period.")
 
     # Slide 4: Top Queries table
-    s = header_slide("Top Search Queries", f"Top {len(top_queries)} queries by clicks")
+    s = header_slide("TOP QUERIES", f"The top search queries driving impressions and clicks during the reporting period.")
     q_rows = []
     for q in top_queries:
         keys = q.get("keys", [""])
@@ -1069,7 +1124,7 @@ def build_sigma(data, out_path, log_fn=None):
                [6.05, 1.4, 1.8, 1.3, 1.4])
 
     # Slide 5: Top Pages table
-    s = header_slide("Top Pages", f"Top {len(top_pages)} pages by clicks")
+    s = header_slide("TOP PAGES", "The top pages by clicks during the reporting period.")
     pg_rows = []
     for pg in top_pages:
         keys = pg.get("keys", [""])
@@ -1081,10 +1136,16 @@ def build_sigma(data, out_path, log_fn=None):
                [6.05, 1.4, 1.8, 1.3, 1.4])
 
     # Slides 6-9: Screenshots
-    screenshot_slide("Sitemap Status", "sitemap", "Submitted sitemaps overview")
-    screenshot_slide("Manual Action", "manual", "Manual actions from Google")
-    screenshot_slide("Security Issues", "security", "Security issues detected")
-    screenshot_slide("Removals", "removals", "URL removals status")
+    screenshot_slide("SITEMAP", "sitemap",
+        "A sitemap is a file on your site that tells Google which pages we should know about.")
+    screenshot_slide("MANUAL ACTION", "manual",
+        "Google issues a manual action against a site when a human reviewer at Google has determined "
+        "that pages on the site are not compliant with Google's webmaster quality guidelines.")
+    screenshot_slide("SECURITY ISSUE", "security",
+        "If a Google evaluation determines that a site was hacked, or exhibits behaviour that could "
+        "harm visitors, the Security Issues report will show Google's findings.")
+    screenshot_slide("CHECK ANY PAGE FOUND IN REMOVAL", "removals",
+        "Checks for any pages that have been temporarily or permanently removed from Google Search results.")
 
     # Slide 10: Thank You
     s = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1167,19 +1228,26 @@ def build_omega(data, out_path, log_fn=None):
 
     # Slide 2: Introduction
     s = header_slide("Introduction")
-    _text(s, f"Domain: {domain}", 0.5, 2.0, 12.3, 0.4, 16, "Calibri", TEXT_DARK, bold=True)
-    _text(s, "This report covers your Google Search Console audit including sitemaps, "
-             "manual actions, performance, security issues, and other notable items.",
-          0.5, 2.6, 12.3, 2.0, 14, "Calibri", TEXT_SOFT)
+    _text(s, "Reviewing the search console for the website is one of the major aspects of our work. "
+             "We check the webmaster for all the important parameters, including sitemap health, "
+             "manual actions, performance, and security issues, to confirm that the website is "
+             "functioning correctly and free of errors.",
+          0.5, 2.0, 12.3, 2.0, 16, "Calibri", TEXT_DARK)
+    _text(s, f"Domain: {domain}", 0.5, 4.5, 12.3, 0.5, 18, "Calibri", NAVY, bold=True)
 
     # Slides 3-6: Screenshots
-    screenshot_slide("Sitemap Status", "sitemap", "Submitted sitemaps and their status")
-    screenshot_slide("Manual Action", "manual", "Manual actions from Google Search team")
-    screenshot_slide("Performance", "perf", "Search performance analytics overview")
-    screenshot_slide("Security Issues", "security", "Security issues detected by Google")
+    screenshot_slide("Check Error in Sitemap", "sitemap",
+        "A sitemap is a record on your site that uncovers to Google which pages we should consider.")
+    screenshot_slide("Check Manual Action", "manual",
+        "Manual action is a penalty imposed by Google for not following the webmaster guidelines.")
+    screenshot_slide("Check Performance Issue", "perf",
+        "The Performance Report shows important metrics about how your site performs in Google Search Results.")
+    screenshot_slide("Check Security Issue", "security",
+        "The Security Issues report in Search Console alerts webmasters about malicious behaviour on their websites.")
 
-    # Slide 7: Other Issues (Removals or Not Found)
-    s = header_slide("Other Issues")
+    # Slide 7: Other Issues
+    s = header_slide("Check Other Issue if in Webmaster",
+        "Reviewed the Removals report and any additional Search Console alerts for the property.")
     img_path = screenshots.get("removals", "")
     if img_path and os.path.exists(img_path):
         _rect(s, 0.7, 2.15, 11.93, 4.85, "#FFFFFF")
@@ -1195,16 +1263,18 @@ def build_omega(data, out_path, log_fn=None):
         s.shapes.add_picture(img_path, cx, cy, fw, fh)
     else:
         _rect(s, 3.5, 3.5, 6.3, 1.2, "#FFFFFF")
-        _text(s, "NOT FOUND", 3.5, 3.7, 6.3, 0.8, 32, "Georgia", STATUS_OK,
-              align=PP_ALIGN.CENTER)
+        _text(s, "Not Found", 3.5, 3.5, 6.3, 1.2, 32, "Georgia", STATUS_OK,
+              bold=True, align=PP_ALIGN.CENTER)
+    _text(s, "No additional issues detected in the Search Console webmaster reports for this property.",
+          0.5, 5.0, 12.3, 0.6, 14, "Calibri", TEXT_DARK, align=PP_ALIGN.CENTER)
 
     # Slide 8: Thank You
     s = prs.slides.add_slide(prs.slide_layouts[6])
     _rect(s, 0, 0, 13.33, 7.5, "#1B2A41")
-    _text(s, "THANK YOU", 0, 2.8, 13.33, 1.0, 56, "Georgia", BRONZE_SOFT,
+    _rect(s, 0, 3.4, 13.33, 0.04, "#B08D57")
+    _text(s, "THANK YOU", 1.5, 2.5, 10.3, 1.0, 56, "Georgia", BRONZE_SOFT,
           bold=True, align=PP_ALIGN.CENTER, char_spacing=8)
-    _rect(s, 4.66, 4.2, 4.0, 0.06, "#B08D57")
-    _text(s, domain, 0, 4.6, 13.33, 0.5, 16, "Georgia", WHITE, align=PP_ALIGN.CENTER)
+    _text(s, domain, 1.5, 3.7, 10.3, 0.5, 18, "Georgia", WHITE, align=PP_ALIGN.CENTER)
 
     prs.save(out_path)
     log_fn(f"  Omega report saved: {os.path.basename(out_path)}")
@@ -1293,9 +1363,11 @@ def build_neon(data, out_path, log_fn=None):
     _rect(s, 0, 1.25, 13.33, 0.05, "#FFC100")
     _text(s, "INTRODUCTION", 0.5, 0.35, 12.3, 0.6, 28, "Trebuchet MS", WHITE,
           bold=True, char_spacing=3)
-    _text(s, f"GSC audit report for {domain}. This report covers sitemap status, "
-             "manual actions, performance analytics, and security issues.",
-          0.5, 1.6, 12.3, 1.5, 16, "Calibri", TEXT_MID)
+    _text(s, "Reviewing the Search Console for the website is one of the major aspects of our work. "
+             "We check the webmaster for all important parameters, including sitemap health, manual actions, "
+             "performance issues, and security issues, to confirm the website is functioning correctly "
+             "and is free of errors.",
+          0.7, 1.6, 11.9, 1.8, 16, "Calibri", TEXT_MID)
     # Domain card
     _rect(s, 0.5, 3.5, 12.33, 0.8, "#0F1F2E")
     _rect(s, 0.5, 3.5, 0.12, 0.8, "#B0BEC5")
@@ -1310,18 +1382,29 @@ def build_neon(data, out_path, log_fn=None):
         _text(s, label, bx + 0.2, 5.1, 2.5, 0.4, 13, "Calibri", TEXT_MID, bold=True)
 
     # Slides 3-6: Screenshots
-    screenshot_slide("Sitemap Status", "sitemap", "Submitted sitemaps overview", "#B0BEC5")
-    screenshot_slide("Manual Action", "manual", "Manual actions from Google", "#FFC100")
-    screenshot_slide("Performance", "perf", "Search performance analytics", "#CFD8DC")
-    screenshot_slide("Security Issues", "security", "Security issues detected", "#FFD44D")
+    screenshot_slide("Sitemap Check", "sitemap",
+        "A sitemap guides Google on which pages to crawl and index. We review it for errors or missing URLs.",
+        "#B0BEC5")
+    screenshot_slide("Manual Action Check", "manual",
+        "A manual action is a Google penalty for violating webmaster guidelines. This should always be clean.",
+        "#FFC100")
+    screenshot_slide("Performance Check", "perf",
+        "The Performance report shows clicks, impressions, CTR, and average position from Google Search.",
+        "#CFD8DC")
+    screenshot_slide("Security Issues Check", "security",
+        "Security issues alert about hacked content, malware, or deceptive pages that may harm users.",
+        "#FFD44D")
 
-    # Slide 7: Other Issues
-    s = header_slide("Other Issues")
+    # Slide 7: Other Webmaster Checks
+    s = header_slide("Other Webmaster Checks",
+        "Reviewed the Removals report and any additional Search Console alerts for this property.")
     _rect(s, 4.16, 3.0, 5.0, 1.7, "#0F1F2E")
     _rect(s, 4.16, 3.0, 5.0, 0.08, "#B0BEC5")
     _rect(s, 4.16, 4.62, 5.0, 0.08, "#FFC100")
-    _text(s, "NOT FOUND", 4.16, 3.3, 5.0, 1.0, 40, "Trebuchet MS", TEAL,
+    _text(s, "NOT FOUND", 4.16, 3.0, 5.0, 1.7, 40, "Trebuchet MS", TEAL,
           align=PP_ALIGN.CENTER, char_spacing=8)
+    _text(s, "No additional issues detected in Search Console for this property.",
+          0.7, 5.0, 11.9, 0.5, 14, "Calibri", TEXT_MID, align=PP_ALIGN.CENTER)
 
     # Slide 8: Thank You
     s = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1330,10 +1413,13 @@ def build_neon(data, out_path, log_fn=None):
     # Gold bottom-left L
     _rect(s, 0, 7.35, 1.5, 0.15, "#FFC100")
     _rect(s, 0, 6.0, 0.15, 1.5, "#FFC100")
-    _text(s, "THANK", 1.0, 2.5, 11.0, 1.2, 72, "Trebuchet MS", TEXT_LIGHT, bold=True)
-    _text(s, "YOU", 1.0, 3.7, 11.0, 1.2, 72, "Trebuchet MS", TEXT_LIGHT, bold=True)
-    _rect(s, 1.0, 5.1, 4.5, 0.06, "#FFC100")
-    _text(s, domain, 1.0, 5.4, 11.0, 0.5, 20, "Trebuchet MS", GOLD_SOFT)
+    _text(s, "THANK", 0.55, 1.8, 12.5, 1.2, 72, "Trebuchet MS", TEXT_LIGHT, bold=True,
+          align=PP_ALIGN.CENTER)
+    _text(s, "YOU", 0.55, 2.9, 12.5, 1.2, 72, "Trebuchet MS", TEAL, bold=True,
+          align=PP_ALIGN.CENTER)
+    _rect(s, 5.16, 4.3, 3.0, 0.05, "#FFC100")
+    _text(s, domain, 0.55, 4.5, 12.5, 0.55, 20, "Trebuchet MS", GOLD_SOFT,
+          align=PP_ALIGN.CENTER)
 
     prs.save(out_path)
     log_fn(f"  Neon report saved: {os.path.basename(out_path)}")

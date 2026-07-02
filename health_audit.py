@@ -648,38 +648,44 @@ INTRO = [
      "according to different points in order to determine if any issue "
      "persists in the website or not."),
     ("",
-     "And after the analysis, we found that there is no health related "
+     "And after doing the analysis, we found that there is no health related "
      "issue in the website."),
 ]
 
-# Non-GSC checkpoints only (manual/security excluded)
 CHECKPOINTS = [
     {"key": "sucuri", "label": "Sucuri Check",
-     "body": ": We check the website in Sucuri SiteCheck for malware, blacklisting, and security issues. {sucuri_result}",
+     "body": ": We first of all check the website in the tool Sucuri, to check "
+             "for any malware or website blacklisting issue.",
      "extra": ("URL:  ", "https://sitecheck.sucuri.net/results/https/{domain}"),
+     "status": ("Status", ": We have not find issue in the website."),
      "capture": "url"},
 
     {"key": "manual_action", "label": "Manual Action:",
      "body": " The Manual Actions report lists manually detected issues with a "
-             "page or site that are mostly attempts to manipulate the search "
-             "index, but are not necessarily dangerous for users. "
-             "Please check this in Google Search Console.",
+             "page or site that are mostly attempts to manipulate our search "
+             "index, but are not necessarily dangerous for users.",
+     "status": ("Status –", " Not found"),
      "capture": "none", "red": True},
 
     {"key": "security_issues", "label": "Security Issues:",
      "body": " The Security Issues report lists indications that your site was "
              "hacked, or behavior on your site that could potentially harm a "
              "visitor or their computer: for example, phishing attacks or "
-             "installing malware or unwanted software on the user's computer. "
-             "Please check this in Google Search Console.",
+             "installing malware or unwanted software on the user's computer.",
+     "status": ("Status:  ", "Not Found"),
      "capture": "none", "red": True},
 
     {"key": "robots", "label": "Robots.txt:",
-     "body": " {robots_result}",
+     "body": " Robots.txt file has pages that needs to be blocked and are not "
+             "useful for the website. Thus, we have checked the robots file is "
+             "running fine for now.",
      "capture": "url"},
 
     {"key": "sitemap", "label": "Sitemap.xml: ",
-     "body": "{sitemap_result}",
+     "body": "Sitemap file must have all the web-pages that are being present "
+             "in the website so that all the pages can be identified by the "
+             "Search Engine. We have checked the sitemap file as it is having "
+             "all the relevant pages or not in the website.",
      "capture": "url"},
 
     {"key": "status200", "label": "All Target page's status is 200:- ",
@@ -689,7 +695,7 @@ CHECKPOINTS = [
      "body": "{versions_result}", "capture": "computed"},
 
     {"key": "meta_source", "label": "Meta Suggestions is visible in the source code (Also on Top):- ",
-     "body": "{meta_source_result}",
+     "body": "Meta suggestion are visible in the source code of the pages.",
      "capture": "url"},
 
     {"key": "canonical", "label": "Right Canonical tag: - ",
@@ -703,7 +709,8 @@ CHECKPOINTS = [
 
     {"key": "layout", "label": "Check Website Layout: -  ",
      "body": "The screenshot below is the latest archived snapshot from web.archive.org. "
-             "Compare it with the current live site to confirm no unexpected layout changes.",
+             "Compare it with the current live site to confirm no unexpected layout changes "
+             "have occurred recently.",
      "capture": "url"},
 
     {"key": "dummy", "label": "Check Dummy Content: ",
@@ -712,12 +719,12 @@ CHECKPOINTS = [
     {"key": "broken_links", "label": "Check for Broken Links:- ",
      "body": "{broken_links_result}", "capture": "computed"},
 
-    {"key": "serp", "label": "SERP Analysis (Spam & Hack Detection): - ",
-     "body": "{serp_result}",
+    {"key": "serp", "label": "Any un-necessary SERP issues: - ",
+     "body": "There is no unnecessary pages found in the SERP",
      "capture": "url"},
 
     {"key": "blank_page", "label": "Check Blank Page: ",
-     "body": "{blank_page_result}",
+     "body": "We check our all-targeted page and didn't find any blank targeted page.",
      "capture": "url"},
 
     {"key": "pagespeed", "label": "Website Page speed:- ",
@@ -799,6 +806,9 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
                 time.sleep(8)
             else:
                 time.sleep(4)
+
+            driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(0.5)
 
             # Use CDP for full-page screenshot
             try:

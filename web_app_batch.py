@@ -47,6 +47,8 @@ import health_audit
 import gsc_audit
 import auth
 import updater
+import requests as http_requests
+import brief_analysis
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -224,7 +226,7 @@ pause_event = threading.Event(); pause_event.set()
 stop_event  = threading.Event()
 state_lock  = threading.Lock()
 
-def add_log(msg):
+def add_log(msg, to_activity=False):
     ts = datetime.now().strftime("%H:%M:%S")
     line = f"[{ts}] {msg}"
     with state_lock:
@@ -232,6 +234,8 @@ def add_log(msg):
         if len(state["log"]) > 240:
             state["log"] = state["log"][-140:]
     print(line)
+    if to_activity:
+        activity(msg)
 
 # --------------------------------------------------------------------------- #
 # Auto-save
@@ -966,7 +970,7 @@ def _vpn_disconnect_pause(vpn_method, driver=None):
 
 def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, proxies,
                       browser_pref="auto", search_mode="stop_on_found", vpn_method="none",
-                      latitude=None, longitude=None, city=None, lang="en"):
+                      latitude=None, longitude=None, city=None, lang="en", target_pages=None):
     sess = Session(headless, country, ProxyPool(proxies), browser_pref, vpn_method,
                    latitude, longitude, lang=lang)
     try:
@@ -1021,12 +1025,23 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
                 except Exception as re_err:
                     raise BrowserClosedError(f"Could not restart browser: {re_err}")
 
-            result = rank_one(sess, kw, domain, country, max_pages, search_mode, city=city, lang=lang)
+            if not target_pages:
+                target_pages = {}
+            kw_target = target_pages.get(kw, "")
+            kw_domain = domain
+            if kw_target:
+                from urllib.parse import urlparse as _up2
+                _parsed = _up2(kw_target if "://" in kw_target else "https://" + kw_target)
+                kw_domain = _parsed.netloc.replace("www.", "") or domain
+
+            result = rank_one(sess, kw, kw_domain, country, max_pages, search_mode, city=city, lang=lang)
 
             with state_lock:
                 matches = result.get("matches", [])
                 if matches:
                     row = {"keyword": kw, "status": "found"}
+                    if kw_target:
+                        row["target_page"] = kw_target
                     for idx, m in enumerate(matches):
                         suffix = "" if idx == 0 else f"_{idx+1}"
                         row[f"position{suffix}"] = m["position"]
@@ -1036,10 +1051,12 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
                         row["screenshot"] = matches[0]["screenshot"]
                     state["results"].append(row)
                 else:
-                    state["results"].append({
-                        "keyword": kw, "position": "-",
-                        "serp_url": "", "loaded_url": "",
-                        "status": result.get("status", "not_found")})
+                    row = {"keyword": kw, "position": "-",
+                           "serp_url": "", "loaded_url": "",
+                           "status": result.get("status", "not_found")}
+                    if kw_target:
+                        row["target_page"] = kw_target
+                    state["results"].append(row)
             autosave()
 
             if i < len(keywords) - 1 and not stop_event.is_set():
@@ -1058,7 +1075,7 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
 
         with state_lock:
             state["status"] = "stopped" if stop_event.is_set() else "completed"
-        add_log("Rank analysis finished.")
+        add_log("Rank analysis finished.", to_activity=True)
         autosave()
         _vpn_disconnect_pause(vpn_method, sess.driver)
     except BrowserClosedError as e:
@@ -1161,7 +1178,7 @@ def run_index_analysis(urls, delay, headless, country, proxies,
 
         with state_lock:
             state["status"] = "stopped" if stop_event.is_set() else "completed"
-        add_log("Index check finished.")
+        add_log("Index check finished.", to_activity=True)
         autosave()
         _vpn_disconnect_pause(vpn_method, sess.driver)
     except BrowserClosedError as e:
@@ -1318,7 +1335,7 @@ def run_backlink_analysis(urls, domain, delay, headless, country, proxies,
 
         with state_lock:
             state["status"] = "stopped" if stop_event.is_set() else "completed"
-        add_log("Backlink check finished.")
+        add_log("Backlink check finished.", to_activity=True)
         autosave()
         _vpn_disconnect_pause(vpn_method, sess.driver)
     except BrowserClosedError as e:
@@ -1391,6 +1408,43 @@ def api_auth_mac():
 def index():
     return render_template("index.html", version=APP_VERSION)
 
+def _parse_keywords(raw_text):
+    """Parse keywords textarea. Supports plain list or tab/comma-separated with headers.
+    If first line headers contain 'keyword' and 'page', parse as keyword+target pairs.
+    Returns (keywords_list, target_pages_dict).
+    """
+    import re
+    lines = [l for l in raw_text.splitlines() if l.strip()]
+    if not lines:
+        return [], {}
+
+    header = lines[0].lower()
+    has_header = "keyword" in header and "page" in header
+    if has_header and len(lines) > 1:
+        sep = "\t" if "\t" in lines[0] else ","
+        cols = [c.strip().lower() for c in lines[0].split(sep)]
+        kw_idx = next((i for i, c in enumerate(cols) if "keyword" in c), None)
+        pg_idx = next((i for i, c in enumerate(cols) if "page" in c), None)
+        if kw_idx is not None:
+            keywords = []
+            target_pages = {}
+            seen = set()
+            for line in lines[1:]:
+                parts = line.split(sep)
+                kw = parts[kw_idx].strip() if kw_idx < len(parts) else ""
+                pg = parts[pg_idx].strip() if pg_idx is not None and pg_idx < len(parts) else ""
+                if not kw or kw.lower() in seen:
+                    continue
+                seen.add(kw.lower())
+                keywords.append(kw)
+                if pg:
+                    if not re.match(r'https?://', pg, re.I):
+                        pg = "https://" + pg
+                    target_pages[kw] = pg
+            return keywords[:100], target_pages
+    keywords = list(dict.fromkeys(k.strip() for k in lines if k.strip()))[:100]
+    return keywords, {}
+
 @app.route("/api/start", methods=["POST"])
 def api_start():
     with state_lock:
@@ -1400,7 +1454,11 @@ def api_start():
     data = request.get_json(silent=True) or {}
     mode = data.get("mode", "ranking")
     domain = (data.get("domain") or "").strip()
-    keywords = list(dict.fromkeys(k.strip() for k in (data.get("keywords") or "").splitlines() if k.strip()))[:100]
+    keywords, target_pages = _parse_keywords(data.get("keywords") or "")
+    if not domain and target_pages:
+        from urllib.parse import urlparse as _up
+        first_url = next(iter(target_pages.values()))
+        domain = _up(first_url).netloc.replace("www.", "") or first_url
     country = (data.get("country") or CONFIG.get("default_country", "us")).strip().lower()
     delay = max(1, int(data.get("delay", 3)))
     max_pages = max(1, min(10, int(data.get("max_pages", CONFIG.get("default_pages", 5)))))
@@ -1442,7 +1500,7 @@ def api_start():
         t = threading.Thread(target=run_rank_analysis,
                              args=(keywords, domain, country, delay, max_pages, headless,
                                    proxies, browser_pref, search_mode, vpn_method,
-                                   latitude, longitude, city, lang),
+                                   latitude, longitude, city, lang, target_pages),
                              daemon=True)
     elif mode == "backlink":
         check_da = bool(data.get("check_da", True))
@@ -1458,6 +1516,7 @@ def api_start():
                                    latitude, longitude, city, lang),
                              daemon=True)
     t.start()
+    activity(f"{mode.title()} started — {domain or 'multi-target'} ({len(keywords)} keywords)")
     return jsonify({"status": "started", "total": len(keywords), "mode": mode})
 
 @app.route("/api/pause", methods=["POST"])
@@ -1546,8 +1605,9 @@ def api_config():
                 DOWNLOADS_DIR = _DEFAULT_DOWNLOADS
                 SCREENSHOTS_DIR = _DEFAULT_DOWNLOADS
         save_config(CONFIG)
-        return jsonify({"saved": True, "config": CONFIG})
-    cfg = dict(CONFIG)
+        safe = {k: v for k, v in CONFIG.items() if k not in SENSITIVE_KEYS}
+        return jsonify({"saved": True, "config": safe})
+    cfg = {k: v for k, v in CONFIG.items() if k not in SENSITIVE_KEYS}
     cfg["downloads_folder"] = DOWNLOADS_DIR
     return jsonify(cfg)
 
@@ -1559,7 +1619,8 @@ def api_export_csv():
     out = io.StringIO()
     if m == "ranking":
         # Collect all column names across all rows (handles multiple matches)
-        base = ["keyword", "status", "position", "serp_url", "loaded_url"]
+        has_targets = any(r.get("target_page") for r in results)
+        base = ["keyword", "target_page", "status", "position", "serp_url", "loaded_url"] if has_targets else ["keyword", "status", "position", "serp_url", "loaded_url"]
         extra = set()
         for r in results:
             for k in r:
@@ -1866,6 +1927,7 @@ def api_ha_start():
                          args=(domain, fmt, target_pages, no_capture, headless, browser_name, psi_key),
                          daemon=True)
     t.start()
+    activity(f"Health audit started — {domain} ({fmt})")
     return jsonify({"status": "started", "domain": domain})
 
 
@@ -2117,6 +2179,257 @@ def err500(e):
     return jsonify({"error": "Internal server error", "detail": str(e)}), 500
 
 # --------------------------------------------------------------------------- #
+# Activity log
+# --------------------------------------------------------------------------- #
+_activity_log = []
+_activity_lock = threading.Lock()
+def activity(msg, level="info"):
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    entry = {"ts": ts, "msg": msg, "level": level}
+    with _activity_lock:
+        _activity_log.append(entry)
+        if len(_activity_log) > 500:
+            _activity_log[:] = _activity_log[-500:]
+
+@app.route("/api/activity-log")
+def api_activity_log():
+    with _activity_lock:
+        return jsonify(list(_activity_log))
+
+# --------------------------------------------------------------------------- #
+# Auth — is_admin
+# --------------------------------------------------------------------------- #
+@app.route("/api/auth/is_admin")
+def api_auth_is_admin():
+    token = auth._load_token()
+    if not token or not token.get("email"):
+        return jsonify({"is_admin": False})
+    result = auth._api_call({"action": "is_admin", "email": token["email"]})
+    is_admin = result.get("is_admin", False)
+    if is_admin and not token.get("is_admin"):
+        token["is_admin"] = True
+        try:
+            with open(auth.AUTH_FILE, "w", encoding="utf-8") as _f:
+                json.dump(token, _f)
+        except Exception:
+            pass
+    elif result.get("error"):
+        is_admin = token.get("is_admin", False)
+    return jsonify({"is_admin": is_admin})
+
+# --------------------------------------------------------------------------- #
+# Admin config (Apps Script URL, admin key, API key sync)
+# --------------------------------------------------------------------------- #
+SENSITIVE_KEYS = {"psi_api_key", "gsc_client_id", "gsc_client_secret",
+                  "admin_key", "auth_api_url", "gsc_projects"}
+
+@app.route("/api/admin/save_config", methods=["POST"])
+def api_admin_save_config():
+    global CONFIG
+    data = request.get_json(silent=True) or {}
+    if "auth_api_url" in data:
+        CONFIG["auth_api_url"] = data["auth_api_url"].strip()
+    if "admin_key" in data:
+        CONFIG["admin_key"] = data["admin_key"].strip()
+    save_config(CONFIG)
+    return jsonify({"saved": True})
+
+@app.route("/api/admin/sync_keys", methods=["POST"])
+def api_admin_sync_keys():
+    global CONFIG
+    webapp_url = CONFIG.get("auth_api_url", "").strip()
+    if not webapp_url:
+        return jsonify({"ok": False, "error": "Apps Script URL not configured"})
+    try:
+        resp = http_requests.post(webapp_url, json={"action": "get_keys"}, timeout=20)
+        data = resp.json()
+        if not data.get("success"):
+            return jsonify({"ok": False, "error": data.get("error", "Sheet returned error")})
+        keys = data.get("keys", {})
+        for k, v in keys.items():
+            if v and isinstance(v, str):
+                CONFIG[k] = v.strip()
+        projects = data.get("gsc_projects", [])
+        if projects:
+            CONFIG["gsc_projects"] = projects
+        save_config(CONFIG)
+        masked_keys = {k: ("****" + v[-4:] if len(v) > 4 else "****") for k, v in keys.items() if v}
+        activity(f"API keys synced: {', '.join(masked_keys.keys())}; {len(projects)} GSC project(s)")
+        return jsonify({"ok": True, "keys": masked_keys, "gsc_projects_count": len(projects)})
+    except Exception as e:
+        activity(f"Key sync error: {e}", "error")
+        return jsonify({"ok": False, "error": str(e)})
+
+@app.route("/api/admin/keys_status")
+def api_admin_keys_status():
+    key_names = {"psi_api_key": "PageSpeed API Key"}
+    status = {}
+    for k, label in key_names.items():
+        val = CONFIG.get(k, "")
+        if val:
+            status[label] = "****" + val[-4:] if len(val) > 4 else "****"
+        else:
+            status[label] = ""
+    projects = CONFIG.get("gsc_projects", [])
+    proj_display = []
+    for p in projects:
+        name = p.get("name", "?")
+        cid = p.get("client_id", "")
+        masked_id = "****" + cid[-4:] if len(cid) > 4 else "****" if cid else ""
+        proj_display.append({"name": name, "client_id": masked_id,
+                             "properties": p.get("properties", "")})
+    return jsonify({"keys": status, "gsc_projects": proj_display})
+
+@app.route("/api/gsc/projects")
+def api_gsc_projects():
+    projects = CONFIG.get("gsc_projects", [])
+    return jsonify([{"name": p.get("name", ""), "properties": p.get("properties", "")}
+                    for p in projects])
+
+@app.route("/api/gsc/domain-check")
+def api_gsc_domain_check():
+    """Check which GSC account owns a domain via Apps Script config."""
+    domain = request.args.get("domain", "").strip().lower().replace("www.", "")
+    if not domain:
+        return jsonify({"error": "No domain"})
+    webapp_url = CONFIG.get("auth_api_url", "").strip()
+    if not webapp_url:
+        return jsonify({"found": False, "reason": "Apps Script URL not configured"})
+    try:
+        resp = http_requests.get(webapp_url, params={"action": "get_config"}, timeout=15)
+        data = resp.json()
+        if not data.get("success"):
+            return jsonify({"found": False, "reason": data.get("error", "Sheet error")})
+        mapping = data.get("mapping", {})
+        info = mapping.get(domain)
+        if info:
+            return jsonify({
+                "found": True,
+                "domain": domain,
+                "email": info.get("email", ""),
+                "accountKey": info.get("accountKey", ""),
+                "accessLevel": info.get("accessLevel", ""),
+                "connected": True
+            })
+        return jsonify({"found": False, "domain": domain, "reason": "Domain not in GSC config"})
+    except Exception as e:
+        return jsonify({"found": False, "error": str(e)})
+
+# --------------------------------------------------------------------------- #
+# Crawl Tracker — proxy to Apps Script Web App
+# --------------------------------------------------------------------------- #
+@app.route("/api/crawl/validate", methods=["POST"])
+def api_crawl_validate():
+    webapp_url = CONFIG.get("auth_api_url", "").strip()
+    if not webapp_url:
+        return jsonify({"error": "GSC accounts not configured. Set Apps Script URL in Admin."}), 400
+    data = request.get_json(silent=True) or {}
+    try:
+        resp = http_requests.post(webapp_url, json={"action": "validate_batch", "urls": data.get("urls", [])}, timeout=30)
+        return jsonify(resp.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/crawl/inspect", methods=["POST"])
+def api_crawl_inspect():
+    webapp_url = CONFIG.get("auth_api_url", "").strip()
+    if not webapp_url:
+        return jsonify({"error": "GSC accounts not configured. Set Apps Script URL in Admin."}), 400
+    data = request.get_json(silent=True) or {}
+    try:
+        resp = http_requests.post(webapp_url, json={
+            "action": "inspect_single",
+            "url": data.get("url", ""),
+            "domain": data.get("domain", ""),
+            "accountKey": data.get("accountKey", ""),
+            "batchId": data.get("batchId", "")
+        }, timeout=30)
+        return jsonify(resp.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --------------------------------------------------------------------------- #
+# Brief Analysis
+# --------------------------------------------------------------------------- #
+_brief_state = {"running": False, "progress": 0, "status": "idle", "result": None, "error": None, "error_msg": None, "stop": False, "log": []}
+_brief_lock = threading.Lock()
+
+@app.route("/api/brief/start", methods=["POST"])
+def api_brief_start():
+    with _brief_lock:
+        if _brief_state["running"]:
+            return jsonify({"error": "Brief analysis already running"}), 400
+        _brief_state.update({"running": True, "progress": 0, "status": "starting", "result": None, "error": None, "error_msg": None, "stop": False, "log": []})
+    data = request.get_json(silent=True) or {}
+    domain = (data.get("domain") or "").strip()
+    if not domain:
+        with _brief_lock:
+            _brief_state["running"] = False
+        return jsonify({"error": "Domain required"}), 400
+    def _run():
+        try:
+            def prog(msg):
+                with _brief_lock:
+                    _brief_state["status"] = str(msg)
+                    _brief_state["log"].append(str(msg))
+            out_file = brief_analysis.run_brief_analysis(domain, log_fn=prog)
+            with _brief_lock:
+                _brief_state["result"] = {"file": out_file}
+                _brief_state["status"] = "completed"
+                _brief_state["progress"] = 100
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[Brief Analysis ERROR] {tb}")
+            with _brief_lock:
+                _brief_state["error_msg"] = str(e)
+                _brief_state["log"].append(f"ERROR: {e}")
+                _brief_state["status"] = "error"
+        finally:
+            with _brief_lock:
+                _brief_state["running"] = False
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    activity(f"Brief analysis started for {domain}")
+    return jsonify({"started": True})
+
+@app.route("/api/brief/status")
+def api_brief_status():
+    with _brief_lock:
+        return jsonify(dict(_brief_state))
+
+@app.route("/api/brief/stop", methods=["POST"])
+def api_brief_stop():
+    with _brief_lock:
+        _brief_state["stop"] = True
+    return jsonify({"stopped": True})
+
+@app.route("/api/brief/download")
+def api_brief_download():
+    with _brief_lock:
+        result = _brief_state.get("result")
+    if not result or not result.get("file"):
+        return jsonify({"error": "No report available"}), 404
+    fpath = result["file"]
+    if not os.path.exists(fpath):
+        return jsonify({"error": "Report file not found"}), 404
+    return send_file(fpath, as_attachment=True, download_name=os.path.basename(fpath))
+
+@app.route("/api/brief/formats")
+def api_brief_formats():
+    return jsonify([{"value": "pptx", "label": "PowerPoint (.pptx)"}])
+
+# --------------------------------------------------------------------------- #
+# On-Page parse targets
+# --------------------------------------------------------------------------- #
+@app.route("/api/onpage/parse-targets", methods=["POST"])
+def api_onpage_parse_targets():
+    data = request.get_json(silent=True) or {}
+    raw = data.get("urls", "")
+    urls = [u.strip() for u in raw.replace(",", "\n").splitlines() if u.strip()]
+    return jsonify({"urls": urls, "count": len(urls)})
+
+# --------------------------------------------------------------------------- #
 # Entry point
 # --------------------------------------------------------------------------- #
 def _kill_previous():
@@ -2146,13 +2459,14 @@ def _kill_previous():
         pass
 
 def main():
-    # Check for OTA updates before starting
-    try:
-        update_result = updater.check_and_update()
-        if update_result.get("updated"):
-            print(f"[GRC] Updated {len(update_result.get('updated_files', []))} file(s)")
-    except Exception as e:
-        print(f"[GRC] Update check skipped: {e}")
+    # OTA updates disabled — local customizations would be overwritten
+    # To re-enable: uncomment the block below
+    # try:
+    #     update_result = updater.check_and_update()
+    #     if update_result.get("updated"):
+    #         print(f"[GRC] Updated {len(update_result.get('updated_files', []))} file(s)")
+    # except Exception as e:
+    #     print(f"[GRC] Update check skipped: {e}")
 
     port = int(os.environ.get("GRC_PORT", "5070"))
     url = f"http://127.0.0.1:{port}"
@@ -2213,12 +2527,24 @@ def _open_app_window(url):
             os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
             "SEO Toolkit Pro", "edge_app"
         )
-        subprocess.Popen(
-            [edge, f"--app={url}",
-             f"--user-data-dir={profile}",
-             "--window-size=1100,820"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
+        import glob as _glob
+        for _p in _glob.glob(os.path.join(profile, "Default", "Favicons*")):
+            try: os.remove(_p)
+            except OSError: pass
+        _icons_dir = os.path.join(profile, "Default", "Web Applications", "Manifest Resources")
+        if os.path.isdir(_icons_dir):
+            import shutil
+            for _d in os.listdir(_icons_dir):
+                _ic = os.path.join(_icons_dir, _d, "Icons")
+                if os.path.isdir(_ic):
+                    shutil.rmtree(_ic, ignore_errors=True)
+        icon_path = os.path.join(BUNDLE_DIR, "rank-checker-search-bars.ico")
+        cmd = [edge, f"--app={url}",
+               f"--user-data-dir={profile}",
+               "--window-size=1100,820"]
+        if os.path.exists(icon_path):
+            cmd.append(f"--app-icon={icon_path}")
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
         import webbrowser
         webbrowser.open(url)

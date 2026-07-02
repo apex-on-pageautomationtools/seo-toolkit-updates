@@ -11,7 +11,18 @@ import urllib.request
 import urllib.parse
 
 BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
-AUTH_FILE = os.path.join(BUNDLE_DIR, ".auth_token")
+
+def _auth_file():
+    script_dir = BUNDLE_DIR
+    pf = os.environ.get("ProgramFiles", "C:\\Program Files").lower()
+    pfx86 = os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)").lower()
+    if script_dir.lower().startswith(pf) or script_dir.lower().startswith(pfx86):
+        appdata = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "SEO Toolkit Pro")
+        os.makedirs(appdata, exist_ok=True)
+        return os.path.join(appdata, ".auth_token")
+    return os.path.join(script_dir, ".auth_token")
+
+AUTH_FILE = _auth_file()
 
 # Replace with your deployed Apps Script web app URL
 AUTH_API_URL = "https://script.google.com/macros/s/AKfycbzqCGuSSfGThDoI1N88BtRxNjwiLbD2RCVsKaDAV6J171WKvFHv574j3hEHbCwiFLpC/exec"  # <-- Paste your Apps Script URL here
@@ -93,6 +104,8 @@ def check_saved_auth():
         "mac": mac,
         "version": APP_VERSION,
     })
+    if result.get("error"):
+        return {"status": "approved", "email": token["email"], "offline": True}
     if result.get("status") != "approved":
         _clear_token()
     return result
