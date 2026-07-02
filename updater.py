@@ -16,7 +16,7 @@ UPDATE_LOG = os.path.join(BUNDLE_DIR, ".update_log")
 
 # Remote manifest URL — set to your GitHub raw URL or Apps Script endpoint
 # Manifest JSON format: {"version": "3.3", "files": [{"path": "health_audit.py", "hash": "sha256...", "url": "https://..."}]}
-UPDATE_MANIFEST_URL = ""  # <-- Set your manifest URL here
+UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/update_manifest.json"
 
 
 def _file_hash(filepath):
