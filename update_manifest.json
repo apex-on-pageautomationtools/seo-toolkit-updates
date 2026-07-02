@@ -1,0 +1,140 @@
+{
+  "version": "3.2",
+  "files": [
+    {
+      "path": "health_audit.py",
+      "hash": "7c25167dcb98f943125533331d3d6dad8786ff737e0f71bd7d989aad61d6534c",
+      "url": "health_audit.py"
+    },
+    {
+      "path": "gsc_audit.py",
+      "hash": "5e33163906a14daab64947eb11857bc8e5490ef29f8a14d99fc7fe283f2a23ab",
+      "url": "gsc_audit.py"
+    },
+    {
+      "path": "web_app_batch.py",
+      "hash": "0499ec0697d504669cda7f3fe307420d76122acae800e2e2fcd0fb68cc1104b5",
+      "url": "web_app_batch.py"
+    },
+    {
+      "path": "engine.py",
+      "hash": "b062f8045479d6c2281c3bc07c874b0e767eb2965711b7077e69d59bde4ca6cf",
+      "url": "engine.py"
+    },
+    {
+      "path": "updater.py",
+      "hash": "1b1f7bf9c536728e350800c7e625aa98a75910b6b58d49328b6c94ccc65f694d",
+      "url": "updater.py"
+    },
+    {
+      "path": "da_checker.py",
+      "hash": "85fb60c4dfa37bdcf6d113d8b466e1dec808d237a210db8d631088e2ecf2c82c",
+      "url": "da_checker.py"
+    },
+    {
+      "path": "auth.py",
+      "hash": "6fd89f96a140a34ed4c5f5e863ac6a9b656e7fb3c8945e142e38372b77f34734",
+      "url": "auth.py"
+    },
+    {
+      "path": "templates/index.html",
+      "hash": "bf7b3fa5de40414021108951e7a5ff5c08f13a8fdbd4a166a23b50e223c3fcf7",
+      "url": "templates/index.html"
+    },
+    {
+      "path": "static/manifest.webmanifest",
+      "hash": "d174076687c1f7b070782eb6c66bb4b563e94a0a95943d7513771647c9fb92fd",
+      "url": "static/manifest.webmanifest"
+    },
+    {
+      "path": "static/offline.html",
+      "hash": "4a98c69df543832336b284cbcb23a4dda96f783941a36e447f4ee8feb8bdb416",
+      "url": "static/offline.html"
+    },
+    {
+      "path": "static/sw.js",
+      "hash": "9442a1fe988fc166c064bf8d5c895eeaf21939c2ddf3d6ee5d9eaf439fae8f2e",
+      "url": "static/sw.js"
+    },
+    {
+      "path": "static/icons/apple-touch-icon.png",
+      "hash": "38336e418705c5204e64ab190e707041992383890c083f10aaec324afdd56d07",
+      "url": "static/icons/apple-touch-icon.png"
+    },
+    {
+      "path": "static/icons/favicon-32.png",
+      "hash": "cc58f1f97336cfe166e711e95658c17525c589364d5616a4e7d95f90a7361283",
+      "url": "static/icons/favicon-32.png"
+    },
+    {
+      "path": "static/icons/favicon.ico",
+      "hash": "029956c0d9c5badf7a97ee3ea40d54312278f08d43a9d9af76c6b9d0d43951de",
+      "url": "static/icons/favicon.ico"
+    },
+    {
+      "path": "static/icons/icon-192.png",
+      "hash": "8249b2cd9aaf2204f70ea394ac47bce83975cacd20c846c0bfb9417ceac848ee",
+      "url": "static/icons/icon-192.png"
+    },
+    {
+      "path": "static/icons/icon-512.png",
+      "hash": "1f8696713bfbd46dcad9935c2eaa3635412d95b8935568dbe65b59531799a15c",
+      "url": "static/icons/icon-512.png"
+    },
+    {
+      "path": "static/icons/maskable-192.png",
+      "hash": "8249b2cd9aaf2204f70ea394ac47bce83975cacd20c846c0bfb9417ceac848ee",
+      "url": "static/icons/maskable-192.png"
+    },
+    {
+      "path": "static/icons/maskable-512.png",
+      "hash": "1f8696713bfbd46dcad9935c2eaa3635412d95b8935568dbe65b59531799a15c",
+      "url": "static/icons/maskable-512.png"
+    },
+    {
+      "path": "scripts/capture_gsc.py",
+      "hash": "d9d66ecd6d5a2a0eda5bd2e45fbaff524a9aa7735a206f0c5afa020f51724a24",
+      "url": "scripts/capture_gsc.py"
+    },
+    {
+      "path": "scripts/generate_health_report.py",
+      "hash": "ee1ef7a654ca7d75e61d41202f9694dd6f790e994efc35bbb59441d567f47006",
+      "url": "scripts/generate_health_report.py"
+    },
+    {
+      "path": "scripts/generate_report.py",
+      "hash": "18032661399648d4d01c8beca3443feffc4e56710312bfa01d43e2c6cee6af98",
+      "url": "scripts/generate_report.py"
+    },
+    {
+      "path": "scripts/generate_seo_onpage_phase2.py",
+      "hash": "c80fe02c25d712bb93429b4075894dd1469464026aa07fc439572ce8b4003de3",
+      "url": "scripts/generate_seo_onpage_phase2.py"
+    },
+    {
+      "path": "scripts/onpage_cover.png",
+      "hash": "1da0a2cdda2622b9453802f90772ed36176003eb348984b8210fed0f6ebef04d",
+      "url": "scripts/onpage_cover.png"
+    },
+    {
+      "path": "scripts/template_alt_suggestions.xlsx",
+      "hash": "55da5115bda26b1dda8fa26a177854688b8b50a9415df2e9aedf1df13e59fb0a",
+      "url": "scripts/template_alt_suggestions.xlsx"
+    },
+    {
+      "path": "scripts/template_canonical_suggestions.xlsx",
+      "hash": "3609e6ce7a3a62d0c32eeae149ea3cd946714feb41d133a0c884178d950df66d",
+      "url": "scripts/template_canonical_suggestions.xlsx"
+    },
+    {
+      "path": "scripts/template_meta_suggestions.xlsx",
+      "hash": "c963234e58470008b9f940370164a82b2294684842b2424664f318a2cc4e25b4",
+      "url": "scripts/template_meta_suggestions.xlsx"
+    },
+    {
+      "path": "scripts/template_website_audit.xlsx",
+      "hash": "6337496bf1f65b7ed3a80e187fd0fbed9f3dafadbe20b8ba74fc7dc40365355c",
+      "url": "scripts/template_website_audit.xlsx"
+    }
+  ]
+}
