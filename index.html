@@ -420,12 +420,12 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
       </div>
       <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Find where your domain ranks on Google — across regions, CAPTCHA-resistant.</p>
       <div class="field">
-        <label>Domain to track <span class="hint">(optional if keywords have target pages)</span></label>
+        <label>Domain to track</label>
         <input type="text" id="r-domain" placeholder="example.com" autocomplete="off">
       </div>
       <div class="field">
-        <label>Keywords <span class="hint">(one per line, or paste with target pages — max 100)</span></label>
-        <textarea id="r-keywords" placeholder="seo services&#10;best seo company&#10;local seo agency&#10;&#10;— or paste with headers —&#10;Keyword&#9;Target Page&#10;seo services&#9;https://example.com/&#10;best seo company&#9;https://example.com/seo/"></textarea>
+        <label>Keywords <span class="hint">(one per line — max 100)</span></label>
+        <textarea id="r-keywords" placeholder="seo services&#10;best seo company&#10;local seo agency"></textarea>
       </div>
       <div class="row2 field">
         <div>
@@ -1513,8 +1513,7 @@ async function doStart(){
     p.vpn_method=$('r-vpn').value;
     if($('r-city').value) p.city=$('r-city').value;
     p.lang=$('r-lang').value||'en';
-    const kwHasTargets=p.keywords&&/keyword/i.test(p.keywords.split('\n')[0])&&/page/i.test(p.keywords.split('\n')[0]);
-    if(!p.domain&&!kwHasTargets){toast('Enter a domain, or paste keywords with target pages');return;}
+    if(!p.domain){toast('Enter a domain');return;}
     if(!p.keywords){toast('Enter at least one keyword');return;}
   }else if(mode==='onpage'){
     p.domain=$('op-domain').value.trim();
@@ -2532,6 +2531,23 @@ async function gscCheckDomain(){
 }
 
 /* ===================== init ===================== */
+async function applyFormatFilter(){
+  try{
+    const r=await(await fetch('/api/auth/formats')).json();
+    if(!r.formats)return;
+    const allowed=r.formats;
+    ['op-format','ha-format','gsc-format','ba-format'].forEach(id=>{
+      const sel=$(id);if(!sel)return;
+      const opts=sel.querySelectorAll('option');
+      let hasSelected=false;
+      opts.forEach(o=>{
+        if(allowed.includes(o.value)){o.style.display='';if(o.selected)hasSelected=true;}
+        else{o.style.display='none';o.selected=false;}
+      });
+      if(!hasSelected){const first=sel.querySelector('option[style=""]')||sel.querySelector('option:not([style*="none"])');if(first)first.selected=true;}
+    });
+  }catch(e){}
+}
 async function initApp(){
   try{const c=await(await fetch('/api/config')).json();
     if('use_buster' in c)$('opt-buster').checked=!!c.use_buster;
@@ -2540,6 +2556,7 @@ async function initApp(){
   gscLoadAccounts();
   gscSessionsLoad();
   admCheckAdmin();
+  applyFormatFilter();
 }
 (async function(){
   const ok=await authCheck();

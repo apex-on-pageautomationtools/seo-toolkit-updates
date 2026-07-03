@@ -1064,10 +1064,6 @@ def _build_edge_driver(args, country, binary, logger, latitude=None, longitude=N
     _apply_stealth(driver, country, latitude, longitude)
     _block_downloads(driver)
     driver.set_page_load_timeout(45)
-    try:
-        driver.minimize_window()
-    except Exception:
-        pass
     return driver
 
 
@@ -1088,10 +1084,6 @@ def _build_chrome_driver(args, country, binary, logger, latitude=None, longitude
     _apply_stealth(driver, country, latitude, longitude)
     _block_downloads(driver)
     driver.set_page_load_timeout(45)
-    try:
-        driver.minimize_window()
-    except Exception:
-        pass
     return driver
 
 

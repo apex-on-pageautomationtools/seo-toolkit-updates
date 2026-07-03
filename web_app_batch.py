@@ -863,6 +863,9 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     human_pause(1.5, 2.5)
                     page_num += 1
                     page_links = extract_organic(sess.driver)
+                    if not page_links and page_num > 1:
+                        human_pause(2.0, 3.5)
+                        page_links = extract_organic(sess.driver)
                     total_links += len(page_links)
                     add_log(f"Page {page_num}: {len(page_links)} links")
                     offset = (page_num - 1) * 10
@@ -1421,6 +1424,12 @@ def api_auth_version():
 def api_auth_mac():
     """Return MAC address for display to user (token for admin)."""
     return jsonify({"mac": auth.get_mac_address()})
+
+@app.route("/api/auth/formats")
+def api_auth_formats():
+    """Return allowed report formats for the current user."""
+    fmts = auth.get_allowed_formats()
+    return jsonify({"formats": fmts})
 
 # --------------------------------------------------------------------------- #
 # Flask routes — API
