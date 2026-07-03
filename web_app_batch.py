@@ -705,6 +705,106 @@ def _recover(sess, kind):
         return _manual_pause("Automatic recovery failed")
     return False
 
+
+def _recover_page(sess, page_num):
+    """A pagination page came back with 0 organic links.
+
+    That is almost always a block (CAPTCHA / soft-block) or a transient empty
+    render — NOT the true end of results. Previously the loop trusted the empty
+    page, found no 'Next' button on it, and reported the keyword as "not found",
+    producing false negatives whenever the site actually ranked deeper.
+
+    Try to clear the page *in place* (no browser restart, so we keep our spot in
+    the pagination) and re-extract. Returns (links, reason):
+        (links, "ok")      recovered — links found
+        ([],    "empty")   page is genuinely empty (real end of results)
+        ([],    "blocked") a block persisted and could not be cleared (incomplete)
+    """
+    reason = "empty"
+    retries = CONFIG.get("max_block_retries", 3)
+    for attempt in range(1, retries + 1):
+        if stop_event.is_set():
+            return [], reason
+        try:
+            kind = classify_page(page_source(sess.driver))
+        except BrowserClosedError:
+            raise
+        except Exception:
+            kind = "empty"
+
+        if kind == "captcha":
+            reason = "blocked"
+            add_log(f"CAPTCHA on page {page_num} — recovering (attempt {attempt}/{retries})...")
+            cur = None
+            try:
+                cur = sess.driver.current_url
+            except Exception:
+                pass
+            if not _recover(sess, kind):
+                add_log(f"Could not clear CAPTCHA on page {page_num} — stopping (results incomplete)")
+                return [], "blocked"
+            # Reload the page we were on so its results render after the solve.
+            try:
+                if cur and is_alive(sess.driver):
+                    safe_get(sess.driver, cur)
+                    human_pause(1.5, 2.5)
+            except BrowserClosedError:
+                raise
+            except Exception:
+                pass
+        elif kind in ("soft_block", "http_403"):
+            reason = "blocked"
+            add_log(f"Block ({kind}) on page {page_num} — cooling down and reloading "
+                    f"(attempt {attempt}/{retries})...")
+            # Reload the same page after a backoff. Deliberately avoid a full browser
+            # restart here so we don't lose our place in the pagination.
+            backoff = min(90.0, 10.0 * attempt) + random.uniform(0, 5)
+            slept = 0.0
+            while slept < backoff and not stop_event.is_set():
+                time.sleep(1); slept += 1
+            try:
+                if is_alive(sess.driver):
+                    sess.driver.refresh()
+                    human_pause(1.5, 2.5)
+            except BrowserClosedError:
+                raise
+            except Exception:
+                pass
+        elif kind == "consent":
+            add_log(f"Consent wall on page {page_num} — accepting and reloading...")
+            try:
+                engine.accept_consent(sess.driver, add_log)
+                engine.accept_google_consent(sess.driver, add_log)
+                human_pause(1.0, 2.0)
+            except BrowserClosedError:
+                raise
+            except Exception:
+                pass
+        else:
+            # Not a detected block — likely a slow/partial render. Reload once.
+            add_log(f"Page {page_num}: 0 links ({kind}) — reloading (attempt {attempt}/{retries})...")
+            human_pause(2.5, 4.5)
+            try:
+                if is_alive(sess.driver):
+                    sess.driver.refresh()
+                    human_pause(1.5, 2.5)
+            except BrowserClosedError:
+                raise
+            except Exception:
+                pass
+
+        try:
+            links = extract_organic(sess.driver)
+        except BrowserClosedError:
+            raise
+        except Exception:
+            links = []
+        if links:
+            return links, "ok"
+
+    return [], reason
+
+
 def _captcha_manual_wait(driver):
     """Show manual CAPTCHA prompt and auto-resume once the CAPTCHA clears —
     no Resume button click needed. Also resumes if user clicks Resume manually."""
@@ -838,6 +938,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
         # Paginate through ALL selected pages (respects max_pages regardless of search_mode)
         page_num = 1
         total_links = len(links_page1)
+        blocked_incomplete = False
         from selenium.webdriver.common.by import By
 
         # stop_on_found: stop as soon as domain is found on any page
@@ -863,9 +964,18 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     human_pause(1.5, 2.5)
                     page_num += 1
                     page_links = extract_organic(sess.driver)
-                    if not page_links and page_num > 1:
-                        human_pause(2.0, 3.5)
-                        page_links = extract_organic(sess.driver)
+                    if not page_links:
+                        # 0 links is almost always a block or a transient empty render,
+                        # NOT the end of results — try to clear it before trusting it.
+                        page_links, reason = _recover_page(sess, page_num)
+                        if not page_links:
+                            if reason == "blocked":
+                                add_log(f"Page {page_num}: blocked and could not recover — "
+                                        f"stopping (results may be incomplete)")
+                                blocked_incomplete = True
+                            else:
+                                add_log(f"Page {page_num}: 0 links — reached end of results")
+                            break
                     total_links += len(page_links)
                     add_log(f"Page {page_num}: {len(page_links)} links")
                     offset = (page_num - 1) * 10
@@ -920,6 +1030,11 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
             add_log(f"'{keyword}': found at #{matches[0]['position']} "
                     f"({total_links} results across {page_num} pages)")
             return {"status": "found", "matches": matches, "pages": page_num}
+        if blocked_incomplete:
+            add_log(f"'{keyword}': search cut short by a block at page {page_num} — "
+                    f"ranking may exist deeper ({total_links} results seen)")
+            return {"status": f"not_found (incomplete — blocked at page {page_num})",
+                    "matches": [], "pages": page_num, "incomplete": True}
         add_log(f"'{keyword}': not in top {page_num} pages ({total_links} results)")
         return {"status": f"not_found in {page_num} pages", "matches": [], "pages": page_num}
 
@@ -2761,14 +2876,12 @@ def _kill_previous():
         pass
 
 def main():
-    # OTA updates disabled — local customizations would be overwritten
-    # To re-enable: uncomment the block below
-    # try:
-    #     update_result = updater.check_and_update()
-    #     if update_result.get("updated"):
-    #         print(f"[GRC] Updated {len(update_result.get('updated_files', []))} file(s)")
-    # except Exception as e:
-    #     print(f"[GRC] Update check skipped: {e}")
+    try:
+        update_result = updater.check_and_update()
+        if update_result.get("updated"):
+            print(f"[GRC] Updated {len(update_result.get('updated_files', []))} file(s)")
+    except Exception as e:
+        print(f"[GRC] Update check skipped: {e}")
 
     port = int(os.environ.get("GRC_PORT", "5070"))
     url = f"http://127.0.0.1:{port}"
