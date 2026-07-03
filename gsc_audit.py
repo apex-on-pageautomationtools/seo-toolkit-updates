@@ -1768,6 +1768,9 @@ def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
     """Run a complete GSC audit: fetch data, capture screenshots, build PPTX."""
     if log_fn is None:
         log_fn = print
+    # Normalize to a bare host so it's safe in the report filename (a full URL
+    # like https://x.com/ produces an invalid filename).
+    domain = re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
 
     if out_dir is None:
         out_dir = tempfile.mkdtemp(prefix="gsc_audit_")

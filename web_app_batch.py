@@ -2111,6 +2111,9 @@ def _lines_from_excel(file_storage):
 
 def _run_onpage_report(domain, targets_json, fmt, no_capture):
     """Run the on-page phase2 script as a subprocess, stream logs."""
+    # Normalize to a bare host so the script's output filename is valid and the
+    # output-zip glob below still matches (a full URL breaks the filename).
+    domain = _re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
     with onpage_lock:
         onpage_state.update({"status": "running", "log": [], "domain": domain,
                              "output_zip": "", "error_msg": "", "progress": "Starting..."})

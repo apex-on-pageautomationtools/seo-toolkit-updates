@@ -445,6 +445,7 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
     """Run all brief analysis checks. Returns dict of results."""
     if log_fn is None:
         log_fn = print
+    domain = re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
     pages = target_pages or ["/", "/about", "/contact", "/services", "/blog"]
 
     log_fn("  Launching browser for data collection...")
@@ -711,7 +712,7 @@ def build_james(data, out_path, log_fn=None):
     # --- Slide 2: Index ---
     s = content_slide("Index")
     topics = [
-        "Website Indexing", "Domain Age", "Backlinks Status", "Title Tag Checking",
+        "Website Indexing", "Domain Age", "Title Tag Checking",
         "Meta Description", "Header Tag Checking", "Image Alt Tag", "Redirection Issues",
         "Canonical Tag", "Sitemap.xml", "Robots.txt", "Broken Links",
     ]
@@ -752,24 +753,6 @@ def build_james(data, out_path, log_fn=None):
     _suggestion_text(s, len(age_rows) > 1 and not _is_empty(age_rows[1][1]),
           "Keep domain registration current. A longer registration period can signal trust to search engines.",
           2.0, 4.3, 7.5, 0.5)
-
-    # --- Slide 5: Backlinks Status ---
-    s = content_slide("Backlinks Status")
-    _text(s, f"Backlinks are links from other websites pointing to {domain}. They remain one of the strongest ranking signals.",
-          2.0, 1.2, 7.5, 0.6, 11, "Calibri", TEXT, bold=True)
-    cards = [("N/A", "/100", "Domain Rating", NAVY),
-             ("N/A", "total", "Backlinks", OLIVE),
-             ("N/A", "referring", "Linking Domains", OLIVE_LINE),
-             ("N/A", "homepage", "URL Rating", "#B62E25")]
-    for i, (val, sub, label, clr) in enumerate(cards):
-        cx = 2.1 + i * 1.9
-        _rect(s, cx, 1.9, 1.7, 1.4, "#F3F5F9")
-        _text(s, val, cx, 2.2, 1.7, 0.5, 34, "Calibri", clr, bold=True, align=PP_ALIGN.CENTER)
-        _text(s, sub, cx, 2.8, 1.7, 0.3, 9, "Calibri", SOFT, align=PP_ALIGN.CENTER)
-        _text(s, label, cx, 3.0, 1.7, 0.3, 10, "Calibri", TEXT, bold=True, align=PP_ALIGN.CENTER)
-    _suggestion_text(s, True,
-          "Build quality backlinks through guest posting, digital PR, and content marketing. Monitor toxic links regularly.",
-          2.0, 3.8, 7.5, 0.5)
 
     # --- Slide 6: Title Tag Checking ---
     s = content_slide("Title Tag Checking")
@@ -1434,6 +1417,7 @@ def run_brief_analysis(domain, fmt="james", target_pages=None, out_dir=None, log
     """Run brief website analysis: collect data + build PPTX."""
     if log_fn is None:
         log_fn = print
+    domain = re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
     if out_dir is None:
         out_dir = tempfile.mkdtemp(prefix="brief_analysis_")
     os.makedirs(out_dir, exist_ok=True)
