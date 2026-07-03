@@ -2,39 +2,39 @@
   "version": "3.2",
   "files": [
     {
-      "path": "health_audit.py",
-      "hash": "7c25167dcb98f943125533331d3d6dad8786ff737e0f71bd7d989aad61d6534c",
-      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/health_audit.py"
-    },
-    {
-      "path": "web_app_batch.py",
-      "hash": "0499ec0697d504669cda7f3fe307420d76122acae800e2e2fcd0fb68cc1104b5",
-      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
-    },
-    {
-      "path": "gsc_audit.py",
-      "hash": "5e33163906a14daab64947eb11857bc8e5490ef29f8a14d99fc7fe283f2a23ab",
-      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/gsc_audit.py"
-    },
-    {
-      "path": "updater.py",
-      "hash": "aa0871ddac79ffad14c45150ca4942c56209603a82681a35897ceeb9472fa3e6",
-      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/updater.py"
-    },
-    {
       "path": "da_checker.py",
       "hash": "85fb60c4dfa37bdcf6d113d8b466e1dec808d237a210db8d631088e2ecf2c82c",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/da_checker.py"
     },
     {
+      "path": "auth.py",
+      "hash": "da9b58e4b2d119f649ceab78aca719e9a72f1d1694dc154ecab091a2445a13e1",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/auth.py"
+    },
+    {
       "path": "engine.py",
-      "hash": "b062f8045479d6c2281c3bc07c874b0e767eb2965711b7077e69d59bde4ca6cf",
+      "hash": "434c43c2aa7e00a639c72bb317605fad262039c99ca3460c9e123d179079dc6a",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/engine.py"
     },
     {
-      "path": "auth.py",
-      "hash": "6fd89f96a140a34ed4c5f5e863ac6a9b656e7fb3c8945e142e38372b77f34734",
-      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/auth.py"
+      "path": "gsc_audit.py",
+      "hash": "e677595999725d009b64e2e8e36c464cf6cd13675dbb00df32e0885851a28aaa",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/gsc_audit.py"
+    },
+    {
+      "path": "health_audit.py",
+      "hash": "2845f2759a1db1657ab4119fcc419bae770a51c810e9c66a98e30df89b7c0337",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/health_audit.py"
+    },
+    {
+      "path": "web_app_batch.py",
+      "hash": "92811ae4ca856863dfb40ee53b6988d5c13d89a9b8669aeb7300ef4f190e06d7",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
+    },
+    {
+      "path": "updater.py",
+      "hash": "aa0871ddac79ffad14c45150ca4942c56209603a82681a35897ceeb9472fa3e6",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/updater.py"
     },
     {
       "path": "static/manifest.webmanifest",
@@ -87,11 +87,6 @@
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/icons/maskable-512.png"
     },
     {
-      "path": "templates/index.html",
-      "hash": "bf7b3fa5de40414021108951e7a5ff5c08f13a8fdbd4a166a23b50e223c3fcf7",
-      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
-    },
-    {
       "path": "scripts/capture_gsc.py",
       "hash": "d9d66ecd6d5a2a0eda5bd2e45fbaff524a9aa7735a206f0c5afa020f51724a24",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/capture_gsc.py"
@@ -108,7 +103,7 @@
     },
     {
       "path": "scripts/generate_seo_onpage_phase2.py",
-      "hash": "c80fe02c25d712bb93429b4075894dd1469464026aa07fc439572ce8b4003de3",
+      "hash": "8629bcc65748f071d0bb755058a8fd3ac81946c0cf8638a89e0ba50d6fd6e99d",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seo_onpage_phase2.py"
     },
     {
@@ -135,6 +130,11 @@
       "path": "scripts/template_website_audit.xlsx",
       "hash": "6337496bf1f65b7ed3a80e187fd0fbed9f3dafadbe20b8ba74fc7dc40365355c",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/template_website_audit.xlsx"
+    },
+    {
+      "path": "templates/index.html",
+      "hash": "c53c40a620cb3b4ac63f9edda726ab5a482ae78ea84054a33bbdb48d89d92242",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     }
   ]
 }
