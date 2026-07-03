@@ -61,27 +61,51 @@ def _close_brief_driver():
 
 
 def _browser_get_indexing(domain):
-    """Use headless browser to get site: result count from Google."""
+    """Read the 'About X results' count from a Google site: query via the browser.
+    Handles the consent wall + one retry; returns None if Google blocks the query
+    (so the report shows N/A rather than a wrong number)."""
     driver = _get_brief_driver()
     if not driver:
         return None
     try:
-        driver.get(f"https://www.google.com/search?q=site:{domain}&hl=en")
-        time.sleep(3)
-        src = driver.page_source or ""
-        # Accept consent if needed
-        from engine import accept_google_consent
-        accept_google_consent(driver, lambda *a: None)
-        time.sleep(1)
-        src = driver.page_source or ""
-        for pat in [r'About ([\d,\.]+) results', r'([\d,\.]+) results',
-                    r'id="result-stats"[^>]*>About ([\d,\.]+)',
-                    r'id="result-stats"[^>]*>([\d,\.]+)']:
+        from engine import accept_google_consent, classify_page
+    except Exception:
+        accept_google_consent = classify_page = None
+
+    def _extract(src):
+        for pat in [r'About ([\d,\.  ]+?) results',
+                    r'result-stats[^>]*>\s*About ([\d,\.  ]+)',
+                    r'result-stats[^>]*>([\d,\.  ]+)',
+                    r'([\d,\. ]+)\s*results']:
             m = re.search(pat, src, re.I)
             if m:
-                return {"count": m.group(1).replace(".", ","), "status": "Indexed & serving"}
-        if "did not match any documents" in src.lower():
+                num = re.sub(r'[^\d]', '', m.group(1))
+                if num:
+                    return {"count": f"{int(num):,}", "status": "Indexed & serving"}
+        if "did not match any documents" in src.lower() or "no results found" in src.lower():
             return {"count": "0", "status": "Not indexed"}
+        return None
+
+    try:
+        for attempt in range(2):
+            driver.get(f"https://www.google.com/search?q=site:{domain}&hl=en&num=20")
+            time.sleep(3 if attempt == 0 else 5)
+            if accept_google_consent:
+                try:
+                    accept_google_consent(driver, lambda *a: None)
+                    time.sleep(1.5)
+                except Exception:
+                    pass
+            src = driver.page_source or ""
+            if classify_page:
+                try:
+                    if classify_page(src) in ("captcha", "soft_block", "http_403"):
+                        continue   # Google blocked us — retry once, else give up (N/A)
+                except Exception:
+                    pass
+            res = _extract(src)
+            if res:
+                return res
         return None
     except Exception:
         return None
@@ -392,24 +416,47 @@ def check_image_alts(domain):
 
 
 def check_redirections(domain):
-    """Check common redirection patterns."""
+    """Check common redirection patterns and report the ACTUAL status code
+    (200 / 301 / 302). 301 is ideal; 302 is a temporary redirect that should be
+    reviewed/changed to 301."""
+    import urllib.error
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None   # don't follow — so we can read the redirect's own status
+
     results = []
     variants = [
         (f"http://{domain}/", "HTTP to HTTPS"),
         (f"https://www.{domain}/", "www to non-www") if not domain.startswith("www.") else (f"https://{domain.replace('www.','')}/", "non-www to www"),
     ]
+    opener = urllib.request.build_opener(_NoRedirect)
     for url, rtype in variants:
         try:
             req = urllib.request.Request(url, method="HEAD",
-                                        headers={"User-Agent": "SEOToolkitPro/1.0"})
-            opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler)
-            with opener.open(req, timeout=10) as r:
-                final = r.url
-                code = r.status
-            if final.rstrip("/") != url.rstrip("/"):
-                results.append({"type": rtype, "status": f"301/302", "detail": f"Redirects to {final[:50]}", "impact": "Good"})
-            else:
-                results.append({"type": rtype, "status": "No redirect", "detail": "Same URL", "impact": "Check needed"})
+                                         headers={"User-Agent": "SEOToolkitPro/1.0"})
+            try:
+                with opener.open(req, timeout=10) as r:
+                    code = r.status
+                if 200 <= code < 300:
+                    results.append({"type": rtype, "status": str(code),
+                                    "detail": "No redirect (already canonical / redirect missing)",
+                                    "impact": "Check needed"})
+                else:
+                    results.append({"type": rtype, "status": str(code),
+                                    "detail": "Unexpected response", "impact": "Review"})
+            except urllib.error.HTTPError as e:
+                code = e.code
+                loc = (e.headers.get("Location") or "")[:55]
+                if code in (301, 308):
+                    impact = "Good (permanent 301)"
+                elif code in (302, 307):
+                    impact = "Check — temporary redirect, use 301"
+                else:
+                    impact = "Review"
+                results.append({"type": rtype, "status": str(code),
+                                "detail": f"Redirects to {loc}" if loc else f"HTTP {code}",
+                                "impact": impact})
         except Exception as e:
             results.append({"type": rtype, "status": "Error", "detail": str(e)[:50], "impact": "Unknown"})
     return results
@@ -732,6 +779,10 @@ def build_james(data, out_path, log_fn=None):
     m = re.search(r'(\d+)\s*URL', sm_summary)
     if m:
         sm_count = f"~{m.group(1)} URLs"
+    else:
+        m2 = re.search(r'(\d+)\s*sub-sitemap', sm_summary)
+        if m2:
+            sm_count = f"{m2.group(1)} sub-sitemaps"
     sm_status = "Found" if sitemap.get("found") or sitemap.get("ok") else "Not found"
     _add_table(s, ["Metric", "Value", "Coverage Status"],
                [["Indexed Pages (site: query)", f"~{idx.get('count', 'N/A')} URLs", idx.get("status", "N/A")],
