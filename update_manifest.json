@@ -1,5 +1,5 @@
 {
-  "version": "3.6",
+  "version": "3.7",
   "files": [
     {
       "path": "da_checker.py",
@@ -8,7 +8,7 @@
     },
     {
       "path": "auth.py",
-      "hash": "bfde77aa8849a0eee1eb46ad8c9008905b176e02145d70bf6fa1c4597f9019a4",
+      "hash": "3c417d4812cdbdd23d657ed3612f257ee76151c94cd63d033410f31ee07b64f8",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/auth.py"
     },
     {
@@ -23,17 +23,17 @@
     },
     {
       "path": "health_audit.py",
-      "hash": "d5639e2a2558ef8bb677d8674cd61b057d6e8cfa32d5545b7047fe26496a01c3",
+      "hash": "c40a9a5e0c2e5d06d45ffaf41f58fc8c23643b2fe0b1eebc31b897da4b04c587",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/health_audit.py"
     },
     {
       "path": "web_app_batch.py",
-      "hash": "3620382c5a344fcf6228078f18ec9a64fd3be0986713c5a359c24b94d2d36bf2",
+      "hash": "ec357c5fc91526a70cb95757ba29d3d0e225688f1ca6923e4e5aa2f39256ec63",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
       "path": "updater.py",
-      "hash": "3a533274ca9e37d6ef4f09b28673fcf32210e62d9a364e51bdf86a4237b71f06",
+      "hash": "57b4bd6ad2595c0d1e85b9457cec901fccabcb4c507070dbffc101026440e15c",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/updater.py"
     },
     {
@@ -133,7 +133,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "c53c40a620cb3b4ac63f9edda726ab5a482ae78ea84054a33bbdb48d89d92242",
+      "hash": "7fa4510e17bccbc032e30065166bdbd7eb1a15b4436d6f47b5fcf3ca2f22e5f6",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     }
   ]

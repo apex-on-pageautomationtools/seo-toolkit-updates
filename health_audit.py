@@ -457,36 +457,60 @@ def check_robots_txt(domain):
             "has_sitemap_ref": has_sitemap, "has_disallow": has_disallow, "lines": line_count}
 
 
-def check_sitemap(domain):
-    """Actually fetch and validate sitemap.xml."""
-    url = f"https://{domain}/sitemap.xml"
-    try:
-        req = _ur.Request(url, headers={"User-Agent": _UA})
-        with _ur.urlopen(req, timeout=15) as r:
-            code = r.status
-            content = r.read().decode("utf-8", "ignore")
-    except _ue.HTTPError as e:
-        return {"ok": False, "status": e.code,
-                "summary": f"sitemap.xml returned HTTP {e.code} — file is missing or inaccessible."}
-    except Exception as e:
-        return {"ok": False, "status": 0,
-                "summary": f"Could not fetch sitemap.xml: {e}"}
-    if not content.strip():
-        return {"ok": False, "status": code,
-                "summary": "sitemap.xml exists but is empty."}
-    is_xml = content.strip().startswith("<?xml") or "<urlset" in content or "<sitemapindex" in content
-    if not is_xml:
-        return {"ok": False, "status": code,
-                "summary": "sitemap.xml exists but does not appear to be valid XML."}
-    url_count = len(re.findall(r'<loc>', content))
-    is_index = "<sitemapindex" in content
-    if is_index:
-        sub_count = len(re.findall(r'<sitemap>', content))
-        summary = f"Sitemap index found with {sub_count} sub-sitemap(s)."
-    else:
-        summary = f"Sitemap found with {url_count} URL(s)."
-    return {"ok": True, "status": code, "summary": summary,
-            "url_count": url_count, "is_index": is_index}
+def check_sitemap(domain, robots_data=None):
+    """Fetch and validate the sitemap. Tries /sitemap.xml then /sitemap_index.xml
+    (many sites — e.g. Yoast — expose only a sitemap index). `robots_data` is
+    accepted for compatibility with callers that pass robots.txt results; when it
+    carries explicit Sitemap: URLs those are tried first."""
+    candidates = []
+    # Prefer any Sitemap: URLs surfaced by the robots.txt check.
+    if isinstance(robots_data, dict):
+        for k in ("sitemaps", "sitemap_urls", "sitemaps_found"):
+            v = robots_data.get(k)
+            if isinstance(v, (list, tuple)):
+                candidates.extend([u for u in v if isinstance(u, str) and u.startswith("http")])
+            elif isinstance(v, str) and v.startswith("http"):
+                candidates.append(v)
+    elif isinstance(robots_data, str):
+        candidates.extend(re.findall(r'(?im)^\s*sitemap:\s*(\S+)', robots_data))
+    # Common fallbacks.
+    for u in (f"https://{domain}/sitemap.xml", f"https://{domain}/sitemap_index.xml"):
+        if u not in candidates:
+            candidates.append(u)
+
+    last = {"ok": False, "status": 0, "summary": "No sitemap found."}
+    for url in candidates:
+        name = url.rsplit("/", 1)[-1] or "sitemap.xml"
+        try:
+            req = _ur.Request(url, headers={"User-Agent": _UA})
+            with _ur.urlopen(req, timeout=15) as r:
+                code = r.status
+                content = r.read().decode("utf-8", "ignore")
+        except _ue.HTTPError as e:
+            last = {"ok": False, "status": e.code,
+                    "summary": f"{name} returned HTTP {e.code} — file is missing or inaccessible."}
+            continue
+        except Exception as e:
+            last = {"ok": False, "status": 0, "summary": f"Could not fetch {name}: {e}"}
+            continue
+        if not content.strip():
+            last = {"ok": False, "status": code, "summary": f"{name} exists but is empty."}
+            continue
+        is_xml = content.strip().startswith("<?xml") or "<urlset" in content or "<sitemapindex" in content
+        if not is_xml:
+            last = {"ok": False, "status": code,
+                    "summary": f"{name} exists but does not appear to be valid XML."}
+            continue
+        url_count = len(re.findall(r'<loc>', content))
+        is_index = "<sitemapindex" in content
+        if is_index:
+            sub_count = len(re.findall(r'<sitemap>', content))
+            summary = f"Sitemap index found with {sub_count} sub-sitemap(s)."
+        else:
+            summary = f"Sitemap found with {url_count} URL(s)."
+        return {"ok": True, "status": code, "summary": summary,
+                "url_count": url_count, "is_index": is_index, "url": url}
+    return last
 
 
 def check_serp(domain, driver=None):

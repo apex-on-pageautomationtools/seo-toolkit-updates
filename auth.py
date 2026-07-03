@@ -36,7 +36,7 @@ def _config_file():
     return cf
 
 AUTH_FILE = _auth_file()
-APP_VERSION = "3.6"
+APP_VERSION = "3.7"
 
 
 def _get_api_url():

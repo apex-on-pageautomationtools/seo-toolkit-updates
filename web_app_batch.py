@@ -53,7 +53,7 @@ import brief_analysis
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "3.6"
+APP_VERSION = "3.7"
 
 # --------------------------------------------------------------------------- #
 # Paths
