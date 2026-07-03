@@ -508,8 +508,21 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
         sitemap = {"ok": False, "found": False, "summary": "Sitemap check could not be completed."}
     if not isinstance(robots, dict):
         robots = {}
-    if not isinstance(bl_broken, (list, tuple)):
-        bl_broken = []
+    # check_broken_links returns (url, status) TUPLES, but every report builder
+    # calls b.get(...) on each broken link expecting a dict. Normalize to dicts
+    # so a site that actually has broken links doesn't crash the report with
+    # "'tuple' object has no attribute 'get'".
+    _norm_broken = []
+    for b in (bl_broken if isinstance(bl_broken, (list, tuple)) else []):
+        if isinstance(b, dict):
+            _norm_broken.append(b)
+        elif isinstance(b, (list, tuple)):
+            _norm_broken.append({"type": "Broken", "source": "",
+                                 "url": str(b[0]) if len(b) > 0 else "",
+                                 "status": str(b[1]) if len(b) > 1 else ""})
+        else:
+            _norm_broken.append({"type": "Broken", "source": "", "url": str(b), "status": ""})
+    bl_broken = _norm_broken
     if not isinstance(bl_checked, int):
         try:
             bl_checked = int(bl_checked)
