@@ -1,5 +1,5 @@
 {
-  "version": "3.2",
+  "version": "3.3",
   "files": [
     {
       "path": "da_checker.py",
@@ -8,7 +8,7 @@
     },
     {
       "path": "auth.py",
-      "hash": "da9b58e4b2d119f649ceab78aca719e9a72f1d1694dc154ecab091a2445a13e1",
+      "hash": "216e82bb5872443c49acc2fab00e6c14d651fde03a5002f6d7309c652da0d1ca",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/auth.py"
     },
     {
@@ -28,12 +28,12 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "f8576a0e8dc3dcfd8d99b7df2b06163d2c52465a1d1a66e5113e89a5108f0e16",
+      "hash": "8cbb70e1ea396843f1e40da621e272172c05836ca0dda835de0045e0aa52dd52",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
       "path": "updater.py",
-      "hash": "aa0871ddac79ffad14c45150ca4942c56209603a82681a35897ceeb9472fa3e6",
+      "hash": "32749f4b8624d972f7a2e1220fbbf40f1a06ed449554353e9df84a816b9d33fe",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/updater.py"
     },
     {
