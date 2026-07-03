@@ -442,18 +442,34 @@ def check_robots_txt(domain):
     has_user_agent = bool(re.search(r'(?i)^user-agent:', content, re.MULTILINE))
     has_sitemap = bool(re.search(r'(?i)^sitemap:', content, re.MULTILINE))
     has_disallow = bool(re.search(r'(?i)^disallow:', content, re.MULTILINE))
+    # Is the whole site blocked from crawling? (Disallow: / under User-agent: * or Googlebot)
+    root_blocked = False
+    cur_ua = None
+    for ln in content.splitlines():
+        t = ln.split("#", 1)[0].strip()
+        low = t.lower()
+        if low.startswith("user-agent:"):
+            cur_ua = low.split(":", 1)[1].strip()
+        elif low.startswith("disallow:") and cur_ua in ("*", "googlebot"):
+            if t.split(":", 1)[1].strip() == "/":
+                root_blocked = True
     issues = []
+    if root_blocked:
+        issues.append("Main site is BLOCKED from crawling (Disallow: /)")
     if not has_user_agent:
         issues.append("Missing User-agent directive")
     if not has_sitemap:
         issues.append("No Sitemap reference in robots.txt")
     line_count = len([l for l in content.splitlines() if l.strip()])
     summary = f"robots.txt found ({line_count} lines). "
+    if root_blocked:
+        summary += "WARNING: the site is disallowed for search crawlers. "
     if issues:
         summary += "Issues: " + "; ".join(issues) + "."
     else:
-        summary += "Contains User-agent, Disallow rules" + (", and Sitemap reference." if has_sitemap else ".")
-    return {"ok": not issues, "status": code, "summary": summary,
+        summary += "Main site is crawlable" + (", sitemap referenced." if has_sitemap else ".")
+    return {"ok": not issues, "status": code, "summary": summary, "found": True,
+            "root_blocked": root_blocked, "site_crawlable": not root_blocked,
             "has_sitemap_ref": has_sitemap, "has_disallow": has_disallow, "lines": line_count}
 
 
@@ -944,6 +960,7 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
 def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, psi_api_key=None, driver=None, prefetched_futures=None):
     if log_fn is None:
         log_fn = print
+    domain = re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
     captured = captured or {}
     target_pages = [p.strip() for p in (target_pages or []) if p.strip()]
 
@@ -1634,6 +1651,9 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
     """Run a full health audit. Returns the output file path."""
     if log_fn is None:
         log_fn = print
+    # Normalize to a bare host — a full URL (https://x.com/) breaks temp image
+    # paths (".png" basename -> PIL "unknown file extension") and the filename.
+    domain = re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
 
     fi = FORMAT_INFO.get(fmt, FORMAT_INFO["james"])
     use_keys = list(fi["keys"])
