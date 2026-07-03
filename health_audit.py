@@ -2,7 +2,7 @@
 Health Audit Module for SEO Toolkit Pro
 Adapted from james-seo-tools generate_health_report.py
 - No Patchright (uses Selenium CDP for screenshots)
-- No GSC-dependent checkpoints (manual, security excluded)
+- GSC screenshots (manual_action, security_issues) captured if GSC account is connected
 - 4 format themes: James (docx), Neon (docx), Sigma (pptx), Omega (pptx)
 """
 
@@ -329,36 +329,97 @@ def check_broken_links(domain, target_pages=None):
 
 def check_sucuri(domain):
     """Fetch Sucuri SiteCheck results page and parse the actual verdict."""
+    import re
     url = f"https://sitecheck.sucuri.net/results/https/{domain}"
     html = _fetch_html(url, timeout=30)
     if html is None:
-        return {"ok": None, "summary": "Could not reach Sucuri SiteCheck. Check manually.", "details": []}
+        return {"ok": None, "summary": "Could not reach Sucuri SiteCheck. Check manually.", "details": [], "issues": []}
     details = []
+    issues = []
     ok = True
-    # Check for "Site is Clean" or malware warnings
     html_lower = html.lower()
-    if "no malware was found" in html_lower or "site is clean" in html_lower:
+
+    # Malware — check the actual result text, not template text
+    has_no_malware = "didn't detect any malware" in html_lower or "no malware found" in html_lower
+    has_malware = bool(re.search(r'Warning:\s*Malware\s+Detected', html))
+    # The raw HTML contains BOTH templates; check which is actually shown
+    # "No malware detected by scan (Low Risk)" = clean; presence of this confirms clean
+    clean_scan = "no malware detected by scan" in html_lower
+    if has_no_malware or clean_scan:
         details.append("No malware found")
-    elif "malware detected" in html_lower or "warning" in html_lower:
+        malware_ok = True
+    elif has_malware:
         ok = False
-        details.append("Malware or security warning detected!")
-    if "not blacklisted" in html_lower or "no blacklisting" in html_lower:
+        details.append("Malware detected!")
+        issues.append("Malware detected on the website")
+        malware_ok = False
+    else:
+        details.append("Malware status unclear")
+        malware_ok = True
+
+    # Blacklist
+    if "is not blacklisted" in html_lower or "site is not blacklisted" in html_lower:
         details.append("Not blacklisted")
-    elif "blacklisted" in html_lower:
+        bl_ok = True
+    elif re.search(r'site\s+is\s+blacklisted', html, re.IGNORECASE):
         ok = False
         details.append("Domain is BLACKLISTED")
-    # Check for outdated CMS
-    if "outdated" in html_lower and ("wordpress" in html_lower or "cms" in html_lower):
-        details.append("Outdated CMS version detected")
-    # Firewall
-    if "no firewall" in html_lower or "website firewall" not in html_lower:
-        details.append("No WAF/Firewall detected")
-    elif "firewall detected" in html_lower or "website firewall" in html_lower:
-        details.append("Firewall/WAF detected")
-    summary = "No issues found." if ok else "Issues detected — review Sucuri report."
-    if not details:
-        details.append("Check completed — see screenshot for details")
-    return {"ok": ok, "summary": summary, "details": details}
+        issues.append("Domain is blacklisted")
+        bl_ok = False
+    else:
+        bl_ok = True
+
+    # Blacklist details — count "Domain clean by" entries
+    bl_clean = len(re.findall(r'Domain clean by', html))
+    if bl_clean:
+        details.append(f"{bl_clean} blacklist checks clean")
+
+    # Risk level — infer from malware/blacklist status
+    if not malware_ok or not bl_ok:
+        risk_level = "High"
+    elif malware_ok and bl_ok:
+        risk_level = "Low"
+    else:
+        risk_level = "Medium"
+    details.append(f"Risk level: {risk_level}")
+
+    # Security headers (from Hardening Improvements section)
+    if "missing security header" in html_lower:
+        header_issues = re.findall(r'Missing security header[^<]*<a[^>]*>([^<]+)</a>', html, re.IGNORECASE)
+        header_issues += re.findall(r'Missing\s+<a[^>]*>([^<]+?)</a>\s*security header', html, re.IGNORECASE)
+        for h in header_issues:
+            issues.append(f"Missing: {h.strip()}")
+        if not header_issues:
+            issues.append("Missing security headers")
+
+    # WAF
+    if "no website application firewall" in html_lower or "please install a cloud-based waf" in html_lower:
+        issues.append("No WAF/Firewall detected")
+    elif "firewall detected" in html_lower:
+        details.append("WAF/Firewall detected")
+
+    # PHP version leaked
+    if "leaked php version" in html_lower or "expose_php" in html_lower:
+        issues.append("PHP version exposed in headers")
+
+    # Missing Strict-Transport-Security
+    if "strict-transport-security" in html_lower and "missing" in html_lower:
+        issues.append("Missing: Strict-Transport-Security header")
+
+    # Missing CSP
+    if "content-security-policy directive" in html_lower and "missing" in html_lower:
+        issues.append("Missing: Content-Security-Policy directive")
+
+    summary_parts = []
+    if ok:
+        summary_parts.append("No critical issues found.")
+    else:
+        summary_parts.append("Critical issues detected!")
+    summary_parts.append(f"Risk: {risk_level}.")
+    if issues:
+        summary_parts.append("Hardening: " + "; ".join(issues[:6]) + ".")
+
+    return {"ok": ok, "summary": " ".join(summary_parts), "details": details, "issues": issues}
 
 
 def check_robots_txt(domain):
@@ -665,7 +726,7 @@ CHECKPOINTS = [
              "page or site that are mostly attempts to manipulate our search "
              "index, but are not necessarily dangerous for users.",
      "status": ("Status –", " Not found"),
-     "capture": "none", "red": True},
+     "capture": "gsc", "red": True},
 
     {"key": "security_issues", "label": "Security Issues:",
      "body": " The Security Issues report lists indications that your site was "
@@ -673,7 +734,7 @@ CHECKPOINTS = [
              "visitor or their computer: for example, phishing attacks or "
              "installing malware or unwanted software on the user's computer.",
      "status": ("Status:  ", "Not Found"),
-     "capture": "none", "red": True},
+     "capture": "gsc", "red": True},
 
     {"key": "robots", "label": "Robots.txt:",
      "body": " Robots.txt file has pages that needs to be blocked and are not "
@@ -807,10 +868,17 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
             else:
                 time.sleep(4)
 
-            driver.execute_script("window.scrollTo(0, 0);")
+            if key == "sucuri":
+                driver.execute_script(
+                    "document.querySelectorAll('.cookie-banner, .consent-banner, [class*=cookie], #cookie-law-info-bar').forEach(e=>e.remove());"
+                    "window.scrollTo(0, 0);"
+                )
+                time.sleep(1)
+            else:
+                driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(0.5)
 
-            # Use CDP for full-page screenshot
+            # Use CDP for viewport screenshot
             try:
                 result = driver.execute_cdp_cmd("Page.captureScreenshot", {
                     "format": "png",
@@ -848,64 +916,61 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
     import concurrent.futures
     executor = None
 
-    if prefetched_futures and "sucuri" in prefetched_futures and "psi" in prefetched_futures:
-        log_fn("Sucuri & PageSpeed already running from early start...")
+    if prefetched_futures and "sucuri" in prefetched_futures:
         fut_sucuri = prefetched_futures["sucuri"]
-        fut_psi = prefetched_futures["psi"]
+        fut_psi = prefetched_futures.get("psi")
+        log_fn("Sucuri" + (" & PageSpeed" if fut_psi else "") + " already running from early start...")
     else:
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-        log_fn("Starting Sucuri & PageSpeed checks in background...")
         fut_sucuri = executor.submit(check_sucuri, domain)
-        fut_psi = executor.submit(check_pagespeed, domain, psi_api_key)
+        if psi_api_key:
+            log_fn("Starting Sucuri & PageSpeed checks in background...")
+            fut_psi = executor.submit(check_pagespeed, domain, psi_api_key)
+        else:
+            log_fn("Starting Sucuri in background (PageSpeed skipped)...")
+            fut_psi = None
 
     # --- Fast checks run sequentially while slow ones are in progress ---
+    _total = 13
+    _step = [0]
+    def _prog(msg):
+        _step[0] += 1
+        log_fn(f"[{_step[0]}/{_total}] {msg}")
 
-    # --- robots.txt ---
-    log_fn("Checking robots.txt...")
+    _prog("Checking robots.txt...")
     robots = check_robots_txt(domain)
 
-    # --- sitemap.xml ---
-    log_fn("Checking sitemap.xml...")
+    _prog("Checking sitemap.xml...")
     sitemap = check_sitemap(domain)
 
-    # --- HTTP status 200 ---
-    log_fn("Running status200 check...")
+    _prog("Running status200 check...")
     s200 = check_status200(target_pages, domain)
 
-    # --- Canonical ---
-    log_fn("Running canonical check...")
+    _prog("Running canonical check...")
     canon = check_canonical(target_pages, domain)
 
-    # --- Double meta ---
-    log_fn("Running double meta check...")
+    _prog("Running double meta check...")
     dmeta = check_double_meta(target_pages, domain)
 
-    # --- Meta robots ---
-    log_fn("Running meta robots check...")
+    _prog("Running meta robots check...")
     mrobots = check_meta_robots(target_pages, domain)
 
-    # --- URL versions ---
-    log_fn("Running URL versions check...")
+    _prog("Running URL versions check...")
     versions_summary, versions_rows = check_versions_full(domain)
 
-    # --- Broken links ---
-    log_fn("Running broken links check...")
+    _prog("Running broken links check...")
     bl_checked, bl_broken = check_broken_links(domain, target_pages)
 
-    # --- Dummy content ---
-    log_fn("Running dummy content check...")
+    _prog("Running dummy content check...")
     dummy_result = check_dummy_content(domain, driver=driver)
 
-    # --- SERP + hack detection ---
-    log_fn("Checking SERP for spam/hacked content...")
+    _prog("Checking SERP for spam/hacked content...")
     serp = check_serp(domain, driver=driver)
 
-    # --- Blank pages (only if target pages provided) ---
-    log_fn("Checking blank pages...")
+    _prog("Checking blank pages...")
     blank_results, blank_count = check_blank_pages(target_pages, domain)
 
-    # --- Meta source (real check: does homepage have title + desc?) ---
-    log_fn("Checking meta source code...")
+    _prog("Checking meta source code...")
     homepage_html = _fetch_html(f"https://{domain}/")
     if homepage_html:
         hp_meta = _parse_meta(homepage_html)
@@ -925,12 +990,15 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
         meta_source_result = "Could not fetch homepage source code."
 
     # --- Collect slow checks ---
-    log_fn("Waiting for Sucuri & PageSpeed results...")
+    if fut_psi:
+        _prog("Waiting for Sucuri & PageSpeed results...")
+    else:
+        _prog("Waiting for Sucuri results...")
     sucuri = fut_sucuri.result(timeout=120)
-    psi = fut_psi.result(timeout=120)
+    psi = fut_psi.result(timeout=120) if fut_psi else {"summary": "PageSpeed Insights — skipped", "scores": {}}
     if executor:
         executor.shutdown(wait=False)
-    log_fn("Sucuri & PageSpeed done.")
+    log_fn("Sucuri" + (" & PageSpeed" if fut_psi else "") + " done.")
 
     # Render table images
     if s200:
@@ -1078,7 +1146,7 @@ def _safe_save_path(base_path):
 
 
 # ---------- DOCX builder ----------
-def build_health_docx(domain, captured, computed, out_dir, include_keys=None, voice="we"):
+def build_health_docx(domain, captured, computed, out_dir, include_keys=None, voice="we", page_border=False):
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import parse_xml
@@ -1105,6 +1173,23 @@ def build_health_docx(domain, captured, computed, out_dir, include_keys=None, vo
     sec.page_width, sec.page_height = Inches(8.5), Inches(11.0)
     sec.left_margin = sec.right_margin = Inches(1.0)
     sec.top_margin = sec.bottom_margin = Inches(1.0)
+
+    if page_border:
+        sectPr = sec._sectPr
+        pgBorders = parse_xml(
+            '<w:pgBorders xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+            ' w:offsetFrom="page">'
+            '<w:top w:val="single" w:sz="12" w:space="24" w:color="000000"/>'
+            '<w:left w:val="single" w:sz="12" w:space="24" w:color="000000"/>'
+            '<w:bottom w:val="single" w:sz="12" w:space="24" w:color="000000"/>'
+            '<w:right w:val="single" w:sz="12" w:space="24" w:color="000000"/>'
+            '</w:pgBorders>'
+        )
+        pgSz = sectPr.find('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pgSz')
+        if pgSz is not None:
+            pgSz.addnext(pgBorders)
+        else:
+            sectPr.append(pgBorders)
 
     # Header
     p = doc.add_paragraph()
@@ -1514,20 +1599,95 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
         log_fn = print
 
     fi = FORMAT_INFO.get(fmt, FORMAT_INFO["james"])
-    use_keys = fi["keys"]
+    use_keys = list(fi["keys"])
+    if not psi_api_key and "pagespeed" in use_keys:
+        use_keys.remove("pagespeed")
+        log_fn("PageSpeed Insights skipped (not enabled).")
 
-    log_fn(f"[1/3] Running health checks for {domain}...")
+    total_steps = 3 if (not no_capture and driver is not None) else 2
+    log_fn(f"[1/{total_steps}] Running health checks for {domain}...")
     captured, computed = prepare_health_data(domain, target_pages=target_pages, log_fn=log_fn, psi_api_key=psi_api_key, driver=driver, prefetched_futures=prefetched_futures)
 
     if not no_capture and driver is not None:
-        log_fn(f"[2/3] Capturing screenshots...")
+        log_fn(f"[2/{total_steps}] Capturing screenshots...")
         ss_dir = os.path.join(out_dir or tempfile.gettempdir(), "health_screenshots")
         ss = capture_screenshots_selenium(driver, domain, ss_dir, use_keys, log_fn)
         captured.update(ss)
+
+        gsc_keys = {"manual_action", "security_issues"} & set(use_keys)
+        uncaptured_gsc = gsc_keys - set(captured.keys())
+        if uncaptured_gsc:
+            try:
+                import gsc_audit
+                accounts = gsc_audit.list_accounts()
+                connected = [a for a in accounts if a.get("has_refresh")]
+                gsc_email = connected[0]["email"] if connected else None
+                prop_url = f"sc-domain:{domain}"
+                gsc_pages = []
+                if "manual_action" in uncaptured_gsc:
+                    gsc_pages.append({"key": "manual_action", "page": "manual-actions", "wait": 12})
+                if "security_issues" in uncaptured_gsc:
+                    gsc_pages.append({"key": "security_issues", "page": "security-issues", "wait": 8})
+                if gsc_pages:
+                    gsc_captured = False
+                    if gsc_email:
+                        session = gsc_audit.find_session_for_email(gsc_email)
+                        if session:
+                            log_fn(f"  Capturing GSC screenshots via saved session ({session.get('label', session['id'])})...")
+                            gsc_ss = gsc_audit.capture_gsc_with_session(
+                                session["id"], prop_url, gsc_email, ss_dir,
+                                pages=gsc_pages, log_fn=log_fn)
+                            if isinstance(gsc_ss, dict) and "error" not in gsc_ss:
+                                captured.update(gsc_ss)
+                                gsc_captured = True
+                            elif isinstance(gsc_ss, dict) and gsc_ss.get("error") == "session_expired":
+                                log_fn(f"  Session expired — re-login needed in GSC Sessions")
+                    if not gsc_captured:
+                        sessions = gsc_audit.list_sessions()
+                        for sess in sessions:
+                            if not gsc_email or gsc_email not in [a.lower() for a in sess.get("accounts", [])]:
+                                continue
+                            log_fn(f"  Trying session {sess.get('label', sess['id'])}...")
+                            gsc_ss = gsc_audit.capture_gsc_with_session(
+                                sess["id"], prop_url, gsc_email or "", ss_dir,
+                                pages=gsc_pages, log_fn=log_fn)
+                            if isinstance(gsc_ss, dict) and "error" not in gsc_ss:
+                                captured.update(gsc_ss)
+                                gsc_captured = True
+                                break
+                    if not gsc_captured:
+                        if not gsc_email:
+                            log_fn("  GSC not connected — skipping manual_action/security_issues screenshots")
+                        else:
+                            log_fn("  No valid GSC browser session found — create one in GSC Audit > Browser Sessions")
+                        try:
+                            import json as _json, urllib.request as _ur2, urllib.parse as _up2
+                            _bd = os.path.dirname(os.path.abspath(__file__))
+                            _cfg_path = os.path.join(_bd, "config.json")
+                            if os.path.exists(_cfg_path):
+                                with open(_cfg_path, "r") as _cf:
+                                    _cfg = _json.load(_cf)
+                                _wurl = (_cfg.get("auth_api_url") or "").strip()
+                                if _wurl:
+                                    _qs = _up2.urlencode({"action": "get_config"})
+                                    _req = _ur2.Request(f"{_wurl}?{_qs}")
+                                    with _ur2.urlopen(_req, timeout=10) as _r:
+                                        _data = _json.loads(_r.read())
+                                    _mapping = _data.get("mapping", {}) if _data.get("success") else {}
+                                    _clean = domain.lower().replace("www.", "")
+                                    _info = _mapping.get(_clean)
+                                    if _info:
+                                        log_fn(f"  >> Domain found in GSC account: {_info.get('email', '?')} "
+                                               f"(access: {_info.get('accessLevel', '?')}). "
+                                               f"Create a browser session and log in with this account.")
+                        except Exception:
+                            pass
+            except Exception as e:
+                log_fn(f"  GSC screenshot capture skipped: {e}")
     else:
         log_fn(f"[2/3] Skipping screenshots (no browser or --no-capture)")
 
-    log_fn(f"[3/3] Building {fi['ext'].upper()} report ({fmt})...")
+    log_fn(f"[{total_steps}/{total_steps}] Building {fi['ext'].upper()} report ({fmt})...")
     if not out_dir:
         out_dir = tempfile.gettempdir()
     os.makedirs(out_dir, exist_ok=True)
@@ -1539,7 +1699,7 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
     elif fmt == "neon":
         path, placed, miss = build_health_docx(domain, captured, computed, out_dir, NEON_KEYS, voice="i")
     else:
-        path, placed, miss = build_health_docx(domain, captured, computed, out_dir, use_keys)
+        path, placed, miss = build_health_docx(domain, captured, computed, out_dir, use_keys, page_border=True)
 
     log_fn(f"[DONE] {placed} images placed, {miss} text-only. Output: {path}")
     return path

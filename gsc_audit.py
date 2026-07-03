@@ -205,8 +205,8 @@ def _refresh_token(email):
 
     config = _load_gsc_config()
     data = urllib.parse.urlencode({
-        "client_id": config.get("client_id", ""),
-        "client_secret": config.get("client_secret", ""),
+        "client_id": config.get("gsc_client_id", config.get("client_id", "")),
+        "client_secret": config.get("gsc_client_secret", config.get("client_secret", "")),
         "refresh_token": acc["refresh_token"],
         "grant_type": "refresh_token",
     }).encode()
@@ -255,6 +255,193 @@ def _load_gsc_config():
 
 
 # ---------------------------------------------------------------------------
+# GSC Browser Sessions — persistent Chrome user-data-dirs per Google account
+# ---------------------------------------------------------------------------
+
+def _sessions_dir():
+    appdata = os.path.join(
+        os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+        "SEO Toolkit Pro", "gsc_sessions")
+    os.makedirs(appdata, exist_ok=True)
+    return appdata
+
+
+def _session_meta_path(session_id):
+    return os.path.join(_sessions_dir(), session_id, "meta.json")
+
+
+def _load_session_meta(session_id):
+    p = _session_meta_path(session_id)
+    try:
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_session_meta(session_id, meta):
+    p = _session_meta_path(session_id)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+
+
+def list_sessions():
+    sdir = _sessions_dir()
+    sessions = []
+    if not os.path.isdir(sdir):
+        return sessions
+    for name in sorted(os.listdir(sdir)):
+        meta_path = os.path.join(sdir, name, "meta.json")
+        if os.path.isfile(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                meta["id"] = name
+                meta["profile_dir"] = os.path.join(sdir, name, "chrome_profile")
+                sessions.append(meta)
+            except Exception:
+                pass
+    return sessions
+
+
+def create_session(label=None):
+    sid = f"s{int(time.time()*1000)}"
+    profile_dir = os.path.join(_sessions_dir(), sid, "chrome_profile")
+    os.makedirs(profile_dir, exist_ok=True)
+    meta = {
+        "label": label or f"Session {sid[-4:]}",
+        "accounts": [],
+        "created": datetime.now().isoformat(),
+        "last_login": None,
+    }
+    _save_session_meta(sid, meta)
+    return {"id": sid, **meta, "profile_dir": profile_dir}
+
+
+def remove_session(session_id):
+    import shutil
+    sdir = os.path.join(_sessions_dir(), session_id)
+    if os.path.isdir(sdir):
+        shutil.rmtree(sdir, ignore_errors=True)
+        return True
+    return False
+
+
+def launch_session_browser(session_id, browser_pref="edge", log_fn=None):
+    """Launch Chrome/Edge with the session's user-data-dir so the user can
+    log into Google accounts.  Returns the driver (caller must quit it)."""
+    if log_fn is None:
+        log_fn = print
+    import engine
+    profile_dir = os.path.join(_sessions_dir(), session_id, "chrome_profile")
+    os.makedirs(profile_dir, exist_ok=True)
+    driver = engine.build_driver(
+        profile_dir, proxy=None, headless=False,
+        country="us", extra_extensions=[],
+        logger=log_fn, browser_pref=browser_pref,
+    )
+    driver.get("https://accounts.google.com/")
+    return driver
+
+
+def scan_session_cookies(session_id, driver=None, log_fn=None):
+    """Scan cookies in the session browser to detect logged-in Google accounts.
+    If driver is provided, reads cookies from it; otherwise reads the cookie
+    file from the profile dir."""
+    if log_fn is None:
+        log_fn = print
+    accounts = []
+    if driver:
+        try:
+            driver.get("https://myaccount.google.com/")
+            time.sleep(3)
+            cookies = driver.get_cookies()
+            google_cookies = [c for c in cookies if ".google.com" in c.get("domain", "")]
+            emails = set()
+            for c in google_cookies:
+                if c.get("name") == "SAPISID" or c.get("name") == "SID":
+                    pass
+            try:
+                page_text = driver.find_element("tag name", "body").text
+                import re
+                found = re.findall(r'[\w.+-]+@[\w-]+\.[\w.]+', page_text)
+                for e in found:
+                    if e.endswith(('.com', '.org', '.net', '.in', '.io', '.co')):
+                        emails.add(e.lower())
+            except Exception:
+                pass
+            accounts = list(emails)
+        except Exception as e:
+            log_fn(f"  Cookie scan error: {e}")
+    meta = _load_session_meta(session_id)
+    if accounts:
+        meta["accounts"] = accounts
+        meta["last_login"] = datetime.now().isoformat()
+    _save_session_meta(session_id, meta)
+    return {"accounts": accounts, "session_id": session_id}
+
+
+def check_session_valid(session_id, driver=None):
+    """Quick check if a session's Google cookies are still valid.
+    Returns True if we can load a Google page without hitting the login screen."""
+    if driver is None:
+        return False
+    try:
+        driver.get("https://search.google.com/search-console")
+        time.sleep(4)
+        url = driver.current_url
+        if "accounts.google.com" in url or "signin" in url.lower():
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def find_session_for_email(email):
+    """Find a session that has this Google account logged in."""
+    email = email.lower().strip()
+    for s in list_sessions():
+        if email in [a.lower() for a in s.get("accounts", [])]:
+            return s
+    return None
+
+
+def capture_gsc_with_session(session_id, property_url, email, out_dir,
+                              pages=None, browser_pref="edge", log_fn=None):
+    """Launch a session browser and capture GSC screenshots."""
+    if log_fn is None:
+        log_fn = print
+    import engine
+    profile_dir = os.path.join(_sessions_dir(), session_id, "chrome_profile")
+    driver = None
+    try:
+        driver = engine.build_driver(
+            profile_dir, proxy=None, headless=True,
+            country="us", extra_extensions=[],
+            logger=log_fn, browser_pref=browser_pref,
+        )
+        driver.get("https://search.google.com/search-console")
+        time.sleep(3)
+        if "accounts.google.com" in driver.current_url:
+            log_fn("  Session expired — need to re-login")
+            return {"error": "session_expired", "session_id": session_id}
+        return capture_gsc_screenshots(driver, property_url, email, out_dir,
+                                        pages=pages, log_fn=log_fn)
+    except Exception as e:
+        log_fn(f"  Session capture error: {e}")
+        return {"error": str(e)}
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+
+
+# ---------------------------------------------------------------------------
 # GSC API helpers
 # ---------------------------------------------------------------------------
 
@@ -265,6 +452,29 @@ def _api_get(url, token, timeout=15):
     })
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
+
+
+def _fmt_date(val):
+    """Format an ISO datetime to just the date part. '2026-06-25T12:31:13.883Z' → '2026-06-25'."""
+    if not val or val == "N/A":
+        return val or "N/A"
+    s = str(val)
+    if "T" in s:
+        return s.split("T")[0]
+    return s
+
+
+def _detect_sitemap_type(sm):
+    """Detect sitemap type — 'Index' for sitemap indexes, otherwise the API type."""
+    api_type = sm.get("type", "")
+    path = sm.get("path", "").lower()
+    if api_type and api_type.lower() not in ("", "sitemap"):
+        return api_type
+    if "index" in path or path.endswith("sitemap_index.xml"):
+        return "Index"
+    if api_type:
+        return api_type
+    return "Sitemap"
 
 
 def _api_post(url, token, body, timeout=30):
@@ -420,9 +630,34 @@ def build_gsc_url(page, property_url, email=None):
     return f"{base}/{page}?{qs}"
 
 
+def _detect_page_status(driver, key):
+    """Read page text to detect status for manual actions, security issues, removals."""
+    try:
+        body = driver.find_element("tag name", "body").text.lower()
+        if key == "manual":
+            if "no issues detected" in body or "no manual actions" in body:
+                return "No Issues Detected"
+            if "manual action" in body and ("issue" in body or "action" in body):
+                return "Issue Found"
+        elif key == "security":
+            if "no issues detected" in body or "no security issues" in body:
+                return "No Issues Detected"
+            if "security issue" in body or "malware" in body or "hacked" in body:
+                return "Issue Found"
+        elif key == "removals":
+            if "no items" in body or "no removals" in body or "nothing here" in body:
+                return "No Removals Found"
+            if "removal" in body and ("request" in body or "expired" in body):
+                return "Removals Found"
+    except Exception:
+        pass
+    return ""
+
+
 def capture_gsc_screenshots(driver, property_url, email, out_dir, pages=None, log_fn=None):
     """Capture GSC page screenshots using the existing Selenium browser.
-    The browser must already be logged into a Google account with GSC access."""
+    The browser must already be logged into a Google account with GSC access.
+    Returns dict with screenshot paths and status info."""
     if log_fn is None:
         log_fn = print
     if pages is None:
@@ -436,6 +671,7 @@ def capture_gsc_screenshots(driver, property_url, email, out_dir, pages=None, lo
 
     os.makedirs(out_dir, exist_ok=True)
     screenshots = {}
+    statuses = {}
 
     for p in pages:
         url = build_gsc_url(p["page"], property_url, email)
@@ -443,6 +679,11 @@ def capture_gsc_screenshots(driver, property_url, email, out_dir, pages=None, lo
         try:
             driver.get(url)
             time.sleep(p["wait"])
+            if p["key"] in ("manual", "security", "removals"):
+                status = _detect_page_status(driver, p["key"])
+                if status:
+                    statuses[p["key"]] = status
+                    log_fn(f"  {p['key']} status: {status}")
             ss_path = os.path.join(out_dir, f"gsc_{p['key']}.png")
             driver.save_screenshot(ss_path)
             screenshots[p["key"]] = ss_path
@@ -450,6 +691,7 @@ def capture_gsc_screenshots(driver, property_url, email, out_dir, pages=None, lo
         except Exception as e:
             log_fn(f"  {p['key']} capture failed: {e}")
 
+    screenshots["_statuses"] = statuses
     return screenshots
 
 
@@ -651,50 +893,57 @@ def build_james_full(data, out_path, log_fn=None):
     s = prs.slides.add_slide(prs.slide_layouts[6])
     _rect(s, 0, 0, 13.33, 7.5, "#165060")
     _rect(s, 0, 0, 0.4, 7.5, "#C9A84C")
-    _text(s, "GSC AUDIT REPORT", 1.2, 2.3, 10, 0.8, 36, "Trebuchet MS", WHITE, bold=True)
+    _text(s, "GSC AUDIT REPORT", 1.2, 2.3, 11, 0.8, 36, "Calibri", WHITE, bold=True)
     _rect(s, 1.2, 3.4, 5, 0.06, "#C9A84C")
-    _text(s, domain, 1.2, 3.6, 10, 0.5, 22, "Trebuchet MS", GOLD)
+    _text(s, domain, 1.2, 3.6, 11, 0.5, 22, "Calibri", GOLD)
 
     # --- Slide 2: Introduction ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
     _rect(s, 0, 0, 13.33, 7.5, "#F5F8FA")
     _rect(s, 0, 0, 13.33, 1.0, "#0D3D4A")
     _rect(s, 0, 1.0, 13.33, 0.08, "#C9A84C")
-    _text(s, "Introduction", 0.5, 0.15, 12.3, 0.55, 26, "Trebuchet MS", WHITE, bold=True)
+    _text(s, "INTRODUCTION", 0.5, 0.15, 12.3, 0.55, 26, "Trebuchet MS", WHITE, bold=True)
+    _text(s, f"This report presents a full Google Search Console audit for {domain} across key areas: "
+             "Sitemap Health, Indexing & Canonicalisation, Rich Results, Image Search, and Search Performance.",
+          0.5, 1.2, 12.3, 0.8, 14, "Calibri", C("#5A6B7A"))
     boxes = [
         ("Property", property_url),
-        ("Pages Inspected", str(len(inspections))),
-        ("Sections", "Sitemaps, Indexing, Performance, Manual Actions, Security"),
+        ("Pages Inspected", f"{len(inspections)} URLs (homepage + top by clicks)"),
+        ("Sections Covered", "Sitemap, Indexing, Rich Results, Image, Performance, Manual Action, Security"),
     ]
     for i, (label, val) in enumerate(boxes):
-        bx = 0.47 + i * 4.3
+        bx = 0.47 + i * 4.2
         _rect(s, bx, 2.5, 4.0, 2.3, "#FFFFFF")
         _text(s, label, bx + 0.3, 2.7, 3.4, 0.4, 14, "Calibri", TEXT_SOFT, bold=True)
         _text(s, val, bx + 0.3, 3.2, 3.4, 1.0, 12, "Calibri", TEXT_DARK)
 
     # --- Slide 3: Sitemap Status ---
-    s = header_slide("Sitemap Status", f"{len(sitemaps)} sitemap(s) found")
+    s = header_slide("SITEMAP SUBMITTED & STATUS",
+        "Checks whether sitemaps are submitted to GSC, whether they are active (not pending), "
+        "and reports any errors or warnings on each sitemap.")
     sitemap_rows = []
     for sm in sitemaps:
         path = sm.get("path", "")
-        sm_type = sm.get("type", "")
-        is_index = "Yes" if sm.get("isSitemapsIndex") else "No"
+        sm_type = _detect_sitemap_type(sm)
         errors = str(sm.get("errors", 0))
         warnings = str(sm.get("warnings", 0))
         pending = "Yes" if sm.get("isPending") else "No"
-        sitemap_rows.append([path, sm_type, is_index, errors, warnings, pending])
-    add_table(s, ["Sitemap URL", "Type", "Index?", "Errors", "Warnings", "Pending"],
+        processed = "Yes" if not sm.get("isPending") else "No"
+        sitemap_rows.append([path, sm_type, processed, pending, errors, warnings])
+    add_table(s, ["Sitemap", "Type", "Processed", "Pending", "Errors", "Warnings"],
               sitemap_rows or [["No sitemaps found", "", "", "", "", ""]],
               [5.3, 1.7, 1.5, 1.4, 1.2, 1.2])
 
     # --- Slide 4: Sitemap Last Read ---
-    s = header_slide("Sitemap Last Read")
+    s = header_slide("SITEMAP LAST READ & URLS DISCOVERED",
+        "Reports the last date Google downloaded each sitemap and how many URLs were discovered. "
+        "A fresh read date indicates healthy crawl activity.")
     lr_rows = []
     for sm in sitemaps:
         contents = sm.get("contents", [])
         submitted = contents[0].get("submitted", "N/A") if contents else "N/A"
-        lr_rows.append([sm.get("path", ""), sm.get("lastSubmitted", "N/A"),
-                        sm.get("lastDownloaded", "N/A"), submitted])
+        lr_rows.append([sm.get("path", ""), _fmt_date(sm.get("lastSubmitted", "N/A")),
+                        _fmt_date(sm.get("lastDownloaded", "N/A")), submitted])
     add_table(s, ["Sitemap URL", "Last Submitted", "Last Downloaded", "URLs Submitted"],
               lr_rows or [["N/A", "N/A", "N/A", "N/A"]],
               [5.5, 2.3, 2.3, 2.2])
@@ -703,7 +952,9 @@ def build_james_full(data, out_path, log_fn=None):
     insp_valid = [i for i in inspections if not i.get("error")]
 
     # Slide 5: URL Indexing
-    s = header_slide("URL Indexing Status", f"{len(insp_valid)} URLs inspected")
+    s = header_slide("URL INDEXING CHECK",
+        "Verifies whether each inspected URL is indexed by Google and confirms its coverage state "
+        "directly from the GSC URL Inspection API.")
     idx_rows = []
     for ins in insp_valid:
         isr = ins.get("indexStatusResult", {})
@@ -714,7 +965,9 @@ def build_james_full(data, out_path, log_fn=None):
               [5.5, 1.5, 2.8, 2.5])
 
     # Slide 6: Canonical Check
-    s = header_slide("Canonical URL Check")
+    s = header_slide("CANONICAL CHECK",
+        "Compares the user-declared canonical URL against the canonical URL Google has chosen. "
+        "A mismatch means Google is indexing a different version than intended.")
     canon_rows = []
     for ins in insp_valid:
         isr = ins.get("indexStatusResult", {})
@@ -728,7 +981,9 @@ def build_james_full(data, out_path, log_fn=None):
               [3.8, 4.0, 4.0, 0.5])
 
     # Slide 7: Robots.txt
-    s = header_slide("Robots.txt Status")
+    s = header_slide("ROBOTS.TXT BLOCKING",
+        "Checks whether Google's crawler is allowed to access each inspected URL. "
+        "BLOCKED means the page cannot be crawled, which prevents indexing.")
     robot_rows = []
     for ins in insp_valid:
         isr = ins.get("indexStatusResult", {})
@@ -738,7 +993,9 @@ def build_james_full(data, out_path, log_fn=None):
               [9.3, 3.0])
 
     # Slide 8: Fetchability
-    s = header_slide("Page Fetchability")
+    s = header_slide("PAGE FETCHABILITY & LAST CRAWLED",
+        "Confirms Google can successfully fetch each page and reports when Google last crawled it. "
+        "Pages not crawled in 90+ days may signal crawl budget or discovery issues.")
     fetch_rows = []
     for ins in insp_valid:
         isr = ins.get("indexStatusResult", {})
@@ -749,7 +1006,9 @@ def build_james_full(data, out_path, log_fn=None):
               [7.5, 2.5, 2.3])
 
     # Slide 9: Crawl Type
-    s = header_slide("Crawl Type")
+    s = header_slide("CRAWL TYPE - MOBILE-FIRST CHECK",
+        "Google uses mobile-first indexing. All inspected pages should show MOBILE as the crawl type. "
+        "DESKTOP crawl is a flag that the page may not be mobile-optimised.")
     crawl_rows = []
     for ins in insp_valid:
         isr = ins.get("indexStatusResult", {})
@@ -759,7 +1018,9 @@ def build_james_full(data, out_path, log_fn=None):
               [9.3, 3.0])
 
     # Slide 10: Rich Results
-    s = header_slide("Rich Results")
+    s = header_slide("ACTIVE RICH RESULTS & SEARCH APPEARANCE",
+        "Identifies rich result types detected in page markup via URL inspection. "
+        "Rich results improve SERP visibility and CTR.")
     rich_rows = []
     for ins in insp_valid:
         rr = ins.get("richResultsResult", {})
@@ -772,7 +1033,7 @@ def build_james_full(data, out_path, log_fn=None):
               [6.0, 4.3, 2.0])
 
     # --- Slide 11: Image Search Performance ---
-    s = header_slide("Image Search Performance")
+    s = header_slide("IMAGE SEARCH PERFORMANCE")
     img_clicks, img_impr, img_ctr, img_pos = _totals(image_perf)
     kpi_cards(s, [
         ("Total Clicks", img_clicks, "#E8A020"),
@@ -786,12 +1047,12 @@ def build_james_full(data, out_path, log_fn=None):
         img_rows.append([keys[0], _fmt_num(q.get("clicks", 0)), _fmt_num(q.get("impressions", 0)),
                          f"{q.get('ctr', 0):.1%}", f"{q.get('position', 0):.1f}"])
     if img_rows:
-        add_table(s, ["#", "Query", "Clicks", "Impressions", "CTR", "Pos"],
-                  [[str(i+1)] + r for i, r in enumerate(img_rows)],
-                  [0.5, 5.3, 1.7, 2.0, 1.7, 1.6], start_y=5.0)
+        add_table(s, ["Top Image Query", "Clicks", "Impressions", "CTR", "Position"],
+                  img_rows,
+                  [5.8, 1.4, 1.8, 1.4, 1.9], start_y=5.0)
 
     # --- Slide 12: Performance Overview ---
-    s = header_slide("Performance Overview", f"{start_date} to {end_date}")
+    s = header_slide("PERFORMANCE OVERVIEW", f"Web search performance totals for the period: {start_date} to {end_date}")
     total_clicks, total_impr, total_ctr, avg_pos = _totals(perf_daily)
     kpi_cards(s, [
         ("Total Clicks", total_clicks, "#E8A020"),
@@ -801,7 +1062,10 @@ def build_james_full(data, out_path, log_fn=None):
     ])
 
     # --- Slide 13: Top Queries ---
-    s = header_slide("Top Search Queries", f"Top {len(top_queries)} queries by clicks")
+    s = header_slide("TOP QUERIES",
+        "Top 10 queries driving impressions and clicks. Flag = below position benchmark "
+        "(pos 4-10 should achieve >3% CTR). Several high-impression queries with low CTR "
+        "represent optimisation opportunities.")
     q_rows = []
     for i, q in enumerate(top_queries):
         keys = q.get("keys", [""])
@@ -813,7 +1077,7 @@ def build_james_full(data, out_path, log_fn=None):
               [0.5, 5.8, 1.4, 1.8, 1.4, 1.4])
 
     # --- Slide 14: Top Pages ---
-    s = header_slide("Top Pages", f"Top {len(top_pages)} pages by clicks")
+    s = header_slide("TOP PAGES", "Top 10 pages by clicks during the period.")
     p_rows = []
     for i, pg in enumerate(top_pages):
         keys = pg.get("keys", [""])
@@ -825,64 +1089,75 @@ def build_james_full(data, out_path, log_fn=None):
               [0.5, 5.8, 1.4, 1.8, 1.4, 1.4])
 
     # --- Slide 15: Keyword Opportunities ---
-    s = header_slide("Keyword Opportunities", "High-impression, low-position queries")
-    opps = sorted([q for q in top_queries if q.get("position", 0) > 10],
+    s = header_slide("KEYWORD OPPORTUNITIES",
+        "Queries with high impression volume but low CTR represent immediate optimisation opportunities. "
+        "Improving title tags and meta descriptions for these terms can unlock clicks without new rankings.")
+    opps = sorted([q for q in top_queries
+                   if q.get("impressions", 0) >= 30 and q.get("ctr", 0) < 0.03],
                   key=lambda x: x.get("impressions", 0), reverse=True)[:10]
     opp_rows = []
     for q in opps:
         keys = q.get("keys", [""])
+        pos = q.get("position", 0)
+        if pos <= 5:
+            opp = "High - Title/Meta tune"
+        elif pos <= 15:
+            opp = "Medium - Content boost"
+        else:
+            opp = "Long-term"
         opp_rows.append([keys[0], _fmt_num(q.get("impressions", 0)),
-                         _fmt_num(q.get("clicks", 0)),
-                         f"{q.get('ctr', 0):.1%}", f"{q.get('position', 0):.1f}"])
-    add_table(s, ["Query", "Impressions", "Clicks", "CTR", "Current Position"],
-              opp_rows or [["No keyword opportunities found", "", "", "", ""]],
-              [5.5, 1.7, 1.4, 1.4, 2.3])
+                         f"{q.get('ctr', 0):.1%}", f"{pos:.1f}", opp])
+    add_table(s, ["Query", "Impressions", "CTR", "Position", "Opportunity"],
+              opp_rows or [["No clear opportunities in the top queries - CTR looks healthy.", "", "", "", ""]],
+              [4.5, 1.7, 1.4, 1.4, 3.3])
 
     # --- Screenshot slides with definitions (matches extension format) ---
+    gsc_statuses = screenshots.get("_statuses", {})
     SHOT_SLIDES = [
-        ("sitemap", "Sitemap Status",
-         "A sitemap is a file on your site that tells Google which pages we should know about. "
-         "It helps search engines crawl your site more efficiently."),
-        ("performance", "Performance",
-         "The Performance report shows clicks, impressions, CTR, and average position from Google Search. "
-         "Use it to understand how your site performs in search results."),
-        ("manual", "Manual Action",
+        ("manual", "MANUAL ACTION",
          "Google issues a manual action against a site when a human reviewer at Google has determined "
          "that pages on the site are not compliant with Google's webmaster quality guidelines."),
-        ("security", "Security Issues",
+        ("security", "SECURITY ISSUES",
          "If a Google evaluation determines that a site was hacked, or exhibits behaviour that could "
          "harm visitors, the Security Issues report will show Google's findings."),
-        ("removals", "Check Any Page Found in Removal",
-         "Checks for any pages that have been temporarily or permanently removed from Google Search results."),
+        ("removals", "REMOVALS",
+         "Checks for active temporary removal requests, outdated content removals, or SafeSearch "
+         "filtering applied to this property."),
     ]
     for shot_key, title, desc in SHOT_SLIDES:
-        s = header_slide(title, desc)
         img_path = screenshots.get(shot_key, "")
-        if img_path and os.path.exists(img_path):
-            from PIL import Image
-            with Image.open(img_path) as im:
-                iw, ih = im.size
-            aspect = iw / ih
-            target_w = Inches(12.33)
-            target_h = Inches(4.6)
-            if aspect > (12.33 / 4.6):
-                fw = target_w; fh = int(target_w / aspect)
-            else:
-                fh = target_h; fw = int(target_h * aspect)
-            cx = Inches(0.5) + (target_w - fw) // 2
-            cy = Inches(2.2) + (target_h - fh) // 2
-            s.shapes.add_picture(img_path, cx, cy, fw, fh)
+        if not (img_path and os.path.exists(img_path)):
+            continue
+        status_text = gsc_statuses.get(shot_key, "")
+        s = header_slide(title, desc)
+        if status_text:
+            color = C("#2E7D32") if "no issue" in status_text.lower() or "no removal" in status_text.lower() else C("#C62828")
+            _text(s, f"Status: {status_text}", 0.5, 1.65, 12.3, 0.4, 16, "Calibri", color, bold=True)
+        from PIL import Image
+        with Image.open(img_path) as im:
+            iw, ih = im.size
+        aspect = iw / ih
+        img_top = 2.4 if status_text else 2.2
+        img_h_avail = 4.4 if status_text else 4.6
+        target_w = Inches(12.33)
+        target_h = Inches(img_h_avail)
+        if aspect > (12.33 / img_h_avail):
+            fw = target_w; fh = int(target_w / aspect)
         else:
-            _text(s, "Screenshot not available. Please check Google Search Console.",
-                  0.5, 3.5, 12.3, 0.5, 16, "Calibri", TEXT_SOFT, align=PP_ALIGN.CENTER)
+            fh = target_h; fw = int(target_h * aspect)
+        cx = Inches(0.5) + (target_w - fw) // 2
+        cy = Inches(img_top) + (target_h - fh) // 2
+        s.shapes.add_picture(img_path, cx, cy, fw, fh)
 
     # --- Slide 19: Thank You ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
     _rect(s, 0, 0, 13.33, 7.5, "#165060")
     _rect(s, 0, 0, 0.4, 7.5, "#C9A84C")
     _text(s, "THANK YOU", 1.2, 2.8, 10, 1.0, 48, "Trebuchet MS", WHITE, bold=True)
-    _rect(s, 1.2, 4.0, 5, 0.06, "#C9A84C")
-    _text(s, domain, 1.2, 4.3, 10, 0.5, 18, "Trebuchet MS", GOLD)
+    _rect(s, 1.2, 4.0, 4, 0.06, "#C9A84C")
+    _text(s, f"GSC Audit Report - {domain}", 1.2, 4.3, 10, 0.5, 18, "Calibri", GOLD)
+    _text(s, "For questions or follow-up analysis, refer to your Google Search Console dashboard.",
+          1.2, 6.5, 10, 0.4, 12, "Calibri", C("#E8F4F6"))
 
     prs.save(out_path)
     log_fn(f"  James Full report saved: {os.path.basename(out_path)}")
@@ -939,7 +1214,7 @@ def build_james_short(data, out_path, log_fn=None):
             cy = Inches(2.7) + (target_h - fh) // 2
             s.shapes.add_picture(img_path, cx, cy, fw, fh)
         else:
-            _text(s, "Screenshot not available", 3, 4.5, 7, 0.5, 18, "Calibri",
+            _text(s, "Screenshot not captured", 3, 4.5, 7, 0.5, 18, "Calibri",
                   TEAL_MD, align=PP_ALIGN.CENTER)
         return s
 
@@ -972,6 +1247,7 @@ def build_james_short(data, out_path, log_fn=None):
     _rect(s, 1.717, 6.457, 6.625, 0.05, "#F0CDA1")
 
     # Slides 3-7: Screenshots
+    gsc_statuses = screenshots.get("_statuses", {})
     screenshot_slide("SITEMAP",
         "A sitemap is a file on your site that tells Google which pages we should know about.",
         "sitemap")
@@ -981,14 +1257,14 @@ def build_james_short(data, out_path, log_fn=None):
     screenshot_slide("MANUAL ACTION",
         "Google issues a manual action against a site when a human reviewer at Google has determined "
         "that pages on the site are not compliant with Google's webmaster quality guidelines.",
-        "manual")
+        "manual", status_text=gsc_statuses.get("manual", ""))
     screenshot_slide("SECURITY ISSUE",
         "If a Google evaluation determines that a site was hacked, or exhibits behaviour that could "
         "harm visitors, the Security Issues report will show Google's finding.",
-        "security")
+        "security", status_text=gsc_statuses.get("security", ""))
     screenshot_slide("CHECK ANY PAGE FOUND IN REMOVAL",
         "Checks for any pages that have been temporarily or permanently removed from Google Search results.",
-        "removals")
+        "removals", status_text=gsc_statuses.get("removals", ""))
 
     # Slide 8: Thank You
     s = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1036,8 +1312,11 @@ def build_sigma(data, out_path, log_fn=None):
             _text(s, desc, 0.689, 1.1, 12.0, 0.4, 16, "Calibri", INK_SOFT)
         return s
 
-    def screenshot_slide(title, shot_key, desc=""):
+    def screenshot_slide(title, shot_key, desc="", status_text=""):
         s = header_slide(title, desc)
+        if status_text:
+            color = GREEN if "no issue" in status_text.lower() or "no removal" in status_text.lower() else RED
+            _text(s, f"Status: {status_text}", 0.689, 1.65, 12.0, 0.4, 16, "Calibri", color, bold=True)
         _rect(s, 0.38, 2.55, 12.57, 4.65, "#E6C069")
         _rect(s, 0.42, 2.59, 12.49, 4.57, "#EFEDE3")
         img_path = screenshots.get(shot_key, "")
@@ -1053,7 +1332,7 @@ def build_sigma(data, out_path, log_fn=None):
             cy = Inches(2.7) + (th - fh) // 2
             s.shapes.add_picture(img_path, cx, cy, fw, fh)
         else:
-            _text(s, "Screenshot not available", 3, 4.5, 7, 0.5, 18, "Calibri",
+            _text(s, "Screenshot not captured", 3, 4.5, 7, 0.5, 18, "Calibri",
                   INK_SOFT, align=PP_ALIGN.CENTER)
         return s
 
@@ -1098,7 +1377,7 @@ def build_sigma(data, out_path, log_fn=None):
           INK_SOFT, align=PP_ALIGN.CENTER)
 
     # Slide 2: Introduction
-    s = header_slide("Introduction")
+    s = header_slide("INTRODUCTION")
     _rect(s, 0.689, 1.5, 0.12, 4.5, "#E6C069")
     _text(s, "Reviewing the Search Console for the website is one of the major aspects of our work. "
              "We check the webmaster for all the important parameters — traffic & performance, "
@@ -1120,7 +1399,7 @@ def build_sigma(data, out_path, log_fn=None):
                        _fmt_num(q.get("impressions", 0)),
                        f"{q.get('ctr', 0):.1%}", f"{q.get('position', 0):.1f}"])
     data_table(s, ["Query", "Clicks", "Impressions", "CTR", "Position"],
-               q_rows or [["No data", "", "", "", ""]],
+               q_rows or [["No query data available", "-", "-", "-", "-"]],
                [6.05, 1.4, 1.8, 1.3, 1.4])
 
     # Slide 5: Top Pages table
@@ -1132,20 +1411,24 @@ def build_sigma(data, out_path, log_fn=None):
                         _fmt_num(pg.get("impressions", 0)),
                         f"{pg.get('ctr', 0):.1%}", f"{pg.get('position', 0):.1f}"])
     data_table(s, ["Page", "Clicks", "Impressions", "CTR", "Position"],
-               pg_rows or [["No data", "", "", "", ""]],
+               pg_rows or [["No page data available", "-", "-", "-", "-"]],
                [6.05, 1.4, 1.8, 1.3, 1.4])
 
     # Slides 6-9: Screenshots
+    gsc_statuses = screenshots.get("_statuses", {})
     screenshot_slide("SITEMAP", "sitemap",
         "A sitemap is a file on your site that tells Google which pages we should know about.")
     screenshot_slide("MANUAL ACTION", "manual",
         "Google issues a manual action against a site when a human reviewer at Google has determined "
-        "that pages on the site are not compliant with Google's webmaster quality guidelines.")
+        "that pages on the site are not compliant with Google's webmaster quality guidelines.",
+        status_text=gsc_statuses.get("manual", ""))
     screenshot_slide("SECURITY ISSUE", "security",
         "If a Google evaluation determines that a site was hacked, or exhibits behaviour that could "
-        "harm visitors, the Security Issues report will show Google's findings.")
+        "harm visitors or their computer, the Security Issues report will show Google's finding.",
+        status_text=gsc_statuses.get("security", ""))
     screenshot_slide("CHECK ANY PAGE FOUND IN REMOVAL", "removals",
-        "Checks for any pages that have been temporarily or permanently removed from Google Search results.")
+        "Checks for any pages that have been temporarily or permanently removed from Google Search results.",
+        status_text=gsc_statuses.get("removals", ""))
 
     # Slide 10: Thank You
     s = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1194,8 +1477,11 @@ def build_omega(data, out_path, log_fn=None):
             _text(s, desc, 0.5, 1.5, 12.3, 0.4, 14, "Calibri", TEXT_SOFT, italic=True)
         return s
 
-    def screenshot_slide(title, shot_key, desc=""):
+    def screenshot_slide(title, shot_key, desc="", status_text=""):
         s = header_slide(title, desc)
+        if status_text:
+            color = STATUS_OK if "no issue" in status_text.lower() or "no removal" in status_text.lower() else C("#C62828")
+            _text(s, f"Status: {status_text}", 0.5, 1.85, 12.3, 0.35, 16, "Calibri", color, bold=True)
         # White card frame
         _rect(s, 0.7, 2.15, 11.93, 4.85, "#FFFFFF")
         img_path = screenshots.get(shot_key, "")
@@ -1211,7 +1497,7 @@ def build_omega(data, out_path, log_fn=None):
             cy = Inches(2.25) + (th - fh) // 2
             s.shapes.add_picture(img_path, cx, cy, fw, fh)
         else:
-            _text(s, "Screenshot not available", 3, 4.5, 7, 0.5, 18, "Calibri",
+            _text(s, "Screenshot not captured.", 3, 4.5, 7, 0.5, 18, "Calibri",
                   TEXT_SOFT, align=PP_ALIGN.CENTER)
         return s
 
@@ -1223,7 +1509,7 @@ def build_omega(data, out_path, log_fn=None):
     _text(s, "WEBMASTER AUDIT REPORT", 0, 2.8, 13.33, 0.8, 40, "Georgia", TEXT_DARK,
           bold=True, align=PP_ALIGN.CENTER)
     _rect(s, 5.66, 3.8, 2.0, 0.06, "#B08D57")
-    _text(s, domain, 0, 4.2, 13.33, 0.5, 24, "Georgia", TEXT_SOFT,
+    _text(s, domain, 0, 4.2, 13.33, 0.5, 24, "Calibri", TEXT_DARK,
           italic=True, align=PP_ALIGN.CENTER)
 
     # Slide 2: Introduction
@@ -1236,18 +1522,25 @@ def build_omega(data, out_path, log_fn=None):
     _text(s, f"Domain: {domain}", 0.5, 4.5, 12.3, 0.5, 18, "Calibri", NAVY, bold=True)
 
     # Slides 3-6: Screenshots
+    gsc_statuses = screenshots.get("_statuses", {})
     screenshot_slide("Check Error in Sitemap", "sitemap",
         "A sitemap is a record on your site that uncovers to Google which pages we should consider.")
     screenshot_slide("Check Manual Action", "manual",
-        "Manual action is a penalty imposed by Google for not following the webmaster guidelines.")
+        "Manual action is a penalty imposed by Google for not following the webmaster guidelines.",
+        status_text=gsc_statuses.get("manual", ""))
     screenshot_slide("Check Performance Issue", "perf",
         "The Performance Report shows important metrics about how your site performs in Google Search Results.")
     screenshot_slide("Check Security Issue", "security",
-        "The Security Issues report in Search Console alerts webmasters about malicious behaviour on their websites.")
+        "The Security Issues report in Search Console alerts webmasters about malicious behaviour on their websites.",
+        status_text=gsc_statuses.get("security", ""))
 
     # Slide 7: Other Issues
     s = header_slide("Check Other Issue if in Webmaster",
         "Reviewed the Removals report and any additional Search Console alerts for the property.")
+    removals_status = gsc_statuses.get("removals", "")
+    if removals_status:
+        color = STATUS_OK if "no removal" in removals_status.lower() else C("#C62828")
+        _text(s, f"Status: {removals_status}", 0.5, 1.85, 12.3, 0.35, 16, "Calibri", color, bold=True)
     img_path = screenshots.get("removals", "")
     if img_path and os.path.exists(img_path):
         _rect(s, 0.7, 2.15, 11.93, 4.85, "#FFFFFF")
@@ -1274,7 +1567,7 @@ def build_omega(data, out_path, log_fn=None):
     _rect(s, 0, 3.4, 13.33, 0.04, "#B08D57")
     _text(s, "THANK YOU", 1.5, 2.5, 10.3, 1.0, 56, "Georgia", BRONZE_SOFT,
           bold=True, align=PP_ALIGN.CENTER, char_spacing=8)
-    _text(s, domain, 1.5, 3.7, 10.3, 0.5, 18, "Georgia", WHITE, align=PP_ALIGN.CENTER)
+    _text(s, domain, 1.5, 3.7, 10.3, 0.5, 18, "Calibri", WHITE, align=PP_ALIGN.CENTER)
 
     prs.save(out_path)
     log_fn(f"  Omega report saved: {os.path.basename(out_path)}")
@@ -1319,8 +1612,11 @@ def build_neon(data, out_path, log_fn=None):
             _text(s, desc, 0.5, 1.45, 12.3, 0.4, 13, "Calibri", TEXT_SOFT, italic=True)
         return s
 
-    def screenshot_slide(title, shot_key, desc="", accent_hex="#B0BEC5"):
+    def screenshot_slide(title, shot_key, desc="", accent_hex="#B0BEC5", status_text=""):
         s = header_slide(title, desc)
+        if status_text:
+            color = C("#2E7D32") if "no issue" in status_text.lower() or "no removal" in status_text.lower() else C("#C62828")
+            _text(s, f"Status: {status_text}", 0.5, 1.85, 12.3, 0.35, 16, "Calibri", color, bold=True)
         # Frame
         _rect(s, 0.5, 2.1, 12.33, 4.85, "#FFFFFF")
         _rect(s, 0.5, 2.1, 12.33, 0.1, accent_hex)
@@ -1337,7 +1633,7 @@ def build_neon(data, out_path, log_fn=None):
             cy = Inches(2.25) + (th - fh) // 2
             s.shapes.add_picture(img_path, cx, cy, fw, fh)
         else:
-            _text(s, "Screenshot not available", 3, 4.5, 7, 0.5, 18, "Calibri",
+            _text(s, "Screenshot not captured", 3, 4.5, 7, 0.5, 18, "Calibri",
                   TEXT_SOFT, align=PP_ALIGN.CENTER)
         return s
 
@@ -1371,7 +1667,7 @@ def build_neon(data, out_path, log_fn=None):
     # Domain card
     _rect(s, 0.5, 3.5, 12.33, 0.8, "#0F1F2E")
     _rect(s, 0.5, 3.5, 0.12, 0.8, "#B0BEC5")
-    _text(s, domain, 0.8, 3.55, 11.8, 0.7, 16, "Calibri", WHITE)
+    _text(s, f"Domain: {domain}", 0.8, 3.55, 11.8, 0.7, 16, "Calibri", WHITE)
     # Section preview boxes
     sections = [("Sitemap", "#B0BEC5"), ("Manual Action", "#FFC100"),
                 ("Performance", "#CFD8DC"), ("Security", "#FFD44D")]
@@ -1382,27 +1678,47 @@ def build_neon(data, out_path, log_fn=None):
         _text(s, label, bx + 0.2, 5.1, 2.5, 0.4, 13, "Calibri", TEXT_MID, bold=True)
 
     # Slides 3-6: Screenshots
+    gsc_statuses = screenshots.get("_statuses", {})
     screenshot_slide("Sitemap Check", "sitemap",
         "A sitemap guides Google on which pages to crawl and index. We review it for errors or missing URLs.",
         "#B0BEC5")
     screenshot_slide("Manual Action Check", "manual",
         "A manual action is a Google penalty for violating webmaster guidelines. This should always be clean.",
-        "#FFC100")
+        "#FFC100", status_text=gsc_statuses.get("manual", ""))
     screenshot_slide("Performance Check", "perf",
         "The Performance report shows clicks, impressions, CTR, and average position from Google Search.",
         "#CFD8DC")
     screenshot_slide("Security Issues Check", "security",
         "Security issues alert about hacked content, malware, or deceptive pages that may harm users.",
-        "#FFD44D")
+        "#FFD44D", status_text=gsc_statuses.get("security", ""))
 
     # Slide 7: Other Webmaster Checks
     s = header_slide("Other Webmaster Checks",
         "Reviewed the Removals report and any additional Search Console alerts for this property.")
-    _rect(s, 4.16, 3.0, 5.0, 1.7, "#0F1F2E")
-    _rect(s, 4.16, 3.0, 5.0, 0.08, "#B0BEC5")
-    _rect(s, 4.16, 4.62, 5.0, 0.08, "#FFC100")
-    _text(s, "NOT FOUND", 4.16, 3.0, 5.0, 1.7, 40, "Trebuchet MS", TEAL,
-          align=PP_ALIGN.CENTER, char_spacing=8)
+    removals_status = gsc_statuses.get("removals", "")
+    if removals_status:
+        color = C("#2E7D32") if "no removal" in removals_status.lower() else C("#C62828")
+        _text(s, f"Status: {removals_status}", 0.5, 1.85, 12.3, 0.35, 16, "Calibri", color, bold=True)
+    img_path = screenshots.get("removals", "")
+    if img_path and os.path.exists(img_path):
+        _rect(s, 0.5, 2.1, 12.33, 4.85, "#FFFFFF")
+        _rect(s, 0.5, 2.1, 12.33, 0.1, "#B0BEC5")
+        from PIL import Image
+        with Image.open(img_path) as im:
+            iw, ih = im.size
+        aspect = iw / ih
+        tw = Inches(12.21); th = Inches(4.65)
+        if aspect > (12.21/4.65): fw = tw; fh = int(tw / aspect)
+        else: fh = th; fw = int(th * aspect)
+        cx = Inches(0.56) + (tw - fw) // 2
+        cy = Inches(2.25) + (th - fh) // 2
+        s.shapes.add_picture(img_path, cx, cy, fw, fh)
+    else:
+        _rect(s, 4.16, 3.0, 5.0, 1.7, "#0F1F2E")
+        _rect(s, 4.16, 3.0, 5.0, 0.08, "#B0BEC5")
+        _rect(s, 4.16, 4.62, 5.0, 0.08, "#FFC100")
+        _text(s, "NOT FOUND", 4.16, 3.0, 5.0, 1.7, 40, "Trebuchet MS", TEAL,
+              align=PP_ALIGN.CENTER, char_spacing=8)
     _text(s, "No additional issues detected in Search Console for this property.",
           0.7, 5.0, 11.9, 0.5, 14, "Calibri", TEXT_MID, align=PP_ALIGN.CENTER)
 
@@ -1410,15 +1726,15 @@ def build_neon(data, out_path, log_fn=None):
     s = prs.slides.add_slide(prs.slide_layouts[6])
     _rect(s, 0, 0, 13.33, 7.5, "#0F1F2E")
     _rect(s, 13.15, 0, 0.18, 7.5, "#B0BEC5")
-    # Gold bottom-left L
-    _rect(s, 0, 7.35, 1.5, 0.15, "#FFC100")
-    _rect(s, 0, 6.0, 0.15, 1.5, "#FFC100")
+    # Gold top-left L
+    _rect(s, 0, 0, 1.5, 0.15, "#FFC100")
+    _rect(s, 0, 0, 0.15, 1.5, "#FFC100")
     _text(s, "THANK", 0.55, 1.8, 12.5, 1.2, 72, "Trebuchet MS", TEXT_LIGHT, bold=True,
           align=PP_ALIGN.CENTER)
     _text(s, "YOU", 0.55, 2.9, 12.5, 1.2, 72, "Trebuchet MS", TEAL, bold=True,
           align=PP_ALIGN.CENTER)
     _rect(s, 5.16, 4.3, 3.0, 0.05, "#FFC100")
-    _text(s, domain, 0.55, 4.5, 12.5, 0.55, 20, "Trebuchet MS", GOLD_SOFT,
+    _text(s, domain, 0.55, 4.5, 12.5, 0.55, 20, "Calibri", GOLD_SOFT,
           align=PP_ALIGN.CENTER)
 
     prs.save(out_path)

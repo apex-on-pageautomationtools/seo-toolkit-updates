@@ -197,6 +197,17 @@ def save_config(cfg):
 
 CONFIG = load_config()
 
+# Load custom cities into engine dicts so they survive restarts
+for _disp, _canon in CONFIG.get("custom_cities", {}).items():
+    engine.CITY_CANONICAL[_disp] = _canon
+    # Coordinates are stored separately if present
+    _cc = CONFIG.get("custom_city_coords", {}).get(_disp)
+    if _cc and isinstance(_cc, (list, tuple)) and len(_cc) == 2:
+        try:
+            engine.CITY_COORDS[_disp] = (float(_cc[0]), float(_cc[1]))
+        except (ValueError, TypeError):
+            pass
+
 # Allow config to override downloads folder
 if CONFIG.get("downloads_folder") and os.path.isdir(CONFIG["downloads_folder"]):
     DOWNLOADS_DIR = CONFIG["downloads_folder"]
@@ -857,8 +868,8 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     offset = (page_num - 1) * 10
                     page_matches = find_domain_in_page(sess.driver, domain_clean, page_offset=offset)
                     if page_matches:
-                        add_log(f"  → Found at position {page_matches[0]['position']}")
                         all_matches.extend(page_matches)
+                        add_log(f"  Found at position {page_matches[0]['position']}")
                     # stop_on_found: exit pagination as soon as domain appears
                     if search_mode == "stop_on_found" and all_matches:
                         break
@@ -1008,7 +1019,7 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
                         with state_lock:
                             state["vpn_location"] = cur_loc
                         if initial_ip and cur_loc != initial_ip:
-                            add_log(f"⚠ VPN location changed: {initial_ip} → {cur_loc}")
+                            add_log(f"[warn] VPN location changed: {initial_ip} -> {cur_loc}")
 
             with state_lock:
                 state["current_keyword"] = kw
@@ -1312,7 +1323,7 @@ def run_backlink_analysis(urls, domain, delay, headless, country, proxies,
                 state["status"] = "running"
             add_log(f"Checking backlink '{url}' ({i+1}/{len(urls)})")
             result = backlink_one(sess, url, domain, check_da=check_da)
-            add_log(f"  → domain {'found' if result['domain_found']=='Yes' else 'not found'}, "
+            add_log(f"  domain {'found' if result['domain_found']=='Yes' else 'not found'}, "
                     f"meta: {result['meta_robots']}, link: {result['link_type']}")
             with state_lock:
                 state["results"].append({
@@ -1374,6 +1385,11 @@ def _proxies_from_request(data):
 def api_auth_check():
     """Check if user is authenticated (saved token)."""
     result = auth.check_saved_auth()
+    if result.get("status") == "approved":
+        result["accounts"] = auth.list_logged_in()
+        result["api_configured"] = bool(auth._get_api_url())
+    elif not auth._get_api_url():
+        result = {"status": "no_api_url", "message": "User Auth URL not configured. Ask your admin to add it in Admin Settings."}
     return jsonify(result)
 
 @app.route("/api/auth/login", methods=["POST"])
@@ -1384,13 +1400,18 @@ def api_auth_login():
     if not email or not password:
         return jsonify({"status": "error", "message": "Email and password required."}), 400
     result = auth.login(email, password)
-    if result.get("status") == "approved":
-        auth._save_full_token(email, password, auth.get_mac_address())
     return jsonify(result)
 
 @app.route("/api/auth/logout", methods=["POST"])
 def api_auth_logout():
-    return jsonify(auth.logout())
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip() or None
+    return jsonify(auth.logout(email))
+
+@app.route("/api/auth/accounts")
+def api_auth_accounts():
+    """List all logged-in accounts on this device."""
+    return jsonify({"accounts": auth.list_logged_in()})
 
 @app.route("/api/auth/version")
 def api_auth_version():
@@ -1555,7 +1576,133 @@ def api_reset():
 @app.route("/api/cities")
 def api_cities():
     cities = [{"name": k} for k in engine.CITY_CANONICAL]
+    # Merge custom cities from CONFIG
+    custom = CONFIG.get("custom_cities", {})
+    custom_names = set()
+    for display_name in custom:
+        custom_names.add(display_name)
+        if display_name not in engine.CITY_CANONICAL:
+            cities.append({"name": display_name})
     return jsonify(cities)
+
+# --------------------------------------------------------------------------- #
+# Admin — City Management
+# --------------------------------------------------------------------------- #
+@app.route("/api/admin/cities")
+def api_admin_cities():
+    custom = CONFIG.get("custom_cities", {})
+    builtin = list(engine.CITY_CANONICAL.keys())
+    return jsonify({"custom": custom, "builtin": builtin})
+
+@app.route("/api/admin/add_city", methods=["POST"])
+def api_admin_add_city():
+    data = request.get_json(silent=True) or {}
+    display = data.get("display", "").strip()
+    canonical = data.get("canonical", "").strip()
+    lat = data.get("lat")
+    lng = data.get("lng")
+    if not display or not canonical:
+        return jsonify({"error": "Display name and canonical name are required"})
+    custom = CONFIG.setdefault("custom_cities", {})
+    custom[display] = canonical
+    # Register in engine dicts so ranking/UULE work immediately
+    engine.CITY_CANONICAL[display] = canonical
+    if lat is not None and lng is not None:
+        try:
+            lat_f, lng_f = float(lat), float(lng)
+            engine.CITY_COORDS[display] = (lat_f, lng_f)
+            CONFIG.setdefault("custom_city_coords", {})[display] = [lat_f, lng_f]
+        except (ValueError, TypeError):
+            pass
+    save_config(CONFIG)
+    return jsonify({"ok": True, "display": display})
+
+@app.route("/api/admin/remove_city", methods=["POST"])
+def api_admin_remove_city():
+    data = request.get_json(silent=True) or {}
+    display = data.get("display", "").strip()
+    if not display:
+        return jsonify({"error": "Display name required"})
+    custom = CONFIG.get("custom_cities", {})
+    if display in custom:
+        del custom[display]
+        coords = CONFIG.get("custom_city_coords", {})
+        coords.pop(display, None)
+        engine.CITY_CANONICAL.pop(display, None)
+        engine.CITY_COORDS.pop(display, None)
+        save_config(CONFIG)
+    return jsonify({"ok": True})
+
+@app.route("/api/admin/upload_cities", methods=["POST"])
+def api_admin_upload_cities():
+    """Bulk-add cities from CSV text.  Expected columns:
+       City, Country, Latitude, Longitude [, Canonical]
+    Canonical is optional — when omitted it is generated as "City,Country".
+    Display name is built as "City, CC" (e.g. "Perth, AU")."""
+    import csv, io
+    data = request.get_json(silent=True) or {}
+    csv_text = data.get("csv", "").strip()
+    if not csv_text:
+        return jsonify({"error": "No CSV data provided"})
+    reader = csv.DictReader(io.StringIO(csv_text))
+    # Normalise header names to lowercase for flexible matching
+    if not reader.fieldnames:
+        return jsonify({"error": "CSV appears empty or has no header row"})
+    header_map = {h.strip().lower(): h for h in reader.fieldnames}
+    city_col = header_map.get("city")
+    country_col = header_map.get("country")
+    lat_col = header_map.get("latitude") or header_map.get("lat")
+    lng_col = header_map.get("longitude") or header_map.get("lng") or header_map.get("lon")
+    canonical_col = header_map.get("canonical")
+    if not city_col or not country_col:
+        return jsonify({"error": "CSV must have at least 'City' and 'Country' columns"})
+    custom = CONFIG.setdefault("custom_cities", {})
+    added = []
+    skipped = []
+    for i, row in enumerate(reader, start=2):
+        city_name = (row.get(city_col) or "").strip()
+        country = (row.get(country_col) or "").strip()
+        if not city_name or not country:
+            skipped.append(f"Row {i}: missing city or country")
+            continue
+        display = f"{city_name}, {country}"
+        # Canonical: use provided value or generate "City,Country"
+        canonical = ""
+        if canonical_col:
+            canonical = (row.get(canonical_col) or "").strip()
+        if not canonical:
+            canonical = f"{city_name},{country}"
+        custom[display] = canonical
+        engine.CITY_CANONICAL[display] = canonical
+        # Coordinates (optional)
+        if lat_col and lng_col:
+            lat_s = (row.get(lat_col) or "").strip()
+            lng_s = (row.get(lng_col) or "").strip()
+            if lat_s and lng_s:
+                try:
+                    lat_f, lng_f = float(lat_s), float(lng_s)
+                    engine.CITY_COORDS[display] = (lat_f, lng_f)
+                    CONFIG.setdefault("custom_city_coords", {})[display] = [lat_f, lng_f]
+                except (ValueError, TypeError):
+                    pass
+        added.append(display)
+    save_config(CONFIG)
+    return jsonify({"ok": True, "added": added, "added_count": len(added),
+                    "skipped": skipped, "skipped_count": len(skipped)})
+
+@app.route("/api/admin/sample_cities_csv")
+def api_admin_sample_cities_csv():
+    """Return a sample CSV file for bulk city upload."""
+    sample = (
+        "City,Country,Latitude,Longitude,Canonical\r\n"
+        "Perth,AU,-31.9505,115.8605,\"Perth,Western Australia,Australia\"\r\n"
+        "Sydney,AU,-33.8688,151.2093,\"Sydney,New South Wales,Australia\"\r\n"
+        "Melbourne,AU,-37.8136,144.9631,\"Melbourne,Victoria,Australia\"\r\n"
+        "Toronto,CA,43.6532,-79.3832,\"Toronto,Ontario,Canada\"\r\n"
+        "Vancouver,CA,49.2827,-123.1207,\"Vancouver,British Columbia,Canada\"\r\n"
+    )
+    return Response(sample, mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=sample_cities.csv"})
 
 @app.route("/api/screenshot/<path:filename>")
 def api_screenshot(filename):
@@ -1609,6 +1756,8 @@ def api_config():
         return jsonify({"saved": True, "config": safe})
     cfg = {k: v for k, v in CONFIG.items() if k not in SENSITIVE_KEYS}
     cfg["downloads_folder"] = DOWNLOADS_DIR
+    cfg["auth_api_url"] = CONFIG.get("auth_api_url", "")
+    cfg["user_auth_url"] = CONFIG.get("user_auth_url", "")
     return jsonify(cfg)
 
 @app.route("/api/export/csv")
@@ -1860,12 +2009,15 @@ def _run_health_audit(domain, fmt, target_pages, no_capture, headless, browser_n
     driver = None
 
     try:
-        # Fire Sucuri + PageSpeed immediately (they don't need the browser)
         import concurrent.futures
         slow_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-        _log("Starting Sucuri & PageSpeed in background...")
+        if psi_api_key:
+            _log("Starting Sucuri & PageSpeed in background...")
+            fut_psi = slow_executor.submit(health_audit.check_pagespeed, domain, psi_api_key)
+        else:
+            _log("Starting Sucuri in background (PageSpeed skipped)...")
+            fut_psi = None
         fut_sucuri = slow_executor.submit(health_audit.check_sucuri, domain)
-        fut_psi = slow_executor.submit(health_audit.check_pagespeed, domain, psi_api_key)
 
         _log("[0/3] Launching browser for Google checks" + (" & screenshots..." if not no_capture else "..."))
         profile = pick_profile()
@@ -1879,7 +2031,7 @@ def _run_health_audit(domain, fmt, target_pages, no_capture, headless, browser_n
             domain, fmt=fmt, target_pages=target_pages,
             out_dir=out_folder, driver=driver, no_capture=no_capture,
             log_fn=_log, psi_api_key=psi_api_key,
-            prefetched_futures={"sucuri": fut_sucuri, "psi": fut_psi},
+            prefetched_futures={"sucuri": fut_sucuri, **({"psi": fut_psi} if fut_psi else {})},
         )
 
         with ha_lock:
@@ -1922,7 +2074,10 @@ def api_ha_start():
     if targets_raw:
         target_pages = [l.strip() for l in targets_raw.splitlines() if l.strip()]
 
+    include_psi = bool(data.get("include_psi", False))
     psi_key = CONFIG.get("psi_api_key", "").strip() or None
+    if not include_psi:
+        psi_key = None
     t = threading.Thread(target=_run_health_audit,
                          args=(domain, fmt, target_pages, no_capture, headless, browser_name, psi_key),
                          daemon=True)
@@ -2106,7 +2261,7 @@ def api_gsc_start():
         return jsonify({"error": "Please connect a Google account first."}), 400
 
     fmt = data.get("format", "james")
-    headless = data.get("headless", False)
+    headless = data.get("headless", True)
     browser_name = data.get("browser", "edge")
 
     t = threading.Thread(target=_run_gsc_audit,
@@ -2149,6 +2304,99 @@ def api_gsc_download():
 def api_gsc_formats():
     return jsonify([{"value": k, "label": v["label"]}
                     for k, v in gsc_audit.GSC_FORMATS.items()])
+
+
+# --------------------------------------------------------------------------- #
+# GSC Browser Sessions
+# --------------------------------------------------------------------------- #
+
+_session_drivers = {}
+
+@app.route("/api/gsc/sessions")
+def api_gsc_sessions():
+    return jsonify(gsc_audit.list_sessions())
+
+
+@app.route("/api/gsc/sessions/create", methods=["POST"])
+def api_gsc_session_create():
+    data = request.get_json(silent=True) or {}
+    label = (data.get("label") or "").strip() or None
+    s = gsc_audit.create_session(label)
+    return jsonify(s)
+
+
+@app.route("/api/gsc/sessions/<sid>/launch", methods=["POST"])
+def api_gsc_session_launch(sid):
+    data = request.get_json(silent=True) or {}
+    browser_name = data.get("browser", "edge")
+    if sid in _session_drivers:
+        try:
+            _session_drivers[sid].current_url
+            return jsonify({"status": "already_open", "session_id": sid})
+        except Exception:
+            _session_drivers.pop(sid, None)
+    try:
+        driver = gsc_audit.launch_session_browser(sid, browser_pref=browser_name)
+        _session_drivers[sid] = driver
+        return jsonify({"status": "launched", "session_id": sid,
+                        "message": "Browser opened — log into your Google accounts, then click 'Done' when finished."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/gsc/sessions/<sid>/done", methods=["POST"])
+def api_gsc_session_done(sid):
+    driver = _session_drivers.pop(sid, None)
+    if not driver:
+        return jsonify({"error": "No open browser for this session."}), 400
+    try:
+        result = gsc_audit.scan_session_cookies(sid, driver=driver)
+        return jsonify({"status": "scanned", **result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+
+@app.route("/api/gsc/sessions/<sid>/remove", methods=["POST"])
+def api_gsc_session_remove(sid):
+    driver = _session_drivers.pop(sid, None)
+    if driver:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+    gsc_audit.remove_session(sid)
+    return jsonify({"status": "removed"})
+
+
+@app.route("/api/gsc/sessions/<sid>/refresh", methods=["POST"])
+def api_gsc_session_refresh(sid):
+    """Re-scan cookies: launch headless, check myaccount page, detect emails."""
+    data = request.get_json(silent=True) or {}
+    browser_name = data.get("browser", "edge")
+    driver = None
+    try:
+        import engine as _eng
+        profile_dir = os.path.join(gsc_audit._sessions_dir(), sid, "chrome_profile")
+        driver = _eng.build_driver(
+            profile_dir, proxy=None, headless=True,
+            country="us", extra_extensions=[],
+            browser_pref=browser_name,
+        )
+        result = gsc_audit.scan_session_cookies(sid, driver=driver)
+        return jsonify({"status": "refreshed", **result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
 
 
 # --------------------------------------------------------------------------- #
@@ -2201,27 +2449,29 @@ def api_activity_log():
 # --------------------------------------------------------------------------- #
 @app.route("/api/auth/is_admin")
 def api_auth_is_admin():
-    token = auth._load_token()
-    if not token or not token.get("email"):
+    email = request.args.get("email", "").strip()
+    accounts = auth.list_logged_in()
+    if not accounts:
         return jsonify({"is_admin": False})
-    result = auth._api_call({"action": "is_admin", "email": token["email"]})
+    if not email:
+        email = accounts[0]["email"]
+    result = auth._api_call({"action": "is_admin", "email": email})
     is_admin = result.get("is_admin", False)
-    if is_admin and not token.get("is_admin"):
-        token["is_admin"] = True
-        try:
-            with open(auth.AUTH_FILE, "w", encoding="utf-8") as _f:
-                json.dump(token, _f)
-        except Exception:
-            pass
+    if is_admin:
+        accts = auth._load_accounts()
+        if email in accts:
+            accts[email]["is_admin"] = True
+            auth._save_accounts(accts)
     elif result.get("error"):
-        is_admin = token.get("is_admin", False)
+        accts = auth._load_accounts()
+        is_admin = accts.get(email, {}).get("is_admin", False)
     return jsonify({"is_admin": is_admin})
 
 # --------------------------------------------------------------------------- #
 # Admin config (Apps Script URL, admin key, API key sync)
 # --------------------------------------------------------------------------- #
 SENSITIVE_KEYS = {"psi_api_key", "gsc_client_id", "gsc_client_secret",
-                  "admin_key", "auth_api_url", "gsc_projects"}
+                  "admin_key", "auth_api_url", "user_auth_url", "gsc_projects"}
 
 @app.route("/api/admin/save_config", methods=["POST"])
 def api_admin_save_config():
@@ -2229,6 +2479,8 @@ def api_admin_save_config():
     data = request.get_json(silent=True) or {}
     if "auth_api_url" in data:
         CONFIG["auth_api_url"] = data["auth_api_url"].strip()
+    if "user_auth_url" in data:
+        CONFIG["user_auth_url"] = data["user_auth_url"].strip()
     if "admin_key" in data:
         CONFIG["admin_key"] = data["admin_key"].strip()
     save_config(CONFIG)
@@ -2285,6 +2537,47 @@ def api_gsc_projects():
     projects = CONFIG.get("gsc_projects", [])
     return jsonify([{"name": p.get("name", ""), "properties": p.get("properties", "")}
                     for p in projects])
+
+@app.route("/api/gsc/check-for-domain")
+def api_gsc_check_for_domain():
+    """Check if GSC is connected locally for a domain; if not, check sheet mapping."""
+    domain = request.args.get("domain", "").strip().lower().replace("www.", "")
+    if not domain:
+        return jsonify({"error": "No domain"})
+    accounts = gsc_audit.list_accounts()
+    connected = [a for a in accounts if a.get("has_refresh")]
+    for acct in connected:
+        try:
+            token = gsc_audit.get_access_token(acct["email"])
+            props = gsc_audit.list_properties(token)
+            for p in props:
+                site = (p.get("siteUrl") or "").lower()
+                if domain in site:
+                    return jsonify({"connected": True, "email": acct["email"],
+                                    "property": p.get("siteUrl"),
+                                    "permission": p.get("permissionLevel", "")})
+        except Exception:
+            continue
+    webapp_url = CONFIG.get("auth_api_url", "").strip()
+    if webapp_url:
+        try:
+            resp = http_requests.get(webapp_url, params={"action": "get_config"}, timeout=15)
+            data = resp.json()
+            mapping = data.get("mapping", {}) if data.get("success") else {}
+            info = mapping.get(domain)
+            if info:
+                return jsonify({"connected": False,
+                    "available": True,
+                    "email": info.get("email", ""),
+                    "accountKey": info.get("accountKey", ""),
+                    "accessLevel": info.get("accessLevel", ""),
+                    "message": f"Domain found in GSC account {info.get('email', '')}. "
+                               f"Connect this account to include GSC screenshots in reports."})
+        except Exception:
+            pass
+    return jsonify({"connected": False, "available": False,
+                    "message": "No GSC account found for this domain. Connect a Google account with GSC access to include screenshots."})
+
 
 @app.route("/api/gsc/domain-check")
 def api_gsc_domain_check():
