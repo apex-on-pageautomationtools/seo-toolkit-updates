@@ -8,7 +8,7 @@
     },
     {
       "path": "auth.py",
-      "hash": "74912a6da728aa752e0f32d6f74bce850e83ad1a1d8bc090b5ffcb7110682bf1",
+      "hash": "d8a98ef6b1151326c698916d75f48004b72216abd0d5964db7f5bcc9584d0910",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/auth.py"
     },
     {
@@ -28,7 +28,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "f0fd7ccd70b63210c2f708f9c9a85607227c4cd928e6afb985a5eac8ca7d2af0",
+      "hash": "f046c73bfa57a2782e1578534b72ff2447523edec84787171aa22f0467ecdc60",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -133,7 +133,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "5be66fb5b53dbb17cae08cd6fb8462e9635c2a3701a513af6e69dbbfeff34010",
+      "hash": "f83b3454d0fd7eb69ff06e9dfddbd0c71d195bfb3386ba311bc6fb84dbcfa249",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {

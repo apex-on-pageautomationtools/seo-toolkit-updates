@@ -1566,6 +1566,20 @@ def api_auth_accounts():
 def api_auth_version():
     return jsonify(auth.check_version())
 
+@app.route("/api/auth/change-password", methods=["POST"])
+def api_change_password():
+    data = request.get_json(silent=True) or {}
+    old_pw = (data.get("old_password") or "").strip()
+    new_pw = (data.get("new_password") or "").strip()
+    if not old_pw or not new_pw:
+        return jsonify({"status": "error", "message": "Current and new password are required."}), 400
+    if len(new_pw) < 6:
+        return jsonify({"status": "error", "message": "New password must be at least 6 characters."}), 400
+    logged = auth.list_logged_in()
+    if not logged:
+        return jsonify({"status": "error", "message": "Not logged in."}), 401
+    return jsonify(auth.change_password(logged[0]["email"], old_pw, new_pw))
+
 @app.route("/api/auth/mac")
 def api_auth_mac():
     """Return MAC address for display to user (token for admin)."""

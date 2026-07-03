@@ -1281,6 +1281,13 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
     <div class="note" style="margin-bottom:8px">All reports, CSVs, and screenshots save here. Leave blank for system Downloads folder.</div>
     <input type="text" id="s-downloads-folder" placeholder="e.g. C:\Users\You\Downloads" autocomplete="off" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:14px">
 
+    <div class="sec-t" style="margin-top:22px">Change Password</div>
+    <div class="note" style="margin-bottom:8px">Update your account password — saved to your account immediately.</div>
+    <input type="password" id="cp-old" placeholder="Current password" autocomplete="current-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:14px;margin-bottom:8px;box-sizing:border-box">
+    <input type="password" id="cp-new" placeholder="New password (min 6 characters)" autocomplete="new-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:14px;margin-bottom:8px;box-sizing:border-box">
+    <input type="password" id="cp-confirm" placeholder="Confirm new password" autocomplete="new-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:14px;margin-bottom:8px;box-sizing:border-box">
+    <button class="btn btn-tonal" style="width:100%" onclick="changePassword()">Change Password</button>
+
     <div class="sec-t" style="margin-top:22px;color:var(--text-3)">API Keys & Credentials</div>
     <div class="note" style="margin-bottom:8px">API keys for PageSpeed, GSC, and Apps Script are managed by the admin in the <b>Admin</b> tab. Contact your admin to configure.</div>
   </div>
@@ -2159,6 +2166,20 @@ async function logoutUser(){
   if(!confirm('Log out of SEO Toolkit Pro?'))return;
   try{await fetch('/api/auth/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});}catch(e){}
   location.reload();
+}
+async function changePassword(){
+  const oldp=$('cp-old').value, newp=$('cp-new').value, conf=$('cp-confirm').value;
+  if(!oldp||!newp){toast('Enter your current and new password');return;}
+  if(newp.length<6){toast('New password must be at least 6 characters');return;}
+  if(newp!==conf){toast('New passwords do not match');return;}
+  try{
+    const r=await fetch('/api/auth/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_password:oldp,new_password:newp})});
+    const d=await r.json();
+    if(d.status==='password_changed'){
+      $('cp-old').value='';$('cp-new').value='';$('cp-confirm').value='';
+      toast('Password changed successfully');
+    }else{ toast(d.message||'Could not change password'); }
+  }catch(e){ toast('Could not change password'); }
 }
 async function authCheck(){
   // Version check first

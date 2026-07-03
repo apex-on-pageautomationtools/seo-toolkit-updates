@@ -100,6 +100,26 @@ def login(email, password):
     return result
 
 
+def change_password(email, old_password, new_password):
+    """Change the logged-in user's password via the backend, then update the
+    saved token so auto-login keeps working and refresh the session window."""
+    if not _get_api_url():
+        return {"status": "error", "message": "Auth not configured"}
+    result = _api_call({
+        "action": "change_password",
+        "email": email,
+        "old_password": old_password,
+        "new_password": new_password,
+    })
+    if result.get("status") == "password_changed":
+        accounts = _load_accounts()
+        if email in accounts:
+            accounts[email]["password"] = new_password
+            accounts[email]["login_time"] = time.time()
+            _save_accounts(accounts)
+    return result
+
+
 def register(email, password, name=""):
     """Register a new account. Returns status dict."""
     if not _get_api_url():
