@@ -499,6 +499,23 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
     _close_brief_driver()
     log_fn("  All checks complete.")
 
+    # Defensive: the report builder calls .get() on these, so guarantee a dict
+    # shape even if a check returned something unexpected. Prevents
+    # "'tuple' object has no attribute 'get'" from aborting the whole report.
+    if not isinstance(indexing, dict):
+        indexing = {"status": "Could not check", "count": "N/A"}
+    if not isinstance(sitemap, dict):
+        sitemap = {"ok": False, "found": False, "summary": "Sitemap check could not be completed."}
+    if not isinstance(robots, dict):
+        robots = {}
+    if not isinstance(bl_broken, (list, tuple)):
+        bl_broken = []
+    if not isinstance(bl_checked, int):
+        try:
+            bl_checked = int(bl_checked)
+        except Exception:
+            bl_checked = 0
+
     return {
         "domain": domain,
         "date": datetime.now().strftime("%d %B %Y"),
@@ -1315,13 +1332,13 @@ def build_neon(data, out_path, log_fn=None):
     ]
 
     def finding_for(i):
-        idx = data.get("indexing", {})
+        idx = data.get("indexing", {});   idx = idx if isinstance(idx, dict) else {}
         titles = data.get("titles", [])
         metas = data.get("metas", [])
         headers = data.get("headers", [])
-        sm = data.get("sitemap", {})
+        sm = data.get("sitemap", {});      sm = sm if isinstance(sm, dict) else {}
         canons = data.get("canonicals", [])
-        rb = data.get("robots", {})
+        rb = data.get("robots", {});       rb = rb if isinstance(rb, dict) else {}
         alts = data.get("img_alts", [])
         bl = data.get("broken_links", [])
         bl_checked = data.get("broken_links_checked", 0)
