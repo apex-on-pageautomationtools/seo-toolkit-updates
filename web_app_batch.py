@@ -89,7 +89,7 @@ SERPCOUNTER_DIR = os.path.join(BUNDLE_DIR, "extensions", "serpcounter")
 SCREENSHOTS_DIR = os.path.join(DATA_DIR, "screenshots")
 
 PROFILE_POOL_SIZE = 5
-PROFILE_MAX_AGE_H = 72
+PROFILE_MAX_AGE_H = 168   # 7 days — keep (Google) cookies for human-like sessions; only wipe truly stale profiles
 
 for d in (UPLOADS_DIR, DOWNLOADS_DIR, SCREENSHOTS_DIR, PROFILES_DIR):
     os.makedirs(d, exist_ok=True)
@@ -108,42 +108,34 @@ def _clear_profile_cache(profile_dir):
             shutil.rmtree(p2, ignore_errors=True)
 
 
-def _clear_profile_cookies(profile_dir):
-    """Delete cookie stores from a rank-checker profile (keeps the profile and
-    its extensions/preferences). GSC browser sessions live in a separate folder
-    (gsc_sessions) and are never touched by this."""
-    rels = ("Cookies", "Cookies-journal",
-            os.path.join("Network", "Cookies"), os.path.join("Network", "Cookies-journal"),
-            os.path.join("Default", "Cookies"), os.path.join("Default", "Cookies-journal"),
-            os.path.join("Default", "Network", "Cookies"),
-            os.path.join("Default", "Network", "Cookies-journal"))
-    for rel in rels:
-        p = os.path.join(profile_dir, rel)
+def _prune_cookies_keep_google(profile_dir):
+    """Keep Google's cookies (so the profile looks like a returning human and
+    avoids CAPTCHAs/blocks) but delete every OTHER site's cookies. This keeps
+    profiles small and stops visited/third-party site cookies from personalising
+    and skewing the rank results. GSC logins live in a separate gsc_sessions
+    folder and are never touched."""
+    import sqlite3
+    for rel in (os.path.join("Default", "Network", "Cookies"),
+                os.path.join("Default", "Cookies"),
+                os.path.join("Network", "Cookies"),
+                "Cookies"):
+        db = os.path.join(profile_dir, rel)
+        if not os.path.isfile(db):
+            continue
+        con = None
         try:
-            if os.path.isfile(p):
-                os.remove(p)
+            con = sqlite3.connect(db, timeout=2)
+            con.execute("DELETE FROM cookies WHERE host_key NOT LIKE '%google%'")
+            con.commit()
+            con.execute("VACUUM")
         except Exception:
             pass
-
-
-def _daily_cookie_clear():
-    """Once per calendar day, clear cookies from all rank-checker profiles so each
-    day starts fresh. GSC logins (separate gsc_sessions folder) are preserved."""
-    marker = os.path.join(DATA_DIR, ".cookies_cleared")
-    today = datetime.now().strftime("%Y-%m-%d")
-    try:
-        last = open(marker, encoding="utf-8").read().strip() if os.path.exists(marker) else ""
-    except Exception:
-        last = ""
-    if last == today:
-        return
-    for i in range(1, PROFILE_POOL_SIZE + 1):
-        _clear_profile_cookies(os.path.join(PROFILES_DIR, f"profile_{i}"))
-    try:
-        with open(marker, "w", encoding="utf-8") as f:
-            f.write(today)
-    except Exception:
-        pass
+        finally:
+            try:
+                if con is not None:
+                    con.close()
+            except Exception:
+                pass
 
 
 def _profile_pool_init():
@@ -160,6 +152,7 @@ def _profile_pool_init():
                     os.makedirs(p, exist_ok=True)
                 else:
                     _clear_profile_cache(p)
+                    _prune_cookies_keep_google(p)
             except Exception:
                 pass
         else:
@@ -177,7 +170,6 @@ def pick_profile():
 
 
 _profile_pool_init()
-_daily_cookie_clear()
 # Migrate old single profile if it exists
 _old_profile = os.path.join(DATA_DIR, "chrome_profile")
 if os.path.isdir(_old_profile):
