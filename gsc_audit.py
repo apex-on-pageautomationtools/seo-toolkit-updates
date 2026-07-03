@@ -471,7 +471,7 @@ def _detect_sitemap_type(sm):
     if api_type and api_type.lower() not in ("", "sitemap"):
         return api_type
     if "index" in path or path.endswith("sitemap_index.xml"):
-        return "Index"
+        return "Index Sitemap"
     if api_type:
         return api_type
     return "Sitemap"
@@ -645,10 +645,17 @@ def _detect_page_status(driver, key):
             if "security issue" in body or "malware" in body or "hacked" in body:
                 return "Issue Found"
         elif key == "removals":
-            if "no items" in body or "no removals" in body or "nothing here" in body:
-                return "No Removals Found"
-            if "removal" in body and ("request" in body or "expired" in body):
+            # Only real table-row status values mean there ARE removals. The
+            # page's chrome/help text always contains the words "removal" and
+            # "request", and every empty tab renders "no requests submitted", so
+            # check the positive row markers FIRST, then the empty state.
+            if ("temporarily removed" in body or "request canceled" in body
+                    or "request denied" in body or "request approved" in body):
                 return "Removals Found"
+            if ("no requests submitted" in body or "no items" in body
+                    or "no removals" in body or "nothing here" in body):
+                return "No Removals Found"
+            return "No Removals Found"
     except Exception:
         pass
     return ""
@@ -867,6 +874,7 @@ def build_james_full(data, out_path, log_fn=None):
             for ci, val in enumerate(row):
                 cell = table.cell(ri + 1, ci)
                 cell.text = str(val)
+                cell.text_frame.word_wrap = True   # wrap long URLs instead of truncating
                 for p in cell.text_frame.paragraphs:
                     for r in p.runs:
                         r.font.size = P(10)
@@ -896,6 +904,8 @@ def build_james_full(data, out_path, log_fn=None):
     _text(s, "GSC AUDIT REPORT", 1.2, 2.3, 11, 0.8, 36, "Calibri", WHITE, bold=True)
     _rect(s, 1.2, 3.4, 5, 0.06, "#C9A84C")
     _text(s, domain, 1.2, 3.6, 11, 0.5, 22, "Calibri", GOLD)
+    if data.get("generatedDate"):
+        _text(s, data.get("generatedDate", ""), 1.2, 4.25, 11, 0.4, 16, "Calibri", OFF_WHITE)
 
     # --- Slide 2: Introduction ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
@@ -958,7 +968,7 @@ def build_james_full(data, out_path, log_fn=None):
     idx_rows = []
     for ins in insp_valid:
         isr = ins.get("indexStatusResult", {})
-        idx_rows.append([ins["url"][:50], isr.get("verdict", "N/A"),
+        idx_rows.append([ins["url"], isr.get("verdict", "N/A"),
                          isr.get("coverageState", "N/A"), isr.get("indexingState", "N/A")])
     add_table(s, ["URL", "Verdict", "Coverage", "Indexing State"],
               idx_rows or [["No inspection data", "", "", ""]],
@@ -999,7 +1009,7 @@ def build_james_full(data, out_path, log_fn=None):
     fetch_rows = []
     for ins in insp_valid:
         isr = ins.get("indexStatusResult", {})
-        fetch_rows.append([ins["url"][:60], isr.get("pageFetchState", "N/A"),
+        fetch_rows.append([ins["url"], isr.get("pageFetchState", "N/A"),
                            isr.get("lastCrawlTime", "N/A")[:19]])
     add_table(s, ["URL", "Fetch State", "Last Crawl"],
               fetch_rows or [["No data", "", ""]],
@@ -1027,7 +1037,7 @@ def build_james_full(data, out_path, log_fn=None):
         verdict = rr.get("verdict", "N/A")
         items = rr.get("detectedItems", [])
         item_str = ", ".join(i.get("richResultType", "") for i in items) if items else "None"
-        rich_rows.append([ins["url"][:50], item_str, verdict])
+        rich_rows.append([ins["url"], item_str, verdict])
     add_table(s, ["URL", "Detected Items", "Verdict"],
               rich_rows or [["No data", "", ""]],
               [6.0, 4.3, 2.0])
@@ -1067,7 +1077,7 @@ def build_james_full(data, out_path, log_fn=None):
         "(pos 4-10 should achieve >3% CTR). Several high-impression queries with low CTR "
         "represent optimisation opportunities.")
     q_rows = []
-    for i, q in enumerate(top_queries):
+    for i, q in enumerate(top_queries[:10]):
         keys = q.get("keys", [""])
         q_rows.append([str(i+1), keys[0], _fmt_num(q.get("clicks", 0)),
                        _fmt_num(q.get("impressions", 0)),
@@ -1079,9 +1089,9 @@ def build_james_full(data, out_path, log_fn=None):
     # --- Slide 14: Top Pages ---
     s = header_slide("TOP PAGES", "Top 10 pages by clicks during the period.")
     p_rows = []
-    for i, pg in enumerate(top_pages):
+    for i, pg in enumerate(top_pages[:10]):
         keys = pg.get("keys", [""])
-        p_rows.append([str(i+1), keys[0][:50], _fmt_num(pg.get("clicks", 0)),
+        p_rows.append([str(i+1), keys[0], _fmt_num(pg.get("clicks", 0)),
                        _fmt_num(pg.get("impressions", 0)),
                        f"{pg.get('ctr', 0):.1%}", f"{pg.get('position', 0):.1f}"])
     add_table(s, ["#", "Page", "Clicks", "Impressions", "CTR", "Position"],
@@ -1156,8 +1166,6 @@ def build_james_full(data, out_path, log_fn=None):
     _text(s, "THANK YOU", 1.2, 2.8, 10, 1.0, 48, "Trebuchet MS", WHITE, bold=True)
     _rect(s, 1.2, 4.0, 4, 0.06, "#C9A84C")
     _text(s, f"GSC Audit Report - {domain}", 1.2, 4.3, 10, 0.5, 18, "Calibri", GOLD)
-    _text(s, "For questions or follow-up analysis, refer to your Google Search Console dashboard.",
-          1.2, 6.5, 10, 0.4, 12, "Calibri", C("#E8F4F6"))
 
     prs.save(out_path)
     log_fn(f"  James Full report saved: {os.path.basename(out_path)}")
@@ -1784,7 +1792,7 @@ def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
         "startDate": start_date,
         "endDate": end_date,
         "periodDays": period_days,
-        "generatedDate": datetime.now().strftime("%B %d, %Y"),
+        "generatedDate": datetime.now().strftime("%d-%B-%Y"),
     }
 
     # Fetch API data for James Full and Sigma
@@ -1810,7 +1818,7 @@ def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
 
     # Build PPTX
     format_info = GSC_FORMATS.get(fmt, GSC_FORMATS["james"])
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    timestamp = datetime.now().strftime("%d-%B-%Y_%H%M")
     out_file = os.path.join(out_dir, f"GSC_Audit_{domain}_{fmt}_{timestamp}.pptx")
 
     log_fn(f"  Building {format_info['label']} report...")
