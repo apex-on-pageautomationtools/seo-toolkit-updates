@@ -194,9 +194,9 @@ def generate_manifest(directory=None, base_url=""):
 
     from importlib.metadata import version as pkg_version
     try:
-        app_ver = "3.4"
+        app_ver = "3.5"
     except Exception:
-        app_ver = "3.4"
+        app_ver = "3.5"
 
     manifest = {"version": app_ver, "files": files}
     out = os.path.join(directory, "update_manifest.json")

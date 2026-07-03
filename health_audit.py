@@ -870,7 +870,7 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
 
             if key == "sucuri":
                 driver.execute_script(
-                    "document.querySelectorAll('.cookie-banner, .consent-banner, [class*=cookie], #cookie-law-info-bar').forEach(e=>e.remove());"
+                    "document.querySelectorAll('.cookie-banner, .consent-banner, [class*=cookie], [class*=consent], #cookie-law-info-bar').forEach(e=>e.remove());"
                     "window.scrollTo(0, 0);"
                 )
                 time.sleep(1)
@@ -878,12 +878,25 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
                 driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(0.5)
 
-            # Use CDP for viewport screenshot
-            try:
-                result = driver.execute_cdp_cmd("Page.captureScreenshot", {
+            # Use CDP for the screenshot. Sucuri's scan verdict sits at the very
+            # top of the page, so capture a fixed top region of the *document*
+            # (captureBeyondViewport + clip anchored at 0,0). This is immune to
+            # wherever the page happened to be scrolled — which previously
+            # produced a useless bottom-of-page ("Check another URL") shot.
+            cdp_params = {"format": "png", "captureBeyondViewport": False}
+            if key == "sucuri":
+                try:
+                    _w = driver.execute_script(
+                        "return Math.max(document.documentElement.clientWidth||0, window.innerWidth||0, 1280);")
+                except Exception:
+                    _w = 1280
+                cdp_params = {
                     "format": "png",
-                    "captureBeyondViewport": False,
-                })
+                    "captureBeyondViewport": True,
+                    "clip": {"x": 0, "y": 0, "width": float(_w or 1280), "height": 1300.0, "scale": 1},
+                }
+            try:
+                result = driver.execute_cdp_cmd("Page.captureScreenshot", cdp_params)
                 import base64
                 with open(path, "wb") as f:
                     f.write(base64.b64decode(result["data"]))
