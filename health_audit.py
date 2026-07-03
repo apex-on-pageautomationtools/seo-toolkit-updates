@@ -1336,7 +1336,7 @@ def build_health_docx(domain, captured, computed, out_dir, include_keys=None, vo
 
         doc.add_paragraph()
 
-    gen_date = datetime.now().strftime("%d-%m-%Y")
+    gen_date = datetime.now().strftime("%d-%B-%Y")
     out_path = Path(out_dir) / f"{domain} Website health checkup analysis report {gen_date}.docx"
     out_path = _safe_save_path(out_path)
     doc.save(str(out_path))
@@ -1443,7 +1443,7 @@ def build_health_pptx_sigma(domain, captured, computed, out_dir, include_keys=No
          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
     text(s, "Website Health Checkup & Analysis Report", 1.0, 3.5, 11.33, 0.6, 22,
          GOLD_DK, bold=True, align=PP_ALIGN.CENTER)
-    gen_date = datetime.now().strftime("%d-%m-%Y")
+    gen_date = datetime.now().strftime("%d-%B-%Y")
     text(s, f"Generated: {gen_date}", 1.0, 4.2, 11.33, 0.45, 13, INK_SOFT,
          align=PP_ALIGN.CENTER)
 
@@ -1620,7 +1620,7 @@ def build_health_pptx_omega(domain, captured, computed, out_dir):
         else:
             missing += 1
 
-    gen_date = datetime.now().strftime("%d-%m-%Y")
+    gen_date = datetime.now().strftime("%d-%B-%Y")
     out_path = Path(out_dir) / f"{domain} Health Analysis Report {gen_date}.pptx"
     out_path = _safe_save_path(out_path)
     prs.save(str(out_path))

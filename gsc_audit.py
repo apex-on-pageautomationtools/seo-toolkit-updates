@@ -1818,8 +1818,8 @@ def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
 
     # Build PPTX
     format_info = GSC_FORMATS.get(fmt, GSC_FORMATS["james"])
-    timestamp = datetime.now().strftime("%d-%B-%Y_%H%M")
-    out_file = os.path.join(out_dir, f"GSC_Audit_{domain}_{fmt}_{timestamp}.pptx")
+    timestamp = datetime.now().strftime("%d-%B-%Y")
+    out_file = os.path.join(out_dir, f"GSC_Audit_{domain}_{timestamp}.pptx")
 
     log_fn(f"  Building {format_info['label']} report...")
     format_info["builder"](report_data, out_file, log_fn)

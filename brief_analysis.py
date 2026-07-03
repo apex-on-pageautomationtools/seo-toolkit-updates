@@ -508,6 +508,10 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
         sitemap = {"ok": False, "found": False, "summary": "Sitemap check could not be completed."}
     if not isinstance(robots, dict):
         robots = {}
+    # check_robots_txt returns status/ok but no explicit "found" — derive it so the
+    # report doesn't show "Found: No" while the summary says robots.txt WAS found.
+    if "found" not in robots:
+        robots["found"] = (robots.get("status") == 200) or ("found" in str(robots.get("summary", "")).lower())
     # check_broken_links returns (url, status) TUPLES, but every report builder
     # calls b.get(...) on each broken link expecting a dict. Normalize to dicts
     # so a site that actually has broken links doesn't crash the report with
@@ -580,17 +584,17 @@ def _text(slide, text_str, x, y, w, h, font_size, font_name, color, bold=False,
     tf = txBox.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
-    p.text = str(text_str)
-    run = p.runs[0] if p.runs else p.add_run()
-    run.text = str(text_str)
-    run.font.size = Pt(font_size)
-    run.font.name = font_name
+    p.text = str(text_str)          # splits on \n into one run per line (with line breaks)
     if isinstance(color, str):
         color = _C(color)
-    run.font.color.rgb = color
-    run.font.bold = bold
-    if italic:
-        run.font.italic = True
+    runs = p.runs or [p.add_run()]
+    for run in runs:                # format every run — do NOT re-assign run.text (that duplicated multi-line text)
+        run.font.size = Pt(font_size)
+        run.font.name = font_name
+        run.font.color.rgb = color
+        run.font.bold = bold
+        if italic:
+            run.font.italic = True
     if align:
         p.alignment = align
     return txBox
@@ -1438,8 +1442,8 @@ def run_brief_analysis(domain, fmt="james", target_pages=None, out_dir=None, log
     data = run_brief_checks(domain, target_pages, log_fn)
 
     format_info = BRIEF_FORMATS.get(fmt, BRIEF_FORMATS["james"])
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    out_file = os.path.join(out_dir, f"Brief_Report_{domain}_{fmt}_{timestamp}.pptx")
+    timestamp = datetime.now().strftime("%d-%B-%Y")
+    out_file = os.path.join(out_dir, f"Brief_Report_{domain}_{timestamp}.pptx")
 
     log_fn(f"Building {format_info['label']} report...")
     format_info["builder"](data, out_file, log_fn)
