@@ -6,6 +6,7 @@ Supports multiple accounts per device and multiple devices per account.
 
 import os
 import json
+import time
 import uuid
 import urllib.request
 import urllib.parse
@@ -36,7 +37,8 @@ def _config_file():
     return cf
 
 AUTH_FILE = _auth_file()
-APP_VERSION = "3.8"
+APP_VERSION = "3.9"
+SESSION_MAX_HOURS = 12   # a saved login stays valid this long, then re-login is required
 
 
 def _get_api_url():
@@ -137,6 +139,17 @@ def check_saved_auth(email=None):
 
 def _validate_account(email, acct, mac, accounts):
     """Validate a single stored account against the backend."""
+    # Session expiry — force re-login after SESSION_MAX_HOURS since login.
+    lt = acct.get("login_time")
+    if lt is None:                       # backfill for tokens saved before this feature
+        acct["login_time"] = time.time()
+        _save_accounts(accounts)
+        lt = acct["login_time"]
+    if (time.time() - lt) > SESSION_MAX_HOURS * 3600:
+        accounts.pop(email, None)
+        _save_accounts(accounts)
+        return {"status": "session_expired", "email": email,
+                "message": "Session expired. Please log in again."}
     result = _api_call({
         "action": "login",
         "email": email,
@@ -191,7 +204,8 @@ def get_allowed_formats():
 def _save_account(email, password, mac, is_admin=False, allowed_formats=None):
     """Add or update one account in the multi-account token file."""
     accounts = _load_accounts()
-    accounts[email] = {"password": password, "mac": mac, "is_admin": is_admin}
+    accounts[email] = {"password": password, "mac": mac, "is_admin": is_admin,
+                       "login_time": time.time()}
     if allowed_formats:
         accounts[email]["allowed_formats"] = allowed_formats
     _save_accounts(accounts)

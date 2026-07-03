@@ -53,7 +53,7 @@ import brief_analysis
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "3.8"
+APP_VERSION = "3.9"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -108,6 +108,44 @@ def _clear_profile_cache(profile_dir):
             shutil.rmtree(p2, ignore_errors=True)
 
 
+def _clear_profile_cookies(profile_dir):
+    """Delete cookie stores from a rank-checker profile (keeps the profile and
+    its extensions/preferences). GSC browser sessions live in a separate folder
+    (gsc_sessions) and are never touched by this."""
+    rels = ("Cookies", "Cookies-journal",
+            os.path.join("Network", "Cookies"), os.path.join("Network", "Cookies-journal"),
+            os.path.join("Default", "Cookies"), os.path.join("Default", "Cookies-journal"),
+            os.path.join("Default", "Network", "Cookies"),
+            os.path.join("Default", "Network", "Cookies-journal"))
+    for rel in rels:
+        p = os.path.join(profile_dir, rel)
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+        except Exception:
+            pass
+
+
+def _daily_cookie_clear():
+    """Once per calendar day, clear cookies from all rank-checker profiles so each
+    day starts fresh. GSC logins (separate gsc_sessions folder) are preserved."""
+    marker = os.path.join(DATA_DIR, ".cookies_cleared")
+    today = datetime.now().strftime("%Y-%m-%d")
+    try:
+        last = open(marker, encoding="utf-8").read().strip() if os.path.exists(marker) else ""
+    except Exception:
+        last = ""
+    if last == today:
+        return
+    for i in range(1, PROFILE_POOL_SIZE + 1):
+        _clear_profile_cookies(os.path.join(PROFILES_DIR, f"profile_{i}"))
+    try:
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write(today)
+    except Exception:
+        pass
+
+
 def _profile_pool_init():
     """Ensure pool has PROFILE_POOL_SIZE profiles. Wipe stale ones, create missing."""
     import shutil
@@ -139,6 +177,7 @@ def pick_profile():
 
 
 _profile_pool_init()
+_daily_cookie_clear()
 # Migrate old single profile if it exists
 _old_profile = os.path.join(DATA_DIR, "chrome_profile")
 if os.path.isdir(_old_profile):
