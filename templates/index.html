@@ -1299,6 +1299,11 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
 
 <div class="toast" id="toast"></div>
 
+<style>
+@keyframes authspin{to{transform:rotate(360deg)}}
+.auth-spin{display:inline-block;width:15px;height:15px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;animation:authspin .7s linear infinite;vertical-align:-2px;margin-right:8px}
+</style>
+
 <!-- Auth login overlay -->
 <div id="auth-overlay" style="display:none;position:fixed;inset:0;z-index:9999;background:var(--bg);align-items:center;justify-content:center">
   <div style="width:380px;max-width:92vw;background:var(--surface);border-radius:var(--r-xl);padding:36px 32px;box-shadow:var(--shadow)">
@@ -1311,7 +1316,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
     <div id="auth-login-form">
       <input type="email" id="auth-email" placeholder="Email address" autocomplete="email" style="width:100%;padding:12px 14px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:14px;margin-bottom:10px;box-sizing:border-box">
       <input type="password" id="auth-pass" placeholder="Password" autocomplete="current-password" style="width:100%;padding:12px 14px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:14px;margin-bottom:10px;box-sizing:border-box">
-      <button class="btn btn-primary" style="width:100%;padding:12px;font-size:15px" onclick="authLogin()">Login</button>
+      <button id="auth-btn" class="btn btn-primary" style="width:100%;padding:12px;font-size:15px" onclick="authLogin()">Login</button>
       <div style="text-align:center;margin-top:14px">
         <p style="color:var(--text-3);font-size:12px;margin:0;line-height:1.5">Don't have an account? Contact your administrator.<br>They will add your email, password, and device ID in the admin panel.</p>
       </div>
@@ -2156,11 +2161,15 @@ function authMsg(msg,type){
 async function authLogin(){
   const email=$('auth-email').value.trim(),pass=$('auth-pass').value.trim();
   if(!email||!pass){authMsg('Enter email and password');return;}
+  const btn=$('auth-btn');
+  btn.disabled=true; btn.dataset.orig=btn.innerHTML;
+  btn.innerHTML='<span class="auth-spin"></span>Logging in…';
   try{
     const r=await(await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pass})})).json();
-    if(r.status==='approved'){$('auth-overlay').style.display='none';initApp();}
-    else authMsg(r.message||'Login failed. Contact your administrator.');
+    if(r.status==='approved'){$('auth-overlay').style.display='none';initApp();return;}
+    authMsg(r.message||'Login failed. Contact your administrator.');
   }catch(e){authMsg('Connection error. Try again.');}
+  btn.disabled=false; btn.innerHTML=btn.dataset.orig;
 }
 async function logoutUser(){
   if(!confirm('Log out of SEO Toolkit Pro?'))return;
