@@ -53,7 +53,7 @@ import brief_analysis
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "3.3"
+APP_VERSION = "3.4"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -1951,6 +1951,119 @@ onpage_stop = threading.Event()
 
 SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts")
 
+
+# --------------------------------------------------------------------------- #
+# On-page "target pages & keywords" parsing — order-agnostic (paste + Excel)
+# --------------------------------------------------------------------------- #
+import re as _re
+
+
+def _looks_like_url(tok):
+    """True if this token looks like a page URL/path rather than a keyword."""
+    t = (tok or "").strip().lower()
+    if not t:
+        return False
+    if t.startswith(("http://", "https://", "www.")):
+        return True
+    if "/" in t:                                  # relative path e.g. 'gold-coast/'
+        return True
+    return bool(_re.match(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$", t))   # bare domain
+
+
+def _parse_target_line(line):
+    """Parse one row into (page, [keywords]).
+
+    URL and keyword(s) may appear in EITHER column order, separated by a tab
+    (Excel paste), a '|' (documented manual format), or 2+ spaces. Keywords may
+    be comma-separated. Relative paths are kept as-is (the phase-2 script
+    resolves them against the domain via normalize_url)."""
+    s = (line or "").strip()
+    if not s:
+        return None, []
+    if "\t" in s:
+        parts = s.split("\t")
+    elif "|" in s:
+        parts = s.split("|")
+    elif _re.search(r"\s{2,}", s):
+        parts = _re.split(r"\s{2,}", s)
+    else:
+        parts = [s]
+    parts = [p.strip() for p in parts if p.strip()]
+    if not parts:
+        return None, []
+
+    page = None
+    kw_fields = []
+    for tok in parts:
+        if page is None and _looks_like_url(tok):
+            page = tok
+        else:
+            kw_fields.append(tok)
+    if page is None:                              # nothing url-like → first field is the page
+        page, kw_fields = parts[0], parts[1:]
+
+    keywords = []
+    for kf in kw_fields:
+        for k in kf.split(","):
+            k = k.strip()
+            if k and k not in keywords:
+                keywords.append(k)
+    return page, keywords
+
+
+def _parse_onpage_targets(raw_text):
+    """Pasted text -> flat [{"keyword":k, "page":url}] rows. This is the phase-2
+    loader's native form, which (unlike the grouped form) correctly keeps
+    URL-only pages that have no keyword. De-duplicated, first-seen order."""
+    rows, seen = [], set()
+    for line in (raw_text or "").splitlines():
+        page, kws = _parse_target_line(line)
+        if not page:
+            continue
+        for k in (kws or [""]):
+            key = (page, k)
+            if key not in seen:
+                seen.add(key)
+                rows.append({"keyword": k, "page": page})
+    return rows
+
+
+def _targets_to_lines(rows):
+    """Flat rows -> 'URL | kw1, kw2' textarea lines (grouped by page)."""
+    grouped, order = {}, []
+    for r in rows:
+        p = r["page"]
+        if p not in grouped:
+            grouped[p] = []
+            order.append(p)
+        if r["keyword"] and r["keyword"] not in grouped[p]:
+            grouped[p].append(r["keyword"])
+    return [f"{p} | {', '.join(grouped[p])}" if grouped[p] else p for p in order]
+
+
+def _lines_from_excel(file_storage):
+    """Read an uploaded .xlsx into 'URL | kw1, kw2' lines, reusing the same
+    order-agnostic parsing as pasted text (header row / either column order)."""
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(file_storage.read()), data_only=True, read_only=True)
+    raw_lines = []
+    for ws in wb.worksheets:
+        for row in ws.iter_rows(values_only=True):
+            if not row:
+                continue
+            cells = [("" if c is None else str(c).strip()) for c in row]
+            nonempty = [c for c in cells if c]
+            if not nonempty:
+                continue
+            low = " ".join(nonempty).lower()
+            # skip a header row (labels only, no link/path in it)
+            if ("keyword" in low or "target" in low) and ("page" in low or "url" in low) \
+               and not any(("http" in c or "/" in c) for c in nonempty):
+                continue
+            raw_lines.append("\t".join(nonempty))
+    return _targets_to_lines(_parse_onpage_targets("\n".join(raw_lines)))
+
+
 def _run_onpage_report(domain, targets_json, fmt, no_capture):
     """Run the on-page phase2 script as a subprocess, stream logs."""
     with onpage_lock:
@@ -2062,10 +2175,14 @@ def api_onpage_start():
     targets_raw = (data.get("targets") or "").strip()
     if targets_raw:
         try:
-            targets = json.loads(targets_raw)
+            parsed = json.loads(targets_raw)
+            targets = parsed if isinstance(parsed, list) else None
         except json.JSONDecodeError:
-            lines = [l.strip() for l in targets_raw.splitlines() if l.strip()]
-            targets = [{"page": l, "keywords": []} for l in lines]
+            targets = None
+        if targets is None:
+            # Parse pasted "URL | kw", "URL <tab> kw" or "kw <tab> URL" rows
+            # (either column order) into the flat form the phase-2 loader reads.
+            targets = _parse_onpage_targets(targets_raw)
 
     t = threading.Thread(target=_run_onpage_report,
                          args=(domain, targets, fmt, no_capture), daemon=True)
@@ -2841,10 +2958,21 @@ def api_brief_formats():
 # --------------------------------------------------------------------------- #
 @app.route("/api/onpage/parse-targets", methods=["POST"])
 def api_onpage_parse_targets():
+    # Excel upload (multipart) -> parse the sheet into "URL | kw1, kw2" lines.
+    f = request.files.get("file")
+    if f is not None and f.filename:
+        try:
+            lines = _lines_from_excel(f)
+        except Exception as e:
+            return jsonify({"error": f"Failed to parse Excel file: {e}"}), 400
+        if not lines:
+            return jsonify({"error": "No target pages found in the Excel file."}), 400
+        return jsonify({"lines": lines, "count": len(lines)})
+    # Text fallback (JSON body of pasted rows) -> same grouped lines.
     data = request.get_json(silent=True) or {}
-    raw = data.get("urls", "")
-    urls = [u.strip() for u in raw.replace(",", "\n").splitlines() if u.strip()]
-    return jsonify({"urls": urls, "count": len(urls)})
+    raw = data.get("urls", "") or data.get("targets", "")
+    lines = _targets_to_lines(_parse_onpage_targets(raw))
+    return jsonify({"lines": lines, "urls": lines, "count": len(lines)})
 
 # --------------------------------------------------------------------------- #
 # Entry point
