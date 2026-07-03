@@ -140,6 +140,16 @@
       "path": "brief_analysis.py",
       "hash": "d9df9634fe8310b97d137a21e20b854a0950d00bce81813acc87e692e0fab1a0",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/brief_analysis.py"
+    },
+    {
+      "path": "python/Lib/site-packages/openpyxl_bundle.zip",
+      "hash": "4243fa5ecce1341639f416f963c771db4c09fbaa62a090f1edb7d79527808a32",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/python/Lib/site-packages/openpyxl_bundle.zip"
+    },
+    {
+      "path": "python/Lib/site-packages/zz_openpyxl_ota.pth",
+      "hash": "d0d5e55d73b406336e4a2f8fa59e069a0b5ff499c193d9866cb42a57f397b0b3",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/python/Lib/site-packages/zz_openpyxl_ota.pth"
     }
   ]
 }
