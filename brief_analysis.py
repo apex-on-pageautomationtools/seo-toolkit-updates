@@ -441,9 +441,10 @@ def _stealth_indexing_count(domain, country="us"):
 
 
 def capture_brief_screenshots(domain, sitemap_url=None, log_fn=print):
-    """Capture homepage / robots.txt / sitemap screenshots via the brief browser
-    (selenium + CDP) so the report can show real page previews, not just text.
-    Returns {key: png_path}; best-effort (missing shots are simply skipped)."""
+    """Capture the per-topic screenshots the report slides embed (like the manual
+    sample templates): homepage, view-source (title/meta/canonical), Google 'site:'
+    SERP (indexing), sitemap and robots.txt. Returns {key: png_path}; best-effort —
+    a missing/blocked shot is simply skipped."""
     driver = _get_brief_driver()
     if not driver:
         return {}
@@ -451,26 +452,33 @@ def capture_brief_screenshots(domain, sitemap_url=None, log_fn=print):
     out = {}
     out_dir = tempfile.mkdtemp(prefix="brief_shots_")
     root = f"https://{domain}"
-    jobs = [("homepage", root + "/", 950),
-            ("robots", root + "/robots.txt", 700),
-            ("sitemap", sitemap_url or (root + "/sitemap.xml"), 850)]
-    for key, url, height in jobs:
+
+    def _shot(key, url, height, view_source=False, serp=False):
         try:
-            driver.get(url)
-            time.sleep(3)
+            driver.get(("view-source:" + url) if view_source else url)
+            time.sleep(4 if serp else 3)
+            if serp:                          # skip a Google CAPTCHA wall — useless as an image
+                low = (driver.page_source or "").lower()
+                if any(m in low for m in ("unusual traffic", "not a robot", "recaptcha",
+                                          "/sorry/", "detected unusual", "before you continue")):
+                    log_fn(f"  Screenshot '{key}' skipped (Google blocked)")
+                    return
             try:
                 driver.execute_script("window.scrollTo(0, 0);")
             except Exception:
                 pass
             time.sleep(0.4)
-            try:
-                _w = driver.execute_script(
-                    "return Math.max(document.documentElement.clientWidth||0, window.innerWidth||0, 1366);")
-            except Exception:
-                _w = 1366
-            res = driver.execute_cdp_cmd("Page.captureScreenshot", {
-                "format": "png", "captureBeyondViewport": True,
-                "clip": {"x": 0, "y": 0, "width": float(_w or 1366), "height": float(height), "scale": 1}})
+            if view_source:
+                cdp = {"format": "png", "captureBeyondViewport": False}
+            else:
+                try:
+                    _w = driver.execute_script(
+                        "return Math.max(document.documentElement.clientWidth||0, window.innerWidth||0, 1366);")
+                except Exception:
+                    _w = 1366
+                cdp = {"format": "png", "captureBeyondViewport": True,
+                       "clip": {"x": 0, "y": 0, "width": float(_w or 1366), "height": float(height), "scale": 1}}
+            res = driver.execute_cdp_cmd("Page.captureScreenshot", cdp)
             p = os.path.join(out_dir, f"{key}.png")
             with open(p, "wb") as f:
                 f.write(base64.b64decode(res["data"]))
@@ -478,6 +486,12 @@ def capture_brief_screenshots(domain, sitemap_url=None, log_fn=print):
             log_fn(f"  Captured screenshot: {key}")
         except Exception as e:
             log_fn(f"  Screenshot '{key}' skipped ({type(e).__name__})")
+
+    _shot("homepage", root + "/", 950)
+    _shot("viewsource", root + "/", 760, view_source=True)
+    _shot("serp", f"https://www.google.com/search?q=site:{domain}", 900, serp=True)
+    _shot("sitemap", sitemap_url or (root + "/sitemap.xml"), 850)
+    _shot("robots", root + "/robots.txt", 700)
     return out
 
 
@@ -1523,9 +1537,6 @@ def build_james(data, out_path, log_fn=None):
               f"No broken links found in {bl_checked} links checked. Continue monitoring regularly.",
               2.0, 3.9, 7.5, 0.5)
 
-    # --- Screenshot previews (homepage / robots / sitemap) ---
-    _add_preview_slides(prs, data.get("screenshots", {}), 10, 5.625, NAVY)
-
     # --- Slide 15: Thank You ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
     _james_sidebar(s)
@@ -1597,13 +1608,19 @@ def build_xenon(data, out_path, log_fn=None):
                 _text(s, finding, bx, 3.2, 12.1 - bx + 0.6, 0.9, 13, "Calibri", TEXT_DARK)
         return s
 
-    def page_detail(s, header, lines, y=4.5):
-        """Per-page breakdown printed below the summary box (Xenon has the room),
-        so the report shows WHICH pages were checked and what was found on each."""
+    _shots = data.get("screenshots", {}) or {}
+
+    def page_detail(s, header, lines, y=4.35):
+        """Compact per-page breakdown below the summary box — kept short so a
+        screenshot can sit beneath it (matching the original template)."""
         if not lines:
             return
-        _text(s, header, 0.6, y, 12.1, 0.35, 13, "Calibri", NAVY, bold=True)
-        _text(s, "\n".join(lines), 0.6, y + 0.4, 12.1, 2.4, 12, "Calibri", TEXT_DARK)
+        _text(s, header, 0.6, y, 12.1, 0.32, 12, "Calibri", NAVY, bold=True)
+        _text(s, "\n".join(lines[:3]), 0.6, y + 0.34, 12.1, 0.85, 11, "Calibri", TEXT_DARK)
+
+    def topic_shot(s, key):
+        """Screenshot at the bottom of the slide (Xenon puts the evidence there)."""
+        _place_image(s, _shots.get(key), 2.6, 5.45, 8.1, 1.85)
 
     # --- Slide 1: Cover ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1621,6 +1638,7 @@ def build_xenon(data, out_path, log_fn=None):
     s = content_slide("Website Indexing",
                       "Indexing is how a search engine crawls and stores your pages so they can appear in search results.",
                       "Good", "good", finding, data_ok=idx_ok)
+    topic_shot(s, "serp")
 
     # --- Slide 3: Title Tag ---
     titles = data.get("titles", [])
@@ -1638,6 +1656,7 @@ def build_xenon(data, out_path, log_fn=None):
     page_detail(s, "Pages checked:", [
         f"{t['page']}  —  \"{(t.get('title') or '(none)')[:55]}\"  ({t['chars']} chars, {t['status']})"
         for t in titles])
+    topic_shot(s, "viewsource")
 
     # --- Slide 4: Meta Description Tag ---
     metas = data.get("metas", [])
@@ -1655,6 +1674,7 @@ def build_xenon(data, out_path, log_fn=None):
     page_detail(s, "Pages checked:", [
         f"{m['page']}  —  meta description {'FOUND' if m['found'] == 'Yes' else 'MISSING'} "
         f"({m['chars']} chars, {m['status']})" for m in metas])
+    topic_shot(s, "viewsource")
 
     # --- Slide 5: Headings ---
     headers = data.get("headers", [])
@@ -1672,6 +1692,7 @@ def build_xenon(data, out_path, log_fn=None):
     page_detail(s, "Pages checked:", [
         f"{h['page']}  —  H1={h['h1']}, H2={h['h2']}, H3={h['h3']}, H4={h['h4']}, H5={h['h5']}, H6={h['h6']}"
         for h in headers])
+    topic_shot(s, "homepage")
 
     # --- Slide 6: Heading Tags — Findings ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1703,6 +1724,7 @@ def build_xenon(data, out_path, log_fn=None):
                       "good" if sm.get("found") else "issue",
                       finding, data_ok=sm_ok)
     page_detail(s, "Sitemap URL:", [sm_url])
+    topic_shot(s, "sitemap")
 
     # --- Slide 8: Robots.txt ---
     rb = data.get("robots", {})
@@ -1713,6 +1735,7 @@ def build_xenon(data, out_path, log_fn=None):
                       "Good" if rb.get("found") else "ISSUE",
                       "good" if rb.get("found") else "issue",
                       finding, data_ok=rb_ok)
+    topic_shot(s, "robots")
 
     # --- Slide 9: Content Optimization ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1770,6 +1793,7 @@ def build_xenon(data, out_path, log_fn=None):
     page_detail(s, "Pages checked:", [
         f"{c['page']}  —  tag {c['found']}, correct: {c.get('correct', 'N/A')} ({c['status']})"
         for c in canons])
+    topic_shot(s, "viewsource")
 
     # --- Slide 12: Redirection Issues ---
     redirects = data.get("redirects", [])
@@ -1817,9 +1841,6 @@ def build_xenon(data, out_path, log_fn=None):
     s = content_slide("Domain Age",
                       "Domain age reflects registration history. Older domains often carry accumulated trust and authority with search engines.",
                       "Good", "good", age_info, data_ok=age_ok)
-
-    # --- Screenshot previews (homepage / robots / sitemap) ---
-    _add_preview_slides(prs, data.get("screenshots", {}), 13.33, 7.5, NAVY)
 
     # --- Slide 15: Thank You ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1874,16 +1895,20 @@ def build_omega(data, out_path, log_fn=None):
         _rect(s, 8.0, 0.8, 1.5, 0.02, ACCENT)
         _rect(s, 8.0, 1.3, 1.5, 0.02, ACCENT)
 
-    def content_slide(title, desc, finding):
+    def content_slide(title, desc, finding, shot=None):
         s = bg_slide()
         _text(s, title, 0.8, 0.1, 8.4, 0.6, 24, "Calibri", WHITE, bold=True)
         _rect(s, 0.8, 0.7, 8.4, 0.02, ACCENT)
         _text(s, desc, 0.8, 0.9, 8.8, 0.6, 14, "Calibri", ACCENT)
+        # Screenshot in the middle (like the original), finding text below it.
+        has_shot = _place_image(s, shot, 1.2, 1.55, 7.6, 2.05) if shot else False
+        fy = 3.75 if has_shot else 1.9
+        fh = 1.75 if has_shot else 3.4
         data_ok = not _is_empty(finding) and finding != UNVERIFIED
         if data_ok:
-            _text(s, finding, 0.8, 1.9, 9.2, 3.4, 12, "Calibri", WHITE)
+            _text(s, finding, 0.8, fy, 9.2, fh, 11 if has_shot else 12, "Calibri", WHITE)
         else:
-            _text(s, UNVERIFIED, 0.8, 3.8, 9.2, 0.7, 14, "Calibri", RED, bold=True)
+            _text(s, UNVERIFIED, 0.8, fy, 9.2, 0.7, 14, "Calibri", RED, bold=True)
         return s
 
     topics = [
@@ -1959,11 +1984,14 @@ def build_omega(data, out_path, log_fn=None):
                  for r in age_rows if len(r) > 1 and str(r[1]).strip()]
     findings.append("\n".join(age_lines) if age_lines else UNVERIFIED)
 
+    # Each content slide embeds the screenshot that evidences that check, like the
+    # original template (indexing = Google SERP, title/meta/canonical = view-source,
+    # headers/images = homepage, sitemap, robots).
+    shots = data.get("screenshots", {}) or {}
+    shot_map = {0: "serp", 1: "viewsource", 2: "viewsource", 3: "homepage",
+                4: "sitemap", 5: "robots", 6: "homepage", 7: "viewsource"}
     for i, (title, desc) in enumerate(topics):
-        content_slide(title, desc, findings[i])
-
-    # --- Screenshot previews (homepage / robots / sitemap) ---
-    _add_preview_slides(prs, data.get("screenshots", {}), 10, 5.625, WHITE, bg_color=BG)
+        content_slide(title, desc, findings[i], shots.get(shot_map.get(i)))
 
     # --- Slide 16: Thank You ---
     s = bg_slide()
@@ -2070,20 +2098,24 @@ def build_neon(data, out_path, log_fn=None):
     _text(s, "Project Name:-", 7.2, 4.4, 5.5, 0.5, 20, "Georgia", TITLE_CLR, bold=True)
     _text(s, f"SEO Analysis - {domain}", 7.2, 4.9, 5.5, 0.5, 18, "Calibri", BODY_CLR)
 
-    # --- Slides 2-18: Content ---
+    # --- Slides 2-18: Content (screenshot in the middle + finding at the bottom,
+    #     like the original template) ---
+    shots = data.get("screenshots", {}) or {}
+    shot_map = {0: "serp", 1: "viewsource", 2: "viewsource", 3: "homepage",
+                4: "sitemap", 5: "viewsource", 6: "robots", 7: "homepage"}
     for i, (title, desc) in enumerate(topics):
         s = prs.slides.add_slide(prs.slide_layouts[6])
         _text(s, f"{title} --", 0.25, 0.5, 4.5, 0.65, 36, "Calibri", TITLE_CLR, bold=True)
         _text(s, desc, 0.54, 1.2, 12.04, 1.0, 18, "Calibri", BODY_CLR)
+        has_shot = _place_image(s, shots.get(shot_map.get(i)), 1.4, 2.45, 10.5, 2.75)
 
         finding_val, data_ok = finding_for(i)
+        fy = 5.45 if has_shot else 2.5
+        fh = 1.5 if has_shot else 4.4
         if data_ok and finding_val:
-            _text(s, finding_val, 0.83, 2.5, 11.75, 4.4, 13, "Calibri", BODY_CLR)
+            _text(s, finding_val, 0.83, fy, 11.75, fh, 13, "Calibri", BODY_CLR)
         else:
-            _text(s, UNVERIFIED, 0.83, 2.5, 11.75, 0.65, 18, "Calibri", RED_BAD, bold=True)
-
-    # --- Screenshot previews (homepage / robots / sitemap) ---
-    _add_preview_slides(prs, data.get("screenshots", {}), 13.33, 7.5, TITLE_CLR)
+            _text(s, UNVERIFIED, 0.83, fy, 11.75, 0.65, 18, "Calibri", RED_BAD, bold=True)
 
     # --- Slide 19: Closing ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
