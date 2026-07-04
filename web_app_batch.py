@@ -2948,13 +2948,20 @@ def api_brief_start():
         with _brief_lock:
             _brief_state["running"] = False
         return jsonify({"error": "Domain required"}), 400
+    # Honour the selected report format + optional target pages (one path per line).
+    fmt = (data.get("format") or "james").strip().lower()
+    if fmt not in brief_analysis.BRIEF_FORMATS:
+        fmt = "james"
+    _targets_raw = (data.get("targets") or "").strip()
+    target_pages = [ln.strip() for ln in _targets_raw.splitlines() if ln.strip()] or None
     def _run():
         try:
             def prog(msg):
                 with _brief_lock:
                     _brief_state["status"] = str(msg)
                     _brief_state["log"].append(str(msg))
-            out_file = brief_analysis.run_brief_analysis(domain, log_fn=prog)
+            out_file = brief_analysis.run_brief_analysis(
+                domain, fmt=fmt, target_pages=target_pages, log_fn=prog)
             with _brief_lock:
                 _brief_state["result"] = {"file": out_file}
                 _brief_state["status"] = "completed"
