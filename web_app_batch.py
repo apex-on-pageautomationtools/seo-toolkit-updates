@@ -662,6 +662,17 @@ class Session:
             latitude=self.latitude, longitude=self.longitude, lang=self.lang)
         with state_lock:
             state["driver"] = self.driver
+        # Always fetch FRESH rankings: a rank check must reflect the live SERP, never a
+        # page served from disk cache or personalised by a prior session's cookies.
+        # Disable the HTTP cache for the whole session and wipe any saved cache + cookies
+        # before warm_up (which re-does Google's consent). Keeps results current.
+        try:
+            self.driver.execute_cdp_cmd("Network.setCacheDisabled", {"cacheDisabled": True})
+            self.driver.execute_cdp_cmd("Network.clearBrowserCache", {})
+            self.driver.execute_cdp_cmd("Network.clearBrowserCookies", {})
+            add_log("Cleared cache & cookies — fetching fresh results")
+        except Exception:
+            pass
         warm_up(self.driver, self.country, add_log, lang=self.lang)
         return self.driver
 
