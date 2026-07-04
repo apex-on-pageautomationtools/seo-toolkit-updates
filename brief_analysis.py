@@ -488,12 +488,71 @@ def check_canonical_tags(domain, pages=None):
     return results
 
 
+def _discover_sitemap(domain):
+    """Find the sitemap — robots.txt 'Sitemap:' first, then common locations —
+    and return (sitemap_url, [same-site page URLs]). Follows a sitemap index."""
+    import urllib.request
+    def _get(u):
+        try:
+            req = urllib.request.Request(u, headers={"User-Agent": "SEOToolkitPro/1.0"})
+            with urllib.request.urlopen(req, timeout=12) as r:
+                if getattr(r, "status", 200) != 200:
+                    return None
+                return r.read().decode("utf-8", "ignore")
+        except Exception:
+            return None
+    candidates = []
+    robots = _get(f"https://{domain}/robots.txt")
+    if robots:
+        for m in re.finditer(r'(?im)^\s*sitemap:\s*(\S+)', robots):
+            candidates.append(m.group(1).strip())
+    for path in ("/sitemap.xml", "/sitemap_index.xml", "/sitemap-index.xml", "/sitemap"):
+        u = f"https://{domain}{path}"
+        if u not in candidates:
+            candidates.append(u)
+    for sm_url in candidates:
+        content = _get(sm_url)
+        if not content or "<loc" not in content.lower():
+            continue
+        locs = [l.strip() for l in re.findall(r'<loc>\s*([^<]+?)\s*</loc>', content, re.I)]
+        if "<sitemapindex" in content.lower():
+            pages = []
+            for sub in locs[:8]:
+                sc = _get(sub)
+                if sc:
+                    pages += re.findall(r'<loc>\s*([^<]+?)\s*</loc>', sc, re.I)
+            pages = [p.strip() for p in pages]
+        else:
+            pages = locs
+        pages = [p for p in pages if domain in p]
+        if pages:
+            return sm_url, pages
+    return None, []
+
+
 def run_brief_checks(domain, target_pages=None, log_fn=None):
     """Run all brief analysis checks. Returns dict of results."""
     if log_fn is None:
         log_fn = print
     domain = re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
-    pages = target_pages or ["/", "/about", "/contact", "/services", "/blog"]
+    # Discover real pages from the sitemap so we check pages that actually EXIST
+    # instead of guessing /about, /contact (which return the homepage on SPAs).
+    sitemap_url, _sm_urls = None, []
+    try:
+        sitemap_url, _sm_urls = _discover_sitemap(domain)
+    except Exception:
+        pass
+    _sm_paths = []
+    for u in _sm_urls:
+        p = re.sub(r'^https?://[^/]+', '', u).split('#')[0].split('?')[0] or "/"
+        if p not in _sm_paths:
+            _sm_paths.append(p)
+    if target_pages:
+        pages = target_pages
+    elif _sm_paths:
+        pages = ["/"] + [p for p in _sm_paths if p not in ("/", "")][:3]
+    else:
+        pages = ["/"]   # no sitemap -> only the homepage (don't invent pages)
 
     log_fn("  Launching browser for data collection...")
 
@@ -538,6 +597,15 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
     sitemap = _safe("Sitemap check",
                     {"ok": False, "found": False, "summary": "Sitemap check could not be completed."},
                     check_sitemap, domain, robots_data=robots)
+    # Merge in the sitemap URL + real page count from discovery (robots.txt first).
+    if isinstance(sitemap, dict):
+        if sitemap_url:
+            sitemap["url_checked"] = sitemap_url
+            sitemap["found"] = True
+        if _sm_paths:
+            sitemap["page_count"] = len(_sm_paths)
+            if not sitemap.get("summary"):
+                sitemap["summary"] = f"Sitemap found with {len(_sm_paths)} page(s)."
 
     log_fn("  Checking broken links...")
     bl_pages = [f"https://{domain}{p}" if p.startswith("/") else p for p in pages[:3]]
@@ -775,14 +843,18 @@ def build_james(data, out_path, log_fn=None):
     idx = data.get("indexing", {})
     sitemap = data.get("sitemap", {})
     sm_count = "N/A"
-    sm_summary = sitemap.get("summary", "")
-    m = re.search(r'(\d+)\s*URL', sm_summary)
-    if m:
-        sm_count = f"~{m.group(1)} URLs"
+    pc = sitemap.get("page_count")
+    if pc:
+        sm_count = f"{pc} pages"
     else:
-        m2 = re.search(r'(\d+)\s*sub-sitemap', sm_summary)
-        if m2:
-            sm_count = f"{m2.group(1)} sub-sitemaps"
+        sm_summary = sitemap.get("summary", "")
+        m = re.search(r'(\d+)\s*URL', sm_summary)
+        if m:
+            sm_count = f"~{m.group(1)} URLs"
+        else:
+            m2 = re.search(r'(\d+)\s*sub-sitemap', sm_summary)
+            if m2:
+                sm_count = f"{m2.group(1)} sub-sitemaps"
     sm_status = "Found" if sitemap.get("found") or sitemap.get("ok") else "Not found"
     _add_table(s, ["Metric", "Value", "Coverage Status"],
                [["Indexed Pages (site: query)", f"~{idx.get('count', 'N/A')} URLs", idx.get("status", "N/A")],
@@ -910,7 +982,7 @@ def build_james(data, out_path, log_fn=None):
           2.0, 1.2, 7.5, 0.6, 11, "Calibri", TEXT, bold=True)
     rb = data.get("robots", {})
     rb_rows = [
-        ["Robots.txt Found", "Yes" if rb.get("found") else "No", rb.get("summary", "")[:40]],
+        ["Robots.txt Found", "Yes" if rb.get("found") else "No", rb.get("summary", "")[:90]],
     ]
     _add_table(s, ["Check Item", "Status", "Detail"],
                rb_rows, [2.5, 1.5, 3.5], 2.0, 2.0)
@@ -946,8 +1018,6 @@ def build_james(data, out_path, log_fn=None):
           align=PP_ALIGN.CENTER)
     _text(s, f"https://{domain}/", 2.0, 3.0, 7.0, 0.5, 16, "Calibri", LINK_BLUE,
           align=PP_ALIGN.CENTER)
-    _text(s, "For any questions, reach out to your SEO consultant.", 2.0, 3.8, 7.0, 0.5, 12,
-          "Calibri", SOFT, align=PP_ALIGN.CENTER)
 
     prs.save(out_path)
     log_fn(f"  James brief report saved: {os.path.basename(out_path)}")
