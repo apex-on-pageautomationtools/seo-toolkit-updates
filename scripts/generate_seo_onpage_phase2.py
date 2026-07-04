@@ -901,64 +901,101 @@ def audit_site(domain, pages_data, dry_run=False):
 
 def capture_onpage_screenshots(domain, sitemap_url=None):
     """Live, HEADLESS screenshots for the report — all public pages/tools, so no
-    Google login is needed. Reuses the health-report capture helpers. The sitemap
-    shot is taken of the ACTUAL found sitemap (only if one exists). PageSpeed is not
-    captured (its report rarely finishes loading — a manual-check note is shown)."""
-    import generate_health_report as hr
-    import generate_report as gr
-    from patchright.sync_api import sync_playwright
+    Google login is needed. Captured with selenium + Chrome via CDP: the embedded
+    python ships selenium but NOT patchright/playwright, so the old patchright
+    capture path silently produced NO screenshots on user machines. The sitemap
+    shot is taken of the ACTUAL found sitemap (only if one exists)."""
+    import base64, tempfile
+    import time as _t
 
-    gr.SCREENSHOTS_DIR.mkdir(exist_ok=True)
+    driver = _get_op_driver()
+    if not driver:
+        log("   [warn] no browser available — screenshots skipped")
+        return {}
+
     out = {}
+    out_dir = tempfile.mkdtemp(prefix=f"onpage_shots_{safe_domain(domain)}_")
     root = f"https://{domain}"
 
     def path(k):
-        return gr.SCREENSHOTS_DIR / f"{domain}_seo_{k}.png"
+        return os.path.join(out_dir, f"{domain}_seo_{k}.png")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_context(
-            viewport={"width": gr.VIEWPORT_W, "height": gr.VIEWPORT_H}).new_page()
-        jobs = [
-            ("homepage",  lambda: hr._capture_frame(page, root + "/", path("homepage"), height=900)),
-            ("robots",    lambda: hr._capture_frame(page, root + "/robots.txt", path("robots"), height=700)),
-            ("canonical", lambda: hr._capture_frame(page, root + "/", path("canonical"),
-                                                    height=760, view_source=True, find="canonical")),
-            ("serp",      lambda: hr._capture_frame(page, f"https://www.google.com/search?q=site:{domain}",
-                                                    path("serp"), height=900)),
-            ("wayback",   lambda: hr._capture_frame(page, f"https://web.archive.org/web/2/https://{domain}/",
-                                                    path("wayback"), height=900)),
-            ("viewport",  lambda: hr._capture_frame(page, root + "/", path("viewport"), height=900)),
-            ("sucuri",    lambda: gr.capture_sucuri(page, domain, path("sucuri"))),
-        ]
-        # only screenshot a sitemap that actually exists, at its real URL
-        if sitemap_url:
-            jobs.insert(2, ("sitemap",
-                            lambda: hr._capture_frame(page, sitemap_url, path("sitemap"), height=760)))
-
-        for key, fn in jobs:
-            try:
-                fn()
-                out[key] = str(path(key))
-                log(f"   -> captured [{key}]")
-            except Exception as e:
-                log(f"   [warn] capture {key} failed: {type(e).__name__}: {e}")
-
+    def _shot(key, url, height=900, view_source=False, sucuri=False):
+        p = path(key)
         try:
-            checked, broken_raw = hr._check_broken_links(domain)
-            # Count ONLY genuinely-broken links — 404/410 and 5xx. Many valid sites
-            # return 401/403/405/429 or block bots (ERR/0) for HEAD/GET, which are
-            # NOT broken links and were causing false positives.
-            broken = [(u, c) for (u, c) in broken_raw
-                      if isinstance(c, int) and (c in (404, 410) or 500 <= c < 600)]
-            hr._render_broken_links_image(domain, checked, broken, path("brokenlinks"))
-            out["brokenlinks"] = str(path("brokenlinks"))
-            out["_broken"] = len(broken)
-            log(f"   -> broken-link check: {checked} links, {len(broken)} genuinely broken")
+            driver.get(("view-source:" + url) if view_source else url)
+            _t.sleep(15 if sucuri else 4)          # let the page (or Sucuri scan) settle
+            # Google serves headless browsers a reCAPTCHA / "unusual traffic" wall
+            # instead of results — a screenshot of that is useless, so skip it (the
+            # indexing section falls back to a text note / GSC data).
+            if key == "serp":
+                src = (driver.page_source or "").lower()
+                if any(m in src for m in ("unusual traffic", "not a robot", "recaptcha",
+                                          "/sorry/", "detected unusual", "before you continue")):
+                    log("   [warn] Google SERP blocked (captcha) — skipping serp screenshot")
+                    return
+            try:
+                driver.execute_script(
+                    "document.querySelectorAll('.cookie-banner,.consent-banner,"
+                    "[class*=cookie],[class*=consent],#cookie-law-info-bar')"
+                    ".forEach(e=>e.remove()); window.scrollTo(0,0);")
+            except Exception:
+                pass
+            _t.sleep(0.6)
+            if view_source:
+                cdp = {"format": "png", "captureBeyondViewport": False}
+            else:
+                try:
+                    _w = driver.execute_script(
+                        "return Math.max(document.documentElement.clientWidth||0,"
+                        " window.innerWidth||0, 1366);")
+                except Exception:
+                    _w = 1366
+                # Sucuri's verdict sits at the very top — clip a fixed top region of
+                # the document so we never grab a scrolled 'check another URL' view.
+                h = 1300.0 if sucuri else float(height)
+                cdp = {"format": "png", "captureBeyondViewport": True,
+                       "clip": {"x": 0, "y": 0, "width": float(_w or 1366), "height": h, "scale": 1}}
+            result = driver.execute_cdp_cmd("Page.captureScreenshot", cdp)
+            with open(p, "wb") as f:
+                f.write(base64.b64decode(result["data"]))
+            out[key] = p
+            log(f"   -> captured [{key}]")
         except Exception as e:
-            log(f"   [warn] broken-link check failed: {e}")
+            log(f"   [warn] capture {key} failed: {type(e).__name__}: {e}")
+            try:                                   # last resort: plain viewport shot
+                driver.save_screenshot(p)
+                out[key] = p
+                log(f"   -> captured [{key}] (fallback)")
+            except Exception:
+                pass
 
-        browser.close()
+    _shot("homepage",  root + "/", height=900)
+    _shot("robots",    root + "/robots.txt", height=700)
+    _shot("canonical", root + "/", view_source=True)
+    if sitemap_url:                                # only shoot a sitemap that exists
+        _shot("sitemap", sitemap_url, height=760)
+    _shot("serp",      f"https://www.google.com/search?q=site:{domain}", height=900)
+    _shot("wayback",   f"https://web.archive.org/web/2/https://{domain}/", height=900)
+    _shot("viewport",  root + "/", height=900)
+    _shot("sucuri",    f"https://sitecheck.sucuri.net/results/https/{domain}", sucuri=True)
+
+    # Broken-links image — reuse health_audit's pure (non-patchright) helpers.
+    try:
+        import sys as _sys
+        _repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if _repo not in _sys.path:
+            _sys.path.insert(0, _repo)
+        import health_audit as _ha
+        checked, broken = _ha.check_broken_links(domain)
+        _ha._render_broken_links_image(domain, checked, broken, path("brokenlinks"))
+        out["brokenlinks"] = path("brokenlinks")
+        out["_broken"] = len(broken) if hasattr(broken, "__len__") else 0
+        log(f"   -> broken-link check: {checked} links, {out['_broken']} broken")
+    except Exception as e:
+        log(f"   [warn] broken-link check failed: {type(e).__name__}: {e}")
+
+    _close_op_driver()
     return out
 
 
