@@ -899,10 +899,11 @@ def _highlight_domain_in_serp(driver, domain_clean, first_only=False):
         if (firstOnly && count >= 1) break;
         var a = anchors[i];
         if (!a.querySelector || !a.querySelector('h3')) continue;   // organic title links
-        // Match the RESULT URL (the title link's href), not the title text — same
-        // basis the rank count uses. Handles direct links and /url?q= redirects.
-        var href = (a.href || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '');
-        if (href.indexOf(dom) === -1) continue;
+        // Match the result's HOST (or subdomain), NOT the title text or the domain
+        // merely appearing in another site's URL path (e.g. trustpilot.com/review/
+        // exactprint.co.uk must not highlight for exactprint.co.uk).
+        var host = (a.hostname || '').toLowerCase().replace(/^www\./, '');
+        if (host !== dom && !(host.length > dom.length && host.slice(-(dom.length + 1)) === '.' + dom)) continue;
         var box = a.closest('[data-hveid]') || a.closest('.g') || a.closest('.MjjYud') || a.parentElement;
         if (!box || box.getAttribute('data-stp-hl')) continue;
         box.setAttribute('data-stp-hl', '1');

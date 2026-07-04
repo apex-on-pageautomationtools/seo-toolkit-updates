@@ -1591,9 +1591,26 @@ def extract_organic(driver, debug=False):
     return links
 
 
+def _host_is_domain(link, domain_clean):
+    """True only if the RESULT's HOST is the domain (or a subdomain of it). This is
+    what makes the rank count by domain, not by the domain merely appearing in the
+    URL path or title — e.g. uk.trustpilot.com/review/exactprint.co.uk is Trustpilot
+    ranking, NOT exactprint.co.uk, so it must not be counted as the client's result."""
+    from urllib.parse import urlparse
+    try:
+        netloc = urlparse(link if "//" in str(link) else "http://" + str(link)).netloc
+    except Exception:
+        netloc = ""
+    host = (netloc or "").lower().split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return bool(host) and (host == domain_clean or host.endswith("." + domain_clean))
+
+
 def find_domain_in_page(driver, domain_clean, page_offset=0):
     """Ctrl+F style: find the domain in the current page's organic title links.
-    Returns list of {position, serp_url} with cumulative position across pages."""
+    Returns list of {position, serp_url} with cumulative position across pages.
+    Matches on the result HOST (or subdomain), not the URL path / title."""
     try:
         src = driver.page_source or ""
     except Exception:
@@ -1601,19 +1618,17 @@ def find_domain_in_page(driver, domain_clean, page_offset=0):
     links = _get_organic_links(src)
     results = []
     for i, link in enumerate(links):
-        norm = link.lower().replace("https://", "").replace("http://", "").replace("www.", "")
-        if domain_clean in norm:
+        if _host_is_domain(link, domain_clean):
             results.append({"position": i + 1 + page_offset, "serp_url": link})
     return results
 
 
 def match_domain(links, domain_clean):
-    """All 1-based positions where domain appears in the ordered links."""
+    """All 1-based positions where the domain (as the result HOST/subdomain) appears
+    in the ordered links — not where it merely appears in a URL path or title."""
     matches = []
     for i, link in enumerate(links):
-        norm = (link.lower()
-                .replace("https://", "").replace("http://", "").replace("www.", ""))
-        if domain_clean in norm:
+        if _host_is_domain(link, domain_clean):
             matches.append({"position": i + 1, "serp_url": link})
     return matches
 
