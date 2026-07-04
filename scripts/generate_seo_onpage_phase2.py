@@ -43,6 +43,12 @@ import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).parent.resolve()
+# The bundled python runs ISOLATED (a python312._pth file is present), so it does
+# NOT put this script's own folder on sys.path. Without this, sibling imports such
+# as `import generate_health_report` (used by the docx builder) raise
+# ModuleNotFoundError and no on-page report is ever produced on user machines.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 OUTPUT_DIR = ROOT / "output"
 TPL_META = ROOT / "template_meta_suggestions.xlsx"
 TPL_ALT = ROOT / "template_alt_suggestions.xlsx"

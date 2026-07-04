@@ -25,7 +25,10 @@ import json
 from urllib.parse import quote
 
 import generate_report as gr
-from patchright.sync_api import sync_playwright
+try:                                    # patchright isn't bundled — keep importable
+    from patchright.sync_api import sync_playwright
+except Exception:
+    sync_playwright = None
 
 CAPTURE_KEYS = ["sitemap", "manual", "security", "removal", "performance"]
 TEXT_KEYS = {"manual", "security", "removal"}

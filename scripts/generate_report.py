@@ -16,7 +16,13 @@ import struct
 from pathlib import Path
 from urllib.parse import quote
 from datetime import datetime
-from patchright.sync_api import sync_playwright
+# patchright/playwright isn't in the bundled python. Import it lazily so this
+# module stays importable (its helpers — png_dimensions etc. — are reused by the
+# health/on-page reports); only the legacy live-capture functions need it.
+try:
+    from patchright.sync_api import sync_playwright
+except Exception:
+    sync_playwright = None
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
