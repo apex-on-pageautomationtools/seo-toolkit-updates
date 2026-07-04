@@ -1432,6 +1432,157 @@ def run_index_analysis(urls, delay, headless, country, proxies,
         sess.quit()
 
 # --------------------------------------------------------------------------- #
+# Search-results count — searches each keyword and reads Google's "About N results"
+# --------------------------------------------------------------------------- #
+def _capture_result_count(driver):
+    """Read Google's 'About N results' total from the current SERP. Returns the
+    number exactly as Google groups it (e.g. '16,500' or the Indian '20,20,00,000'),
+    or '' if the page has no result-stats element."""
+    import re as _rc
+    def _extract(text):
+        if not text:
+            return ""
+        # First number-like run (digits + grouping separators). Language-agnostic —
+        # doesn't depend on the words "About"/"results", which are localised.
+        m = _rc.search(r'\d[\d.,   ]*\d|\d', text)
+        return m.group(0).strip("   ") if m else ""
+    # 1) The count lives in #result-stats: "About 16,500 results (0.18 seconds)"
+    try:
+        from selenium.webdriver.common.by import By
+        els = driver.find_elements(By.ID, "result-stats")
+        if els:
+            c = _extract(els[0].text or "")
+            if c:
+                return c
+    except Exception:
+        pass
+    # 2) Fallback: pull #result-stats out of the page source and strip its tags
+    try:
+        src = page_source(driver) or ""
+        m = _rc.search(r'id="result-stats"[^>]*>(.*?)</div>', src, _rc.S)
+        if m:
+            plain = _rc.sub(r'<[^>]+>', ' ', m.group(1))
+            c = _extract(plain)
+            if c:
+                return c
+        m = _rc.search(r'About\s+([\d.,   ]+?)\s+results', src)
+        if m:
+            return m.group(1).strip("   ")
+    except Exception:
+        pass
+    return ""
+
+
+def count_one(sess, keyword, country, city=None, lang="en"):
+    """Search Google for the keyword and return its total 'About N results' count."""
+    for _try in range(CONFIG.get("max_block_retries", 3) + 1):
+        if stop_event.is_set():
+            return {"status": "stopped", "results_count": ""}
+        pause_event.wait()
+        if not is_alive(sess.driver):
+            raise BrowserClosedError("Browser closed before search")
+        human_search(sess.driver, keyword, country, add_log, city=city, lang=lang)
+        src = page_source(sess.driver)
+        kind = classify_page(src)
+        if kind == "consent":
+            engine.accept_consent(sess.driver, add_log)
+            engine.accept_google_consent(sess.driver, add_log)
+            human_search(sess.driver, keyword, country, add_log, city=city, lang=lang)
+            src = page_source(sess.driver)
+            kind = classify_page(src)
+        if kind in ("captcha", "soft_block", "http_403"):
+            add_log(f"Block detected ({kind}). Starting recovery...")
+            if not _recover(sess, kind):
+                return {"status": "captcha", "results_count": ""}
+            continue
+        time.sleep(0.8)
+        count = _capture_result_count(sess.driver)
+        if count:
+            add_log(f"'{keyword}': about {count} results")
+            return {"status": "ok", "results_count": count}
+        low = src.lower()
+        if "did not match any documents" in low or "no results found" in low:
+            add_log(f"'{keyword}': 0 results")
+            return {"status": "ok", "results_count": "0"}
+        return {"status": "ok", "results_count": "N/A"}
+    return {"status": "ok", "results_count": "N/A"}
+
+
+def run_count_analysis(keywords, delay, headless, country, proxies,
+                       browser_pref="auto", vpn_method="none",
+                       latitude=None, longitude=None, city=None, lang="en"):
+    sess = Session(headless, country, ProxyPool(proxies), browser_pref, vpn_method,
+                   latitude, longitude, lang=lang)
+    try:
+        with state_lock:
+            state["status"] = "starting"
+        add_log("Launching hardened browser...")
+        sess.start(rotate=bool(sess.pool))
+        if not _vpn_pause_at_start(vpn_method, sess.driver):
+            return
+        with state_lock:
+            state["status"] = "running"
+
+        for i, kw in enumerate(keywords):
+            if stop_event.is_set():
+                break
+            pause_event.wait()
+            if stop_event.is_set():
+                break
+            if not is_alive(sess.driver):
+                add_log("Browser disconnected — restarting...")
+                try:
+                    sess.start(rotate=bool(sess.pool))
+                    add_log("Browser restarted successfully.")
+                except Exception as re_err:
+                    raise BrowserClosedError(f"Could not restart browser: {re_err}")
+            with state_lock:
+                state["current_keyword"] = kw
+                state["current_index"] = i + 1
+                state["status"] = "running"
+            add_log(f"Search results count '{kw}' ({i+1}/{len(keywords)})")
+            result = count_one(sess, kw, country, city=city, lang=lang)
+            with state_lock:
+                state["results"].append({
+                    "keyword": kw,
+                    "results_count": result.get("results_count", ""),
+                    "status": result.get("status", "unknown"),
+                    "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+            autosave()
+            if i < len(keywords) - 1 and not stop_event.is_set():
+                pause_event.wait()
+                if not stop_event.is_set():
+                    t0 = time.time()
+                    human_visit_neutral_bg(sess.driver, None, add_log)
+                    elapsed = time.time() - t0
+                    wait = max(0, max(CONFIG.get("min_keyword_delay", 2), delay) + random.uniform(1, 3) - elapsed)
+                    if wait > 0:
+                        add_log(f"Waiting {wait:.0f}s before next keyword...")
+                        t = 0
+                        while t < wait and not stop_event.is_set():
+                            time.sleep(1); t += 1
+
+        with state_lock:
+            state["status"] = "stopped" if stop_event.is_set() else "completed"
+        add_log("Search results count finished.", to_activity=True)
+        autosave()
+        _vpn_disconnect_pause(vpn_method, sess.driver)
+    except BrowserClosedError as e:
+        add_log(f"Browser closed: {e}")
+        autosave()
+        with state_lock:
+            state["status"] = "error"
+            state["error_msg"] = "Browser closed. Results saved — Export CSV to download."
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        add_log(f"Fatal error: {e}")
+        autosave()
+        with state_lock:
+            state["status"] = "error"; state["error_msg"] = str(e)
+    finally:
+        sess.quit()
+
+# --------------------------------------------------------------------------- #
 # Backlink checker — visits each backlink URL, finds domain link, checks meta
 # --------------------------------------------------------------------------- #
 def backlink_one(sess, backlink_url, target_domain, check_da=True):
@@ -1751,6 +1902,8 @@ def api_start():
         return jsonify({"error": "At least one URL required."}), 400
     if mode == "backlink" and (not domain or not keywords):
         return jsonify({"error": "Domain and at least one backlink URL required."}), 400
+    if mode == "count" and not keywords:
+        return jsonify({"error": "At least one keyword required."}), 400
 
     with state_lock:
         state.update({"status": "starting", "current_keyword": "", "current_index": 0,
@@ -1773,6 +1926,12 @@ def api_start():
                              args=(keywords, domain, delay, headless, country, proxies,
                                    browser_pref, vpn_method, check_da,
                                    latitude, longitude),
+                             daemon=True)
+    elif mode == "count":
+        t = threading.Thread(target=run_count_analysis,
+                             args=(keywords, delay, headless, country, proxies,
+                                   browser_pref, vpn_method,
+                                   latitude, longitude, city, lang),
                              daemon=True)
     else:
         t = threading.Thread(target=run_index_analysis,
@@ -2029,6 +2188,8 @@ def api_export_csv():
         fields = base + sorted(extra, key=_col_sort)
     elif m == "backlink":
         fields = ["url", "domain_found", "meta_robots", "link_type", "da", "pa", "da_source", "link_url", "status", "checked_at"]
+    elif m == "count":
+        fields = ["keyword", "results_count"]
     else:
         fields = ["url", "indexed", "found_url", "status", "checked_at"]
     w = csv.DictWriter(out, fieldnames=fields, extrasaction="ignore")
@@ -2038,6 +2199,8 @@ def api_export_csv():
         name = f"rankings_{ts}.csv"
     elif m == "backlink":
         name = f"backlink_check_{ts}.csv"
+    elif m == "count":
+        name = f"search_results_{ts}.csv"
     else:
         name = f"index_check_{ts}.csv"
     # Save to domain folder

@@ -345,6 +345,10 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c1.66 0 3.21.45 4.55 1.23"/></svg>
       <span class="sb-label">Indexing Checker</span>
     </button>
+    <button class="sb-item" id="tab-count" data-tip="Search Results Count" onclick="switchTab('count')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>
+      <span class="sb-label">Results Count</span>
+    </button>
     <button class="sb-item" id="tab-backlink" data-tip="Backlink Status" onclick="switchTab('backlink')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
       <span class="sb-label">Backlink Status</span>
@@ -621,6 +625,94 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
       </div>
       <div class="note">Searches Google for <b>site:domain.com/path</b> — indexing is global so no country needed. VPN/proxies protect your IP from Google blocks.</div>
       <input type="hidden" id="i-country" value="us">
+    </section>
+
+    <!-- SEARCH RESULTS COUNT SETTINGS -->
+    <section class="card panel" id="panel-count" style="display:none">
+      <div class="card-t">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>
+        Search Results Count Settings
+      </div>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">For each keyword, get Google's total "About N results" number — same regional browser as the Rank Checker. No domain or pages needed.</p>
+      <div class="field">
+        <label>Keywords <span class="hint">(one per line — max 100)</span></label>
+        <textarea id="c-keywords" placeholder="seo expert&#10;best seo company&#10;digital marketing agency"></textarea>
+      </div>
+      <div class="row2 field">
+        <div>
+          <label>Target country</label>
+          <input type="text" id="c-country" list="country-list" placeholder="Type to search…" value="United States" autocomplete="off">
+        </div>
+        <div>
+          <label>City <span class="hint">(geolocation)</span></label>
+          <select id="c-city"><option value="">— Auto from country —</option></select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Language <span class="hint">(hl=)</span></label>
+        <select id="c-lang">
+          <option value="en">English</option>
+          <option value="es">Spanish</option>
+          <option value="fr">French</option>
+          <option value="de">German</option>
+          <option value="it">Italian</option>
+          <option value="pt">Portuguese</option>
+          <option value="nl">Dutch</option>
+          <option value="pl">Polish</option>
+          <option value="ru">Russian</option>
+          <option value="ar">Arabic</option>
+          <option value="hi">Hindi</option>
+          <option value="ja">Japanese</option>
+          <option value="ko">Korean</option>
+          <option value="zh-CN">Chinese (Simplified)</option>
+          <option value="zh-TW">Chinese (Traditional)</option>
+          <option value="tr">Turkish</option>
+          <option value="id">Indonesian</option>
+          <option value="ms">Malay</option>
+          <option value="th">Thai</option>
+          <option value="vi">Vietnamese</option>
+        </select>
+      </div>
+      <div class="row2 field">
+        <div>
+          <label>Delay between</label>
+          <select id="c-delay">
+            <option value="3">Fast · 3s</option>
+            <option value="6" selected>Normal · 6s</option>
+            <option value="10">Safe · 10s</option>
+            <option value="15">Stealth · 15s</option>
+          </select>
+        </div>
+        <div>
+          <label>Browser</label>
+          <select id="c-browser">
+            <option value="auto" selected>Auto (Edge first)</option>
+            <option value="edge">Edge</option>
+            <option value="chrome">Chrome</option>
+          </select>
+        </div>
+      </div>
+      <div class="row2 field">
+        <div>
+          <label>Browser mode</label>
+          <select id="c-headless">
+            <option value="0" selected>Visible</option>
+            <option value="1">Headless</option>
+          </select>
+        </div>
+        <div>
+          <label>VPN method</label>
+          <select id="c-vpn">
+            <option value="none" selected>No VPN (recommended — uses city geolocation)</option>
+            <option value="pause">Pause to connect VPN manually</option>
+            <option value="windscribe">Windscribe extension</option>
+            <option value="edge_secure">Edge Secure Network</option>
+            <option value="system">System VPN (your own app)</option>
+            <option value="proxy">Free proxy (auto-fetched)</option>
+          </select>
+        </div>
+      </div>
+      <div class="note" style="line-height:1.6">The result count is the number Google shows under the search bar (e.g. <b>About 16,500 results</b>). It varies by <b>country</b>, <b>city</b> and <b>language</b>, so set those to match the market you care about. Uses the same CAPTCHA-resistant browser as the Rank Checker.</div>
     </section>
 
     <!-- BACKLINK SETTINGS -->
@@ -1230,6 +1322,18 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
         </table>
       </div>
 
+      <!-- results-count table -->
+      <div id="tbl-count" class="tbl-wrap" style="flex:1;display:none">
+        <div class="empty" id="empty-count">
+          <div class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg></div>
+          <p>Enter keywords to see how many results Google returns for each.</p>
+        </div>
+        <table id="tbl-c" class="hidden">
+          <thead><tr><th>#</th><th>Query</th><th style="text-align:center">Search Results</th></tr></thead>
+          <tbody id="tbody-c"></tbody>
+        </table>
+      </div>
+
     </section>
   </div><!-- /right -->
 </main>
@@ -1431,6 +1535,7 @@ function switchTab(m){
   if(tab) tab.classList.add('active');
   $('panel-ranking').style.display=m==='ranking'?'':'none';
   $('panel-index').style.display=m==='index'?'':'none';
+  $('panel-count').style.display=m==='count'?'':'none';
   $('panel-backlink').style.display=m==='backlink'?'':'none';
   $('panel-onpage').style.display=m==='onpage'?'':'none';
   $('panel-health').style.display=m==='health'?'':'none';
@@ -1440,6 +1545,7 @@ function switchTab(m){
   $('panel-brief').style.display=m==='brief'?'':'none';
   $('tbl-ranking').style.display=m==='ranking'?'':'none';
   $('tbl-index').style.display=m==='index'?'':'none';
+  $('tbl-count').style.display=m==='count'?'':'none';
   $('tbl-backlink').style.display=m==='backlink'?'':'none';
   $('tbl-onpage').style.display=m==='onpage'?'':'none';
   $('tbl-health').style.display=m==='health'?'':'none';
@@ -1447,9 +1553,10 @@ function switchTab(m){
   $('tbl-crawl').style.display=m==='crawl'?'':'none';
   $('tbl-admin').style.display=m==='admin'?'':'none';
   $('tbl-brief').style.display=m==='brief'?'':'none';
-  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',admin:'Admin Panel'};
+  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',admin:'Admin Panel'};
   const subs={ranking:'Find where your domain ranks on Google — across regions, CAPTCHA-resistant.',
     index:'Check if your URLs are indexed in Google — searches site:url to verify.',
+    count:'Get Google\'s total "About N results" number for each keyword — regional, CAPTCHA-resistant.',
     backlink:'Check if backlink pages have index/noindex meta tag, and if your link is dofollow/nofollow.',
     onpage:'Generate a comprehensive SEO on-page analysis report with meta, alt, canonical suggestions.',
     health:'Run a full website health checkup — Sucuri, robots, sitemap, canonical, broken links, PageSpeed, and more.',
@@ -1506,8 +1613,13 @@ function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show')
     rc.addEventListener('change',function(){updateCityDropdown('r',countryCode(rc.value));});
     rc.addEventListener('input',function(){updateCityDropdown('r',countryCode(rc.value));});
   }
+  const cc=$('c-country');
+  if(cc){
+    cc.addEventListener('change',function(){updateCityDropdown('c',countryCode(cc.value));});
+    cc.addEventListener('input',function(){updateCityDropdown('c',countryCode(cc.value));});
+  }
   // Init cities once loaded
-  const _wait=setInterval(()=>{if(_cities.length){clearInterval(_wait);updateCityDropdown('r',countryCode(rc?rc.value:'us'));updateCityDropdown('i','us');}},200);
+  const _wait=setInterval(()=>{if(_cities.length){clearInterval(_wait);updateCityDropdown('r',countryCode(rc?rc.value:'us'));updateCityDropdown('i','us');updateCityDropdown('c',countryCode(cc?cc.value:'us'));}},200);
 })();
 
 /* ===================== API ===================== */
@@ -1621,6 +1733,16 @@ async function doStart(){
     p.check_da=$('b-check-da').checked;
     if(!p.domain){toast('Enter your domain');return;}
     if(!p.keywords){toast('Enter at least one backlink URL');return;}
+  }else if(mode==='count'){
+    p.keywords=$('c-keywords').value.trim();
+    p.country=countryCode($('c-country').value);
+    p.delay=parseInt($('c-delay').value);
+    p.headless=$('c-headless').value==='1';
+    p.browser=$('c-browser').value;
+    p.vpn_method=$('c-vpn').value;
+    if($('c-city').value) p.city=$('c-city').value;
+    p.lang=$('c-lang').value||'en';
+    if(!p.keywords){toast('Enter at least one keyword');return;}
   }else{
     p.keywords=$('i-urls').value.trim();
     p.country=countryCode($('i-country').value);
@@ -1668,7 +1790,7 @@ async function poll(){try{const r=await fetch('/api/status');apply(await r.json(
 
 function apply(d){
   const _pm=d.mode||mode;
-  const isActive=['ranking','index','backlink'].includes(mode)&&(mode===_pm);
+  const isActive=['ranking','index','count','backlink'].includes(mode)&&(mode===_pm);
   if(isActive){setStatus(d.status);updateProgress(d.current_index,d.total,d.current_keyword);}
   else{$('cur-kw').textContent='';}
   if(d.captcha_msg) showAlert(true,d.captcha_msg); else if(d.status!=='paused') showAlert(false);
@@ -1702,7 +1824,7 @@ function updateProgress(cur,tot,kw){
   $('prog-lbl').textContent=cur+' / '+tot;
   $('cur-kw').textContent=(kw&&cur>0&&cur<=tot)?'Checking: "'+kw+'"':'';
 }
-const _modeState={ranking:'idle',index:'idle',backlink:'idle',onpage:'idle',health:'idle',gsc:'idle',crawl:'idle',brief:'idle',admin:'idle'};
+const _modeState={ranking:'idle',index:'idle',count:'idle',backlink:'idle',onpage:'idle',health:'idle',gsc:'idle',crawl:'idle',brief:'idle',admin:'idle'};
 function setButtons(s, m){
   m = m || mode;
   _modeState[m] = s;
@@ -1719,15 +1841,16 @@ function showAlert(show,msg){
   if(msg) $('alert-msg').textContent=msg;
 }
 function clearResults(){
-  tbody_r.innerHTML='';tbody_i.innerHTML='';tbody_b.innerHTML='';
+  tbody_r.innerHTML='';tbody_i.innerHTML='';tbody_b.innerHTML='';if(window.tbody_c)tbody_c.innerHTML='';
   document.querySelectorAll('.col-target').forEach(el=>el.classList.add('hidden'));
-  $('tbl-r').classList.add('hidden');$('tbl-i').classList.add('hidden');$('tbl-b').classList.add('hidden');
-  $('empty-ranking').style.display='block';$('empty-index').style.display='block';$('empty-backlink').style.display='block';$('empty-onpage').style.display='block';$('onpage-active').classList.add('hidden');$('empty-health').style.display='block';$('health-active').classList.add('hidden');
+  $('tbl-r').classList.add('hidden');$('tbl-i').classList.add('hidden');$('tbl-b').classList.add('hidden');$('tbl-c').classList.add('hidden');
+  $('empty-ranking').style.display='block';$('empty-index').style.display='block';$('empty-count').style.display='block';$('empty-backlink').style.display='block';$('empty-onpage').style.display='block';$('onpage-active').classList.add('hidden');$('empty-health').style.display='block';$('health-active').classList.add('hidden');
   $('count').textContent='0 results';$('btn-export').disabled=true;lastCount=0;
 }
 window.tbody_r=document.getElementById('tbody-r');
 window.tbody_i=document.getElementById('tbody-i');
 window.tbody_b=document.getElementById('tbody-b');
+window.tbody_c=document.getElementById('tbody-c');
 
 function rankClass(r){if(r<=0)return'r-none';if(r<=3)return'r-gold';if(r<=10)return'r-green';if(r<=20)return'r-blue';return'r-gray';}
 function appendRow(row,num,m){
@@ -1774,6 +1897,18 @@ function appendRow(row,num,m){
       '<td><span class="tag '+(row.status==='ok'?'t-yes':'t-unknown')+'">'+esc(row.status==='ok'?'Checked':(row.status||'').replace(/_/g,' '))+'</span></td>';
     tbody_i.appendChild(tr);
     $('tbl-i').classList.remove('hidden');$('empty-index').style.display='none';
+  } else if(m==='count'){
+    const raw=(row.results_count==null?'':String(row.results_count)).trim();
+    const failed=(row.status&&row.status!=='ok');
+    const hasNum=raw&&raw!=='N/A';
+    const disp=hasNum?raw:(failed?(row.status||'').replace(/_/g,' '):(raw||'N/A'));
+    const col=hasNum?'var(--text)':'var(--text-3)';
+    const tr=document.createElement('tr');
+    tr.innerHTML='<td style="color:var(--text-3)">'+num+'</td>'+
+      '<td class="cell-kw" style="font-weight:600">'+esc(row.keyword||'')+'</td>'+
+      '<td style="text-align:center;font-weight:700;color:'+col+'">'+esc(disp)+'</td>';
+    tbody_c.appendChild(tr);
+    $('tbl-c').classList.remove('hidden');$('empty-count').style.display='none';
   } else if(m==='backlink'){
     const df=row.domain_found||'No';
     const dfCls=df==='Yes'?'t-yes':'t-not_found';
