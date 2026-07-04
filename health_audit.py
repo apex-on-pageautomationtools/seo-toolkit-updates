@@ -1738,7 +1738,17 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
                 accounts = gsc_audit.list_accounts()
                 connected = [a for a in accounts if a.get("has_refresh")]
                 gsc_email = connected[0]["email"] if connected else None
+                # Resolve the REAL property (URL-prefix vs sc-domain) via the API so
+                # the manual-actions / security pages load the correct property —
+                # hardcoding sc-domain broke it for URL-prefix properties.
                 prop_url = f"sc-domain:{domain}"
+                if gsc_email:
+                    try:
+                        _tok = gsc_audit.get_access_token(gsc_email)
+                        prop_url = gsc_audit.resolve_property(_tok, domain) or prop_url
+                        log_fn(f"  GSC property: {prop_url}")
+                    except Exception as _e:
+                        log_fn(f"  Could not resolve GSC property ({_e}); using {prop_url}")
                 gsc_pages = []
                 if "manual_action" in uncaptured_gsc:
                     gsc_pages.append({"key": "manual_action", "page": "manual-actions", "wait": 12})
