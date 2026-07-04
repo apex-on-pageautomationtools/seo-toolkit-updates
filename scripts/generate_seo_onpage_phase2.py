@@ -940,11 +940,22 @@ def capture_onpage_screenshots(domain, sitemap_url=None):
                                           "/sorry/", "detected unusual", "before you continue")):
                     log("   [warn] Google SERP blocked (captcha) — skipping serp screenshot")
                     return
+            if sucuri:
+                # Click Sucuri's cookie-consent "Accept" so it isn't in the shot.
+                try:
+                    driver.execute_script("""
+                        var els=document.querySelectorAll('button,a,input[type=button],input[type=submit],span,div');
+                        for(var i=0;i<els.length;i++){var t=(els[i].textContent||els[i].value||'').trim().toLowerCase();
+                          if(t==='accept'||t==='accept all'||t==='i accept'||t==='allow all'||t==='allow'||t==='got it'||t==='agree'){try{els[i].click();}catch(e){}return;}}
+                    """)
+                    _t.sleep(1.2)
+                except Exception:
+                    pass
             try:
                 driver.execute_script(
                     "document.querySelectorAll('.cookie-banner,.consent-banner,"
-                    "[class*=cookie],[class*=consent],#cookie-law-info-bar')"
-                    ".forEach(e=>e.remove()); window.scrollTo(0,0);")
+                    "[class*=cookie],[class*=consent],[id*=cookie],[id*=consent],#cookie-law-info-bar')"
+                    ".forEach(function(e){e.remove();}); window.scrollTo(0,0);")
             except Exception:
                 pass
             _t.sleep(0.6)

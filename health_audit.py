@@ -945,11 +945,28 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
                 time.sleep(4)
 
             if key == "sucuri":
+                # Sucuri shows a cookie-consent bar over the verdict. Click "Accept"
+                # so it isn't in the screenshot; then remove any leftover banner.
+                try:
+                    driver.execute_script("""
+                        var els = document.querySelectorAll('button, a, input[type=button], input[type=submit], span, div');
+                        for (var i = 0; i < els.length; i++) {
+                            var t = (els[i].textContent || els[i].value || '').trim().toLowerCase();
+                            if (t === 'accept' || t === 'accept all' || t === 'i accept' ||
+                                t === 'allow all' || t === 'allow' || t === 'got it' || t === 'agree') {
+                                try { els[i].click(); } catch (e) {}
+                                return;
+                            }
+                        }
+                    """)
+                    time.sleep(1.2)
+                except Exception:
+                    pass
                 driver.execute_script(
-                    "document.querySelectorAll('.cookie-banner, .consent-banner, [class*=cookie], [class*=consent], #cookie-law-info-bar').forEach(e=>e.remove());"
+                    "document.querySelectorAll('.cookie-banner,.consent-banner,[class*=cookie],[class*=consent],[id*=cookie],[id*=consent],#cookie-law-info-bar').forEach(function(e){e.remove();});"
                     "window.scrollTo(0, 0);"
                 )
-                time.sleep(1)
+                time.sleep(0.6)
             else:
                 driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(0.5)

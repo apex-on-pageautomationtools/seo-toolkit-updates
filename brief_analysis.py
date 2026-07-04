@@ -458,9 +458,17 @@ def capture_brief_screenshots(domain, sitemap_url=None, log_fn=print):
     sample templates): homepage, view-source (title/meta/canonical), Google 'site:'
     SERP (indexing), sitemap and robots.txt. Returns {key: png_path}; best-effort —
     a missing/blocked shot is simply skipped."""
+    # Use a FRESH driver — after all the page rendering + the separate stealth
+    # engine used for indexing, the shared driver can be in a state where get()
+    # times out and cascades. A clean driver captures reliably.
+    _close_brief_driver()
     driver = _get_brief_driver()
     if not driver:
         return {}
+    try:
+        driver.set_page_load_timeout(20)     # heavy homepages can exceed the default
+    except Exception:
+        pass
     import base64
     out = {}
     out_dir = tempfile.mkdtemp(prefix="brief_shots_")
@@ -468,7 +476,15 @@ def capture_brief_screenshots(domain, sitemap_url=None, log_fn=print):
 
     def _shot(key, url, height, view_source=False, serp=False):
         try:
-            driver.get(("view-source:" + url) if view_source else url)
+            try:
+                driver.get(("view-source:" + url) if view_source else url)
+            except Exception:
+                # Page-load timeout on a heavy page — stop loading and screenshot
+                # whatever has rendered so far (good enough for a preview).
+                try:
+                    driver.execute_script("window.stop();")
+                except Exception:
+                    pass
             time.sleep(4 if serp else 3)
             if serp:                          # skip a Google CAPTCHA wall — useless as an image
                 low = (driver.page_source or "").lower()
