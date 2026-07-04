@@ -830,6 +830,50 @@ def _check_broken_links_located(domain, pages, max_links=80):
     return checked, broken
 
 
+def _select_sample_pages(sm_paths):
+    """A representative sample of REAL pages from the sitemap: Home + one
+    collection/category + one about/contact page. Uses only URLs that are actually
+    in the sitemap (so they exist); if a category/about isn't present it substitutes
+    another real non-product page, and a site with no other pages just gets Home."""
+    pages = ["/"]
+
+    def pick(keys):
+        for p in sm_paths:
+            pl = p.lower()
+            if p in pages or p in ("/", "") or "/products/" in pl or "/product/" in pl:
+                continue                      # skip Home, already-picked, deep products
+            if keys is None or any(k in pl for k in keys):
+                return p
+        return None
+
+    # 1 collection/category page (else any other real page)
+    collection = pick(["/collections/", "/collection/", "/category/", "/categories/",
+                       "/product-category/", "/shop"]) or pick(None)
+    if collection:
+        pages.append(collection)
+    # 1 about/contact page (else another real page)
+    about = pick(["about", "contact"]) or pick(None)
+    if about:
+        pages.append(about)
+    return pages[:3]
+
+
+def _normalize_target_pages(target_pages, domain):
+    """Turn user-provided pages (full URLs or paths) into site-relative paths."""
+    out = []
+    seq = target_pages if isinstance(target_pages, (list, tuple)) else [target_pages]
+    for tp in seq:
+        tp = str(tp or "").strip()
+        if not tp:
+            continue
+        p = re.sub(r'^\s*https?://[^/]+', '', tp).split('#')[0]
+        if not p.startswith("/"):
+            p = "/" + p
+        if p not in out:
+            out.append(p)
+    return out or ["/"]
+
+
 def run_brief_checks(domain, target_pages=None, log_fn=None):
     """Run all brief analysis checks. Returns dict of results."""
     if log_fn is None:
@@ -851,9 +895,9 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
         if p not in _sm_paths:
             _sm_paths.append(p)
     if target_pages:
-        pages = target_pages
+        pages = _normalize_target_pages(target_pages, domain)   # user's own pages
     elif _sm_paths:
-        pages = ["/"] + [p for p in _sm_paths if p not in ("/", "")][:3]
+        pages = _select_sample_pages(_sm_paths)                 # Home + collection + about/contact
     else:
         pages = ["/"]   # no sitemap -> only the homepage (don't invent pages)
 
