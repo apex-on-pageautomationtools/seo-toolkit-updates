@@ -4,6 +4,7 @@ Handles Google OAuth, GSC API data, screenshots, and 5 PPTX report formats.
 """
 
 import os
+import re
 import sys
 import json
 import time
