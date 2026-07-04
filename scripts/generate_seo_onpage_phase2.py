@@ -210,13 +210,121 @@ def _mock_page(url, keywords):
     }
 
 
+# --- selenium-rendered crawl (fallback when patchright isn't bundled) ----------
+# The embedded python ships selenium + Chrome but NOT patchright/playwright, so on
+# user machines the patchright path below never runs. Without this fallback every
+# page would be fetched as raw HTML — JS-rendered / SPA sites then report a missing
+# H1, zero images, zero headings and zero internal links. Rendering with Chrome
+# fixes that. One driver is reused for the whole run.
+_op_driver = None
+
+
+def _get_op_driver():
+    global _op_driver
+    if _op_driver is not None:
+        try:
+            _ = _op_driver.title
+            return _op_driver
+        except Exception:
+            _op_driver = None
+    try:
+        import tempfile
+        from selenium.webdriver import Chrome, ChromeOptions
+        opts = ChromeOptions()
+        opts.add_argument(f"--user-data-dir={tempfile.mkdtemp(prefix='seo_op_')}")
+        opts.add_argument("--headless=new")
+        opts.add_argument("--no-sandbox")
+        opts.add_argument("--disable-dev-shm-usage")
+        opts.add_argument("--disable-gpu")
+        opts.add_argument("--disable-notifications")
+        opts.add_argument("--mute-audio")
+        opts.add_argument("--window-size=1366,900")
+        opts.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+        _op_driver = Chrome(options=opts)
+        _op_driver.set_page_load_timeout(45)
+        return _op_driver
+    except Exception as e:
+        log(f"   [warn] could not launch Chrome for rendering: {type(e).__name__}: {e}")
+        return None
+
+
+def _close_op_driver():
+    global _op_driver
+    if _op_driver:
+        try:
+            _op_driver.quit()
+        except Exception:
+            pass
+        _op_driver = None
+
+
+def _op_http_status(url):
+    """Best-effort HTTP status (selenium doesn't expose it)."""
+    import urllib.request, urllib.error
+    for method in ("HEAD", "GET"):
+        try:
+            req = urllib.request.Request(url, method=method,
+                                         headers={"User-Agent": "Mozilla/5.0 SEOPhase2Bot"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return getattr(r, "status", 200) or 200
+        except urllib.error.HTTPError as e:
+            return e.code
+        except Exception:
+            continue
+    return None
+
+
+def _crawl_selenium(url, keywords):
+    """Render the page in Chrome (waits for the SPA to hydrate) and parse it.
+    Returns None if the browser is unavailable so the caller can fall back."""
+    driver = _get_op_driver()
+    if not driver:
+        return None
+    import time
+    try:
+        driver.get(url)
+        last, stable = -1, 0
+        for _ in range(22):                       # wait up to ~9s for hydration
+            try:
+                ready = driver.execute_script("return document.readyState")
+                blen = driver.execute_script(
+                    "return (document.body ? document.body.innerText.length : 0)")
+            except Exception:
+                break
+            if ready == "complete" and blen > 0 and blen == last:
+                stable += 1
+                if stable >= 2:                   # body text stable ~0.8s -> settled
+                    break
+            else:
+                stable = 0
+            last = blen
+            time.sleep(0.4)
+        html = driver.page_source or ""
+        final_url = driver.current_url or url
+    except Exception as e:
+        log(f"   [warn] selenium crawl failed for {url}: {type(e).__name__}: {e}")
+        return None
+    if not html or len(html) < 200:
+        return None
+    return _parse_html(html, final_url, _op_http_status(url))
+
+
+def _crawl_rendered(url, keywords):
+    """Prefer a real browser render (selenium+Chrome), fall back to raw HTTP."""
+    sel = _crawl_selenium(url, keywords)
+    if sel is not None:
+        return sel
+    return _crawl_requests(url, keywords)
+
+
 def crawl_page(url, keywords, dry_run=False):
     if dry_run:
         return _mock_page(url, keywords)
     try:
         from patchright.sync_api import sync_playwright
     except Exception:
-        return _crawl_requests(url, keywords)
+        return _crawl_rendered(url, keywords)      # no patchright -> selenium/raw
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -232,7 +340,7 @@ def crawl_page(url, keywords, dry_run=False):
         return _parse_html(html, final_url or url, status)
     except Exception as e:
         log(f"   [warn] browser crawl failed for {url}: {type(e).__name__}: {e}")
-        return _crawl_requests(url, keywords)
+        return _crawl_rendered(url, keywords)      # patchright failed -> selenium/raw
 
 
 def _crawl_requests(url, keywords):
@@ -1721,6 +1829,7 @@ def main():
         pages_data.append(pd)
         if homepage is None or urllib.parse.urlparse(pd["url"]).path in ("", "/"):
             homepage = pd
+    _close_op_driver()          # done crawling — free the render browser
     log(f"[2/5] Crawled {total} page(s)")
 
     brand = brand_from(domain, homepage.get("title") if homepage else None,
