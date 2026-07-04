@@ -33,7 +33,7 @@
     },
     {
       "path": "updater.py",
-      "hash": "45733340a568aed8d3ef6d1574f427d7bf9c6c13f588a5498cd626c416e8d741",
+      "hash": "6bf78de206c74ed1df79a0f65cb95c2c6f3300ef1e5884b9d5f1d7bc5efb03e8",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/updater.py"
     },
     {
@@ -150,6 +150,16 @@
       "path": "python/Lib/site-packages/zz_openpyxl_ota.pth",
       "hash": "6bf09f2f091b38ad169e7db95893063dca5e0a559a76386a5b5b808b7a8f56cd",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/python/Lib/site-packages/zz_openpyxl_ota.pth"
+    },
+    {
+      "path": "Start Tool.vbs",
+      "hash": "956d256b5629ecdb6a057dcf539cbf9b0948e95b24128e48f878908752194552",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/Start%20Tool.vbs"
+    },
+    {
+      "path": "app_launch.ps1",
+      "hash": "69c32a58c0046dc90bb66120f6341bfd8ad86b612bd23918e85bb8d8227e8e64",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/app_launch.ps1"
     }
   ]
 }

@@ -114,7 +114,14 @@ def check_and_update(log_fn=None):
                 pass
 
         log_fn(f"[update] Downloading {rel_path}...")
-        if _download_file(download_url, local_path):
+        ok = _download_file(download_url, local_path)
+        # Verify the download matches the manifest hash. A truncated/corrupt download
+        # can otherwise brick a launcher file (Start Tool.vbs / app_launch.ps1) with no
+        # way to self-heal, since the broken launcher is what runs the updater.
+        if ok and remote_hash and _file_hash(local_path) != remote_hash:
+            ok = False
+            _log_update(f"Hash mismatch: {rel_path}")
+        if ok:
             updated_files.append(rel_path)
             _log_update(f"Updated: {rel_path} ({local_hash[:8]}... -> {remote_hash[:8]}...)")
             # Remove backup on success
@@ -127,12 +134,18 @@ def check_and_update(log_fn=None):
         else:
             failed.append(rel_path)
             _log_update(f"Failed: {rel_path}")
-            # Restore from backup
+            # Roll back: restore the previous good version, or drop a corrupt new file
             backup = local_path + ".bak"
             if os.path.exists(backup):
                 try:
                     shutil.copy2(backup, local_path)
                     os.remove(backup)
+                except Exception:
+                    pass
+            else:
+                try:
+                    if os.path.exists(local_path):
+                        os.remove(local_path)
                 except Exception:
                     pass
 
