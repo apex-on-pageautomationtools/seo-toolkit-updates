@@ -28,6 +28,41 @@ def _fetch_html(url, timeout=15):
         return None
 
 
+# Per-run cache of browser-rendered pages so the same URL is only rendered once
+# across the canonical / double-meta / meta-robots / meta-source checks.
+_RENDER_CACHE = {}
+
+
+def _render_html(url, driver=None, wait=1.2):
+    """Return the page as a real browser renders it (so JS-set title / meta /
+    canonical are seen — Google renders JS, so this is the ACTUAL state that
+    matters). Falls back to raw HTTP when no browser/driver is available."""
+    if url in _RENDER_CACHE:
+        return _RENDER_CACHE[url]
+    html = None
+    if driver is not None:
+        import time
+        try:
+            driver.get(url)
+            for _ in range(16):                       # wait up to ~4s for load
+                try:
+                    if driver.execute_script("return document.readyState") == "complete":
+                        break
+                except Exception:
+                    break
+                time.sleep(0.25)
+            time.sleep(wait)                          # short settle for hydration
+            h = driver.page_source or ""
+            if h and len(h) > 200:
+                html = h
+        except Exception:
+            html = None
+    if not html:
+        html = _fetch_html(url)
+    _RENDER_CACHE[url] = html
+    return html
+
+
 def _google_via_selenium(driver, query, num=30):
     """Run a Google search through the Selenium browser to avoid bot blocks.
     Returns page HTML or None. Uses gentle delays to stay under the radar."""
@@ -106,7 +141,7 @@ def _detect_live_homepage(domain):
     return f"https://{domain}/"
 
 
-def check_canonical(target_pages, domain):
+def check_canonical(target_pages, domain, driver=None):
     pages = list(target_pages) if target_pages else []
     homepage = _detect_live_homepage(domain)
     if not any(p.rstrip("/") == homepage.rstrip("/") for p in pages):
@@ -118,7 +153,7 @@ def check_canonical(target_pages, domain):
             continue
         if not url.startswith("http"):
             url = "https://" + url
-        html = _fetch_html(url)
+        html = _render_html(url, driver)
         if html is None:
             results.append({"url": url, "canonical": "—", "ok": False, "note": "Could not fetch"})
             continue
@@ -137,7 +172,7 @@ def check_canonical(target_pages, domain):
     return results
 
 
-def check_double_meta(target_pages, domain):
+def check_double_meta(target_pages, domain, driver=None):
     pages = list(target_pages) if target_pages else []
     if not pages:
         pages = [f"https://{domain}/"]
@@ -148,7 +183,7 @@ def check_double_meta(target_pages, domain):
             continue
         if not url.startswith("http"):
             url = "https://" + url
-        html = _fetch_html(url)
+        html = _render_html(url, driver)
         if html is None:
             results.append({"url": url, "title_count": "—", "desc_count": "—", "ok": False, "note": "Could not fetch"})
             continue
@@ -169,7 +204,7 @@ def check_double_meta(target_pages, domain):
     return results
 
 
-def check_meta_robots(target_pages, domain):
+def check_meta_robots(target_pages, domain, driver=None):
     pages = list(target_pages) if target_pages else []
     if not pages:
         pages = [f"https://{domain}/"]
@@ -180,7 +215,7 @@ def check_meta_robots(target_pages, domain):
             continue
         if not url.startswith("http"):
             url = "https://" + url
-        html = _fetch_html(url)
+        html = _render_html(url, driver)
         if html is None:
             results.append({"url": url, "robots_value": "—", "ok": False, "note": "Could not fetch"})
             continue
@@ -594,9 +629,10 @@ def check_serp(domain, driver=None):
     return {"ok": True, "summary": summary, "result_count": count or "unknown", "spam_found": []}
 
 
-def check_blank_pages(target_pages, domain):
+def check_blank_pages(target_pages, domain, driver=None):
     """Fetch target pages and check if they have minimal content (blank).
-    Only runs when target pages are provided — homepage-only check is skipped."""
+    Uses the RENDERED page so JS/SPA sites aren't falsely flagged as blank (their
+    raw HTML is an empty shell). Only runs when target pages are provided."""
     pages = [p.strip() for p in (target_pages or []) if p.strip()]
     if not pages:
         return [], 0
@@ -604,7 +640,7 @@ def check_blank_pages(target_pages, domain):
     for url in pages:
         if not url.startswith("http"):
             url = "https://" + url
-        html = _fetch_html(url)
+        html = _render_html(url, driver)
         if html is None:
             results.append({"url": url, "ok": False, "note": "Could not fetch"})
             continue
@@ -963,6 +999,7 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
     domain = re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
     captured = captured or {}
     target_pages = [p.strip() for p in (target_pages or []) if p.strip()]
+    _RENDER_CACHE.clear()      # fresh per-run cache of browser-rendered pages
 
     _tmp = Path(tempfile.gettempdir())
 
@@ -1001,13 +1038,13 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
     s200 = check_status200(target_pages, domain)
 
     _prog("Running canonical check...")
-    canon = check_canonical(target_pages, domain)
+    canon = check_canonical(target_pages, domain, driver=driver)
 
     _prog("Running double meta check...")
-    dmeta = check_double_meta(target_pages, domain)
+    dmeta = check_double_meta(target_pages, domain, driver=driver)
 
     _prog("Running meta robots check...")
-    mrobots = check_meta_robots(target_pages, domain)
+    mrobots = check_meta_robots(target_pages, domain, driver=driver)
 
     _prog("Running URL versions check...")
     versions_summary, versions_rows = check_versions_full(domain)
@@ -1022,10 +1059,10 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
     serp = check_serp(domain, driver=driver)
 
     _prog("Checking blank pages...")
-    blank_results, blank_count = check_blank_pages(target_pages, domain)
+    blank_results, blank_count = check_blank_pages(target_pages, domain, driver=driver)
 
     _prog("Checking meta source code...")
-    homepage_html = _fetch_html(f"https://{domain}/")
+    homepage_html = _render_html(f"https://{domain}/", driver)
     if homepage_html:
         hp_meta = _parse_meta(homepage_html)
         has_title = bool(hp_meta["title"])
