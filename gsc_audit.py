@@ -412,34 +412,46 @@ def find_session_for_email(email):
 
 def capture_gsc_with_session(session_id, property_url, email, out_dir,
                               pages=None, browser_pref="edge", log_fn=None):
-    """Launch a session browser and capture GSC screenshots."""
+    """Launch the GSC-login session browser and capture GSC screenshots from it.
+    Uses the exact profile where the user logged into Google Search Console. Google
+    often bounces a HEADLESS relaunch of a logged-in profile to the sign-in page, so
+    if the headless attempt is bounced we retry once in a VISIBLE window (matching how
+    the session was created) — that keeps the login alive and the screenshots real."""
     if log_fn is None:
         log_fn = print
     import engine
     profile_dir = os.path.join(_sessions_dir(), session_id, "chrome_profile")
-    driver = None
-    try:
-        driver = engine.build_driver(
-            profile_dir, proxy=None, headless=True,
-            country="us", extra_extensions=[],
-            logger=log_fn, browser_pref=browser_pref,
-        )
-        driver.get("https://search.google.com/search-console")
-        time.sleep(3)
-        if "accounts.google.com" in driver.current_url:
-            log_fn("  Session expired — need to re-login")
-            return {"error": "session_expired", "session_id": session_id}
-        return capture_gsc_screenshots(driver, property_url, email, out_dir,
-                                        pages=pages, log_fn=log_fn)
-    except Exception as e:
-        log_fn(f"  Session capture error: {e}")
-        return {"error": str(e)}
-    finally:
-        if driver:
-            try:
-                driver.quit()
-            except Exception:
-                pass
+
+    def _attempt(headless):
+        driver = None
+        try:
+            driver = engine.build_driver(
+                profile_dir, proxy=None, headless=headless,
+                country="us", extra_extensions=[],
+                logger=log_fn, browser_pref=browser_pref,
+            )
+            driver.get("https://search.google.com/search-console")
+            time.sleep(3)
+            cur = (driver.current_url or "").lower()
+            if "accounts.google.com" in cur or "/signin" in cur or "servicelogin" in cur:
+                return {"error": "session_expired", "session_id": session_id}
+            return capture_gsc_screenshots(driver, property_url, email, out_dir,
+                                            pages=pages, log_fn=log_fn)
+        except Exception as e:
+            log_fn(f"  Session capture error ({'headless' if headless else 'visible'}): {e}")
+            return {"error": str(e)}
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+
+    result = _attempt(headless=True)
+    if isinstance(result, dict) and result.get("error") == "session_expired":
+        log_fn("  Headless GSC session bounced to login — retrying in a visible window...")
+        result = _attempt(headless=False)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -687,8 +699,12 @@ def capture_gsc_screenshots(driver, property_url, email, out_dir, pages=None, lo
         try:
             driver.get(url)
             time.sleep(p["wait"])
-            if p["key"] in ("manual", "security", "removals"):
-                status = _detect_page_status(driver, p["key"])
+            # Normalise the health-audit key names ("manual_action"/"security_issues")
+            # to the status detector's base keys ("manual"/"security").
+            status_key = {"manual_action": "manual",
+                          "security_issues": "security"}.get(p["key"], p["key"])
+            if status_key in ("manual", "security", "removals"):
+                status = _detect_page_status(driver, status_key)
                 if status:
                     statuses[p["key"]] = status
                     log_fn(f"  {p['key']} status: {status}")

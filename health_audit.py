@@ -1756,33 +1756,31 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
                     gsc_pages.append({"key": "security_issues", "page": "security-issues", "wait": 8})
                 if gsc_pages:
                     gsc_captured = False
-                    if gsc_email:
-                        session = gsc_audit.find_session_for_email(gsc_email)
-                        if session:
-                            log_fn(f"  Capturing GSC screenshots via saved session ({session.get('label', session['id'])})...")
-                            gsc_ss = gsc_audit.capture_gsc_with_session(
-                                session["id"], prop_url, gsc_email, ss_dir,
-                                pages=gsc_pages, log_fn=log_fn)
-                            if isinstance(gsc_ss, dict) and "error" not in gsc_ss:
-                                captured.update(gsc_ss)
-                                gsc_captured = True
-                            elif isinstance(gsc_ss, dict) and gsc_ss.get("error") == "session_expired":
-                                log_fn(f"  Session expired — re-login needed in GSC Sessions")
+                    sessions = gsc_audit.list_sessions()
+                    # A session's "accounts" list is only populated by a cookie scan, which
+                    # may not have run — so a perfectly-good logged-in session can look
+                    # "untagged". Try email-matched sessions FIRST, then every other session.
+                    # capture_gsc_with_session verifies it's actually logged in (and retries
+                    # in a visible window if Google bounces the headless relaunch to login).
+                    def _email_match(s):
+                        return bool(gsc_email) and gsc_email.lower() in [a.lower() for a in s.get("accounts", [])]
+                    ordered = [s for s in sessions if _email_match(s)] + [s for s in sessions if not _email_match(s)]
+                    for sess in ordered:
+                        tag = "matched" if _email_match(sess) else "untagged"
+                        log_fn(f"  Capturing GSC screenshots via session {sess.get('label', sess['id'])} ({tag})...")
+                        gsc_ss = gsc_audit.capture_gsc_with_session(
+                            sess["id"], prop_url, gsc_email or "", ss_dir,
+                            pages=gsc_pages, log_fn=log_fn)
+                        if isinstance(gsc_ss, dict) and "error" not in gsc_ss:
+                            captured.update(gsc_ss)
+                            gsc_captured = True
+                            break
+                        elif isinstance(gsc_ss, dict) and gsc_ss.get("error") == "session_expired":
+                            log_fn(f"  Session {sess.get('label', sess['id'])} needs re-login in GSC Sessions.")
                     if not gsc_captured:
-                        sessions = gsc_audit.list_sessions()
-                        for sess in sessions:
-                            if not gsc_email or gsc_email not in [a.lower() for a in sess.get("accounts", [])]:
-                                continue
-                            log_fn(f"  Trying session {sess.get('label', sess['id'])}...")
-                            gsc_ss = gsc_audit.capture_gsc_with_session(
-                                sess["id"], prop_url, gsc_email or "", ss_dir,
-                                pages=gsc_pages, log_fn=log_fn)
-                            if isinstance(gsc_ss, dict) and "error" not in gsc_ss:
-                                captured.update(gsc_ss)
-                                gsc_captured = True
-                                break
-                    if not gsc_captured:
-                        if not gsc_email:
+                        if not sessions:
+                            log_fn("  No GSC browser session found — create one in GSC Audit > Browser Sessions")
+                        elif not gsc_email:
                             log_fn("  GSC not connected — skipping manual_action/security_issues screenshots")
                         else:
                             log_fn("  No valid GSC browser session found — create one in GSC Audit > Browser Sessions")
