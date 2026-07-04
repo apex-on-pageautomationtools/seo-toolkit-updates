@@ -60,6 +60,166 @@ def _close_brief_driver():
         _brief_driver = None
 
 
+_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+       "(KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
+
+# Per-run cache so each URL is rendered by the browser only ONCE even though
+# several checks (title / meta / headers / canonical / image alt) all need it.
+_PAGE_CACHE = {}
+# Rendered-content fingerprints for the current run, used to catch SPA soft-404s
+# (sites that return HTTP 200 for every route and client-render a fallback view
+# for URLs that don't actually exist).
+_HOME_SIG = [None]   # the homepage
+_NF_SIG = [None]     # a deliberately-nonexistent probe URL = the site's 404 view
+
+
+def _page_signature(html):
+    """A stable fingerprint of a page's visible content (title + start of body
+    text) used to tell whether two URLs render the SAME page."""
+    if not html:
+        return ""
+    m = re.search(r'<title[^>]*>([^<]*)</title>', html, re.I)
+    title = (m.group(1) if m else "").strip().lower()
+    text = re.sub(r'(?is)<(script|style|noscript)[^>]*>.*?</\1>', ' ', html)
+    text = re.sub(r'(?s)<[^>]+>', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip().lower()
+    return title + "||" + text[:1500]
+
+
+def _sig_similar(a, b, thresh=0.92):
+    """True if two page signatures are (near-)identical — the fake route echoing
+    its own path is the only difference, so a high-ratio match still counts."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, a, b).ratio() >= thresh
+
+
+def _prime_soft404(domain):
+    """Render a guaranteed-nonexistent URL once to capture the site's soft-404
+    fingerprint. SPAs that 200 every route render their fallback/404 view here,
+    which lets us flag other pages that render the same thing as 'Not Found'."""
+    probe = f"https://{domain}/__seo_toolkit_probe_404__/no-such-page"
+    try:
+        _NF_SIG[0] = _page_signature(_render_html(probe))
+    except Exception:
+        _NF_SIG[0] = None
+
+
+def _http_status(url):
+    """Best-effort HTTP status for a URL (HEAD, then GET fallback).
+    Returns the code (e.g. 200, 404) or 0 if the host is unreachable."""
+    import urllib.error
+    for method in ("HEAD", "GET"):
+        try:
+            req = urllib.request.Request(url, method=method,
+                                         headers={"User-Agent": _UA})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return getattr(r, "status", 200) or 200
+        except urllib.error.HTTPError as e:
+            return e.code          # 404/410/etc. is a real answer — stop here
+        except Exception:
+            continue
+    return 0
+
+
+def _looks_not_found(html):
+    """True if the page's <title>/<h1> says it's a 404 / 'page not found'.
+    Catches soft-404s (SPA routes that return HTTP 200 but render a 404 page)."""
+    if not html:
+        return False
+    m = re.search(r'<title[^>]*>([^<]*)</title>', html, re.I)
+    title = (m.group(1) if m else "").lower()
+    hm = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.I | re.S)
+    h1 = re.sub(r'<[^>]+>', '', hm.group(1)).lower() if hm else ""
+    hay = title + " " + h1
+    for phrase in ("404 not found", "page not found", "page doesn't exist",
+                   "page does not exist", "404 error", "error 404",
+                   "not found", "nothing found", "page cannot be found",
+                   "no longer exists"):
+        if phrase in hay:
+            return True
+    return False
+
+
+def _render_html(url, max_wait=9.0):
+    """Return fully-rendered HTML (JavaScript executed) via the headless browser,
+    falling back to raw HTTP if the browser is unavailable. Waits for the SPA to
+    finish hydrating (body text stops growing) so title/heading/meta checks see
+    the real content, not an empty shell."""
+    driver = _get_brief_driver()
+    html = ""
+    if driver:
+        try:
+            driver.get(url)
+            last_len, stable = -1, 0
+            for _ in range(int(max_wait / 0.4)):
+                try:
+                    ready = driver.execute_script("return document.readyState")
+                    blen = driver.execute_script(
+                        "return (document.body ? document.body.innerText.length : 0)")
+                except Exception:
+                    break
+                if ready == "complete" and blen > 0 and blen == last_len:
+                    stable += 1
+                    if stable >= 2:          # content unchanged for ~0.8s -> settled
+                        break
+                else:
+                    stable = 0
+                last_len = blen
+                time.sleep(0.4)
+            html = driver.page_source or ""
+        except Exception:
+            html = ""
+    if not html or len(html) < 200:                   # browser failed -> raw HTTP
+        raw = _fetch_html(url)
+        if raw:
+            html = raw
+    return html
+
+
+def _get_page(url):
+    """Fetch a page once (rendered HTML + whether it actually exists), cached for
+    the run. Returns {'html': str, 'status': int, 'exists': bool}.
+
+    Existence is decided by: HTTP status (404/410), a 'page not found' title/H1,
+    OR — for SPAs that 200 every route — the rendered content being identical to
+    the homepage (the app served its shell for a URL that doesn't exist)."""
+    if url in _PAGE_CACHE:
+        return _PAGE_CACHE[url]
+    status = _http_status(url)
+    html = "" if status in (404, 410) else _render_html(url)
+    exists = status not in (404, 410) and not _looks_not_found(html)
+
+    path = re.sub(r'^https?://[^/]+', '', url).split('#')[0].split('?')[0]
+    sig = _page_signature(html)
+    if path in ("", "/"):
+        if sig:
+            _HOME_SIG[0] = sig                        # remember the homepage
+    elif exists and sig:
+        # SPA soft-404: this route renders the same thing as the 404 probe (or is
+        # byte-identical to the homepage shell) -> the page doesn't really exist.
+        if (_NF_SIG[0] and _sig_similar(sig, _NF_SIG[0])) or \
+           (_HOME_SIG[0] and sig == _HOME_SIG[0]):
+            exists = False
+
+    page = {"html": html, "status": status, "exists": exists}
+    _PAGE_CACHE[url] = page
+    return page
+
+
+def _page_name(pg):
+    """Human label for a page path: last segment, title-cased. '/' -> 'Home'."""
+    seg = (pg or "").strip("/").split("/")[-1]
+    if not seg:
+        return "Home"
+    seg = re.sub(r'\.\w{2,5}$', '', seg)               # drop .html/.php extension
+    seg = seg.replace("-", " ").replace("_", " ").strip()
+    return (seg.title() or "Home")[:22]
+
+
 def _browser_get_indexing(domain):
     """Read the 'About X results' count from a Google site: query via the browser.
     Handles the consent wall + one retry; returns None if Google blocks the query
@@ -322,14 +482,21 @@ def check_domain_age(domain):
 
 
 def check_title_tags(domain, pages=None):
-    """Check title tags on key pages."""
+    """Check title tags on key pages (uses rendered HTML so SPA pages work,
+    and marks pages that don't exist as 'Not Found')."""
     if not pages:
-        pages = ["/", "/about", "/contact", "/services", "/blog"]
+        pages = ["/"]
     results = []
     for pg in pages:
         url = f"https://{domain}{pg}"
-        html = _fetch_html(url)
+        name = _page_name(pg)
+        page = _get_page(url)
+        if not page["exists"]:
+            results.append({"page": name, "title": "Page not found", "chars": "0", "status": "Not Found"})
+            continue
+        html = page["html"]
         if not html:
+            results.append({"page": name, "title": "Could not fetch", "chars": "0", "status": "Could not check"})
             continue
         meta = _parse_meta(html)
         title = meta["title"][0] if meta["title"] else ""
@@ -342,20 +509,26 @@ def check_title_tags(domain, pages=None):
             status = "Too long"
         else:
             status = "Good"
-        name = pg.strip("/").capitalize() or "Home"
         results.append({"page": name, "title": title[:40], "chars": str(length), "status": status})
     return results
 
 
 def check_meta_desc(domain, pages=None):
-    """Check meta descriptions on key pages."""
+    """Check meta descriptions on key pages (rendered HTML; 'Not Found' for
+    pages that don't exist)."""
     if not pages:
-        pages = ["/", "/about", "/contact", "/services", "/blog"]
+        pages = ["/"]
     results = []
     for pg in pages:
         url = f"https://{domain}{pg}"
-        html = _fetch_html(url)
+        name = _page_name(pg)
+        page = _get_page(url)
+        if not page["exists"]:
+            results.append({"page": name, "found": "No", "chars": "0", "status": "Not Found"})
+            continue
+        html = page["html"]
         if not html:
+            results.append({"page": name, "found": "No", "chars": "0", "status": "Could not check"})
             continue
         meta = _parse_meta(html)
         desc = meta["description"][0] if meta["description"] else ""
@@ -369,23 +542,27 @@ def check_meta_desc(domain, pages=None):
             status = "Too long"
         else:
             status = "Good"
-        name = pg.strip("/").capitalize() or "Home"
         results.append({"page": name, "found": found, "chars": str(length), "status": status})
     return results
 
 
 def check_headers(domain, pages=None):
-    """Count H1-H6 tags on key pages."""
+    """Count H1-H6 tags on key pages (rendered HTML; missing pages flagged)."""
     if not pages:
-        pages = ["/", "/about", "/contact"]
+        pages = ["/"]
     results = []
     for pg in pages:
         url = f"https://{domain}{pg}"
-        html = _fetch_html(url)
-        if not html:
+        name = _page_name(pg)
+        page = _get_page(url)
+        counts = {f"h{i}": 0 for i in range(1, 7)}
+        if not page["exists"]:
+            results.append({"page": f"{name} (Not Found)", **counts})
             continue
-        name = pg.strip("/").capitalize() or "Home"
-        counts = {}
+        html = page["html"]
+        if not html:
+            results.append({"page": f"{name} (no data)", **counts})
+            continue
         for i in range(1, 7):
             counts[f"h{i}"] = len(re.findall(rf"<h{i}[\s>]", html, re.I))
         results.append({"page": name, **counts})
@@ -393,8 +570,8 @@ def check_headers(domain, pages=None):
 
 
 def check_image_alts(domain):
-    """Check image alt tags on homepage."""
-    html = _fetch_html(f"https://{domain}/")
+    """Check image alt tags on homepage (rendered HTML)."""
+    html = _get_page(f"https://{domain}/")["html"]
     if not html:
         return []
     imgs = re.findall(r'<img\s[^>]*?>', html, re.I | re.S)
@@ -463,16 +640,23 @@ def check_redirections(domain):
 
 
 def check_canonical_tags(domain, pages=None):
-    """Check canonical tags on key pages."""
+    """Check canonical tags on key pages (rendered HTML; 'Not Found' handling)."""
     if not pages:
-        pages = ["/", "/about", "/contact"]
+        pages = ["/"]
     results = []
     for pg in pages:
         url = f"https://{domain}{pg}"
-        html = _fetch_html(url)
-        if not html:
+        name = _page_name(pg)
+        page = _get_page(url)
+        if not page["exists"]:
+            results.append({"page": name, "found": "No", "correct": "N/A",
+                            "duplicate_risk": "N/A", "status": "Not Found"})
             continue
-        name = pg.strip("/").capitalize() or "Home"
+        html = page["html"]
+        if not html:
+            results.append({"page": name, "found": "No", "correct": "N/A",
+                            "duplicate_risk": "N/A", "status": "Could not check"})
+            continue
         m = re.search(r'<link[^>]+rel\s*=\s*["\']canonical["\'][^>]+href\s*=\s*["\']([^"\']+)["\']', html, re.I)
         if not m:
             m = re.search(r'<link[^>]+href\s*=\s*["\']([^"\']+)["\'][^>]+rel\s*=\s*["\']canonical["\']', html, re.I)
@@ -535,6 +719,9 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
     if log_fn is None:
         log_fn = print
     domain = re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
+    _PAGE_CACHE.clear()      # fresh per-run cache of rendered pages
+    _HOME_SIG[0] = None      # reset homepage fingerprint (SPA soft-404 detection)
+    _NF_SIG[0] = None        # reset 404-probe fingerprint
     # Discover real pages from the sitemap so we check pages that actually EXIST
     # instead of guessing /about, /contact (which return the homepage on SPAs).
     sitemap_url, _sm_urls = None, []
@@ -555,6 +742,15 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
         pages = ["/"]   # no sitemap -> only the homepage (don't invent pages)
 
     log_fn("  Launching browser for data collection...")
+    # Render the homepage + one known-bad URL first, so their fingerprints are
+    # captured before any real sub-page is checked. That's what lets us flag SPA
+    # soft-404s (routes that 200 but don't really exist). Homepage is cached, so
+    # no real page renders twice.
+    try:
+        _get_page(f"https://{domain}/")
+        _prime_soft404(domain)
+    except Exception:
+        pass
 
     def _safe(label, default, fn, *args, **kwargs):
         """Run one check; if it raises, log it and keep going so the rest of the
