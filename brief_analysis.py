@@ -1135,13 +1135,12 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
             if not sitemap.get("summary"):
                 sitemap["summary"] = f"Sitemap found with {len(_sm_paths)} page(s)."
 
-    # If Google blocked the indexed-count lookup, fall back to the sitemap page
-    # count so the slide always shows a real number (labelled as a sitemap estimate).
+    # Indexing MUST come from Google (via the stealth engine + Buster). Never
+    # substitute the sitemap count — if Google couldn't be checked, leave it N/A so
+    # the slide clearly asks the user to verify it manually.
     if isinstance(indexing, dict) and str(indexing.get("count", "")).strip().upper() in ("", "N/A"):
-        _pc = sitemap.get("page_count") if isinstance(sitemap, dict) else None
-        if _pc:
-            indexing = {"count": f"{_pc:,}" if isinstance(_pc, int) else str(_pc),
-                        "status": "Estimated from sitemap - verify in Search Console"}
+        indexing = {"count": "N/A",
+                    "status": "Could not verify with Google - please check indexing manually"}
 
     log_fn("  Checking broken links (with location)...")
     bl_checked, bl_broken = _safe("Broken links check", (0, []),
