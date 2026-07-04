@@ -881,6 +881,44 @@ def _manual_pause(reason):
             state["status"] = "running"
     return not stop_event.is_set()
 
+def _highlight_domain_in_serp(driver, domain_clean):
+    """Highlight the target domain's organic result(s) in the LIVE SERP before the
+    screenshot — like the SERP Highlighter extension: an orange outline, a soft
+    background and a 'YOUR SITE' badge — so the client's position is obvious in the
+    captured image. Returns how many results were highlighted."""
+    js = r"""
+    var dom = arguments[0];
+    var count = 0;
+    var anchors = document.querySelectorAll('a');
+    for (var i = 0; i < anchors.length; i++) {
+        var a = anchors[i];
+        if (!a.querySelector || !a.querySelector('h3')) continue;   // organic title links
+        var href = (a.href || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '');
+        if (href.indexOf(dom) === -1) continue;
+        var box = a.closest('[data-hveid]') || a.closest('.g') || a.closest('.MjjYud') || a.parentElement;
+        if (!box || box.getAttribute('data-stp-hl')) continue;
+        box.setAttribute('data-stp-hl', '1');
+        box.style.outline = '4px solid #ff5a00';
+        box.style.outlineOffset = '3px';
+        box.style.background = 'rgba(255,206,130,0.32)';
+        box.style.borderRadius = '10px';
+        box.style.position = 'relative';
+        var badge = document.createElement('span');
+        badge.textContent = '★ YOUR SITE';
+        badge.style.cssText = 'display:inline-block;background:#ff5a00;color:#fff;' +
+            'font:bold 12px Arial,sans-serif;padding:2px 9px;border-radius:6px;margin:0 0 6px 0;';
+        box.insertBefore(badge, box.firstChild);
+        count++;
+    }
+    return count;
+    """
+    try:
+        n = driver.execute_script(js, domain_clean)
+        return int(n) if n else 0
+    except Exception:
+        return 0
+
+
 def _save_full_page_screenshot(driver, path):
     """Capture a full-page screenshot via CDP (entire scrollable page, not just viewport)."""
     import base64 as b64
@@ -1035,6 +1073,13 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                 ss_folder = _domain_folder(domain, "ranking")
                 ss_path = os.path.join(ss_folder, ss_name)
                 if is_alive(sess.driver):
+                    try:
+                        hl = _highlight_domain_in_serp(sess.driver, domain_clean)
+                        if hl:
+                            add_log(f"Highlighted {hl} result(s) for {domain_clean} in the SERP")
+                            time.sleep(0.4)
+                    except Exception:
+                        pass
                     _save_full_page_screenshot(sess.driver, ss_path)
                     add_log(f"SERP screenshot saved: {ss_name}")
                     for m in matches:
