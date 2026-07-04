@@ -3131,12 +3131,18 @@ def _kill_previous():
         pass
 
 def main():
-    try:
-        update_result = updater.check_and_update()
-        if update_result.get("updated"):
-            print(f"[GRC] Updated {len(update_result.get('updated_files', []))} file(s)")
-    except Exception as e:
-        print(f"[GRC] Update check skipped: {e}")
+    # Skip the update check when launched by a start script (Start Tool.vbs / run.bat
+    # already run the updater BEFORE the server). Re-checking here just adds a network
+    # round-trip to startup, which on a slow connection pushes the port-file write past
+    # the launcher's timeout -> "SEO Toolkit Pro could not start". GRC_NO_BROWSER is set
+    # by the launcher, so it doubles as the "already updated" signal.
+    if not os.environ.get("GRC_NO_BROWSER") and not os.environ.get("GRC_SKIP_UPDATE"):
+        try:
+            update_result = updater.check_and_update()
+            if update_result.get("updated"):
+                print(f"[GRC] Updated {len(update_result.get('updated_files', []))} file(s)")
+        except Exception as e:
+            print(f"[GRC] Update check skipped: {e}")
 
     port = int(os.environ.get("GRC_PORT", "5070"))
     url = f"http://127.0.0.1:{port}"
