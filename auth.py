@@ -8,6 +8,7 @@ import os
 import json
 import time
 import uuid
+import hashlib
 import urllib.request
 import urllib.parse
 
@@ -54,10 +55,59 @@ def _get_api_url():
     return ""
 
 
+def _device_id_file():
+    return os.path.join(_writable_dir(), ".device_id")
+
+
+def _persisted_device_id():
+    """A random id generated once and stored on disk, so it stays constant for
+    this install even if the registry read below fails. Last-resort guarantee."""
+    path = _device_id_file()
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                v = f.read().strip()
+            if v:
+                return v
+    except Exception:
+        pass
+    v = uuid.uuid4().hex
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(v)
+    except Exception:
+        pass
+    return v
+
+
+def _stable_device_key():
+    """A durable, per-machine key. Prefers the Windows MachineGuid — unique per OS
+    install; it survives reboots, PC renames and network-adapter changes — and
+    falls back to a persisted random id so the value is ALWAYS stable here."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SOFTWARE\Microsoft\Cryptography") as k:
+            guid, _ = winreg.QueryValueEx(k, "MachineGuid")
+        if guid and str(guid).strip():
+            return "MG:" + str(guid).strip()
+    except Exception:
+        pass
+    return "PID:" + _persisted_device_id()
+
+
 def get_mac_address():
-    """Get this machine's MAC address as a stable uppercase hex string."""
-    mac = uuid.getnode()
-    return ':'.join(f'{(mac >> (8 * i)) & 0xFF:02X}' for i in reversed(range(6)))
+    """Stable per-device ID (name kept for backend compatibility).
+
+    This used to return uuid.getnode() — a NETWORK MAC that flips between the
+    Hyper-V / VPN / random adapters run-to-run (e.g. 00:15:5D:… one day,
+    01:01:01:01:00:00 the next) and kept tripping the device lock. It now derives
+    from the durable Windows MachineGuid, so the same machine always yields the
+    same id. Format: 8 hyphen-separated 4-char groups, e.g. A1B2-C3D4-…-CDEF."""
+    key = _stable_device_key()
+    digest = hashlib.sha256(key.encode("utf-8", "ignore")).hexdigest().upper()
+    d = digest[:32]
+    return "-".join(d[i:i + 4] for i in range(0, 32, 4))
 
 
 def _api_call(params, timeout=15):
