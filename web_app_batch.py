@@ -881,18 +881,26 @@ def _manual_pause(reason):
             state["status"] = "running"
     return not stop_event.is_set()
 
-def _highlight_domain_in_serp(driver, domain_clean):
+def _highlight_domain_in_serp(driver, domain_clean, first_only=False):
     """Highlight the target domain's organic result(s) in the LIVE SERP before the
     screenshot — like the SERP Highlighter extension: an orange outline, a soft
     background and a 'YOUR SITE' badge — so the client's position is obvious in the
-    captured image. Returns how many results were highlighted."""
+    captured image.
+
+    Matching is on the result's URL (the title link's href), NOT the title text.
+    first_only=True highlights just the first match (for 'stop when domain found');
+    otherwise every occurrence on the page is highlighted ('Scan All Pages').
+    Returns how many results were highlighted."""
     js = r"""
-    var dom = arguments[0];
+    var dom = arguments[0], firstOnly = arguments[1];
     var count = 0;
     var anchors = document.querySelectorAll('a');
     for (var i = 0; i < anchors.length; i++) {
+        if (firstOnly && count >= 1) break;
         var a = anchors[i];
         if (!a.querySelector || !a.querySelector('h3')) continue;   // organic title links
+        // Match the RESULT URL (the title link's href), not the title text — same
+        // basis the rank count uses. Handles direct links and /url?q= redirects.
         var href = (a.href || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '');
         if (href.indexOf(dom) === -1) continue;
         var box = a.closest('[data-hveid]') || a.closest('.g') || a.closest('.MjjYud') || a.parentElement;
@@ -913,7 +921,7 @@ def _highlight_domain_in_serp(driver, domain_clean):
     return count;
     """
     try:
-        n = driver.execute_script(js, domain_clean)
+        n = driver.execute_script(js, domain_clean, bool(first_only))
         return int(n) if n else 0
     except Exception:
         return 0
@@ -1004,6 +1012,34 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
         # Ctrl+F search on page 1
         all_matches = find_domain_in_page(sess.driver, domain_clean, page_offset=0)
 
+        # Capture a HIGHLIGHTED screenshot of every page where the domain is found.
+        # stop_on_found -> highlight just the first match; Scan All Pages -> every
+        # occurrence. Captured per-page (before pagination navigates away) so a
+        # Scan-All run shows the domain wherever it ranks, not just the last page.
+        _first_only = (search_mode == "stop_on_found")
+
+        def _shot_serp_page(page_matches):
+            if not page_matches or not is_alive(sess.driver):
+                return
+            try:
+                hl = _highlight_domain_in_serp(sess.driver, domain_clean, first_only=_first_only)
+                if hl:
+                    add_log(f"Highlighted {hl} result(s) for {domain_clean}")
+                    time.sleep(0.3)
+                safe_kw = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in keyword)[:50]
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                ss_name = f"{safe_kw}_{ts}.png"
+                ss_path = os.path.join(_domain_folder(domain, "ranking"), ss_name)
+                _save_full_page_screenshot(sess.driver, ss_path)
+                add_log(f"SERP screenshot saved: {ss_name}")
+                for m in page_matches:
+                    m["screenshot"] = ss_name
+            except Exception as e:
+                add_log(f"Screenshot failed: {e}")
+
+        if all_matches:
+            _shot_serp_page(all_matches)
+
         # Paginate through ALL selected pages (respects max_pages regardless of search_mode)
         page_num = 1
         total_links = len(links_page1)
@@ -1052,6 +1088,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     if page_matches:
                         all_matches.extend(page_matches)
                         add_log(f"  Found at position {page_matches[0]['position']}")
+                        _shot_serp_page(page_matches)   # highlight + screenshot this page
                     # stop_on_found: exit pagination as soon as domain appears
                     if search_mode == "stop_on_found" and all_matches:
                         break
@@ -1065,27 +1102,8 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
         if matches:
             if search_mode == "stop_on_found":
                 matches = matches[:1]
-            # Capture full-page SERP screenshot
-            try:
-                safe_kw = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in keyword)[:60]
-                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                ss_name = f"{safe_kw}_{ts}.png"
-                ss_folder = _domain_folder(domain, "ranking")
-                ss_path = os.path.join(ss_folder, ss_name)
-                if is_alive(sess.driver):
-                    try:
-                        hl = _highlight_domain_in_serp(sess.driver, domain_clean)
-                        if hl:
-                            add_log(f"Highlighted {hl} result(s) for {domain_clean} in the SERP")
-                            time.sleep(0.4)
-                    except Exception:
-                        pass
-                    _save_full_page_screenshot(sess.driver, ss_path)
-                    add_log(f"SERP screenshot saved: {ss_name}")
-                    for m in matches:
-                        m["screenshot"] = ss_name
-            except Exception as e:
-                add_log(f"Screenshot failed: {e}")
+            # Screenshots were already captured per page (with the domain
+            # highlighted) in _shot_serp_page, so no end-of-run capture is needed.
             # Visit each matched URL to capture final loaded URL (redirects)
             for m in matches:
                 try:
