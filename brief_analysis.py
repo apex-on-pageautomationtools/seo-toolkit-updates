@@ -1012,6 +1012,14 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
             if not sitemap.get("summary"):
                 sitemap["summary"] = f"Sitemap found with {len(_sm_paths)} page(s)."
 
+    # If Google blocked the indexed-count lookup, fall back to the sitemap page
+    # count so the slide always shows a real number (labelled as a sitemap estimate).
+    if isinstance(indexing, dict) and str(indexing.get("count", "")).strip().upper() in ("", "N/A"):
+        _pc = sitemap.get("page_count") if isinstance(sitemap, dict) else None
+        if _pc:
+            indexing = {"count": f"{_pc:,}" if isinstance(_pc, int) else str(_pc),
+                        "status": "Estimated from sitemap - verify in Search Console"}
+
     log_fn("  Checking broken links (with location)...")
     bl_checked, bl_broken = _safe("Broken links check", (0, []),
                                   _check_broken_links_located, domain, pages[:3])
@@ -1775,7 +1783,7 @@ def build_omega(data, out_path, log_fn=None):
         _text(s, desc, 0.8, 0.9, 8.8, 0.6, 14, "Calibri", ACCENT)
         data_ok = not _is_empty(finding) and finding != UNVERIFIED
         if data_ok:
-            _text(s, finding, 0.8, 3.8, 9.2, 0.7, 14, "Calibri", WHITE)
+            _text(s, finding, 0.8, 1.9, 9.2, 3.4, 12, "Calibri", WHITE)
         else:
             _text(s, UNVERIFIED, 0.8, 3.8, 9.2, 0.7, 14, "Calibri", RED, bold=True)
         return s
@@ -1814,26 +1822,44 @@ def build_omega(data, out_path, log_fn=None):
         _text(s, num, x, y, 0.5, 0.35, 12, "Calibri", WHITE, align=PP_ALIGN.CENTER)
         _text(s, t, x + 0.6, y, 3.5, 0.35, 12, "Calibri", ACCENT)
 
-    # --- Slides 3-13: Content ---
+    # --- Slides 3-13: Content (full per-page detail, not just a status) ---
+    def _lines(items, fmt_fn):
+        return "\n".join(fmt_fn(x) for x in items) if items else UNVERIFIED
+
     idx = data.get("indexing", {})
+    titles = data.get("titles", [])
+    metas = data.get("metas", [])
+    headers = data.get("headers", [])
+    canons = data.get("canonicals", [])
+    redirects = data.get("redirects", [])
+    bl = data.get("broken_links", [])
+    bl_checked = data.get("broken_links_checked", 0)
+    alts = data.get("img_alts", [])
+    sm = data.get("sitemap", {})
+    rb = data.get("robots", {})
+    sm_url = sm.get("url_checked") or f"https://{domain}/sitemap.xml"
+    sm_find = sm.get("summary", "")
+    if sm.get("found") or sm.get("ok"):
+        sm_find = (sm_find + f"\nSitemap URL: {sm_url}").strip()
     findings = [
         f"About {idx.get('count', 'N/A')} pages indexed. Status: {idx.get('status', 'N/A')}",
-        "; ".join(f'{t["page"]}: {t["status"]}' for t in data.get("titles", [])[:3]) or UNVERIFIED,
-        "; ".join(f'{m["page"]}: {m["status"]}' for m in data.get("metas", [])[:3]) or UNVERIFIED,
-        "; ".join(f'{h["page"]}: H1={h["h1"]}' for h in data.get("headers", [])[:3]) or UNVERIFIED,
-        data.get("sitemap", {}).get("summary", UNVERIFIED),
-        data.get("robots", {}).get("summary", UNVERIFIED),
-        f"{len(data.get('img_alts', []))} images checked. {len([a for a in data.get('img_alts', []) if a['present'] != 'Yes'])} need alt text." if data.get("img_alts") else UNVERIFIED,
-        "; ".join(f'{c["page"]}: {c["status"]}' for c in data.get("canonicals", [])[:3]) or UNVERIFIED,
-        "; ".join(f'{r["type"]}: {r["status"]}' for r in data.get("redirects", [])) or UNVERIFIED,
-        f"{len(data.get('broken_links', []))} broken link(s) found in {data.get('broken_links_checked', 0)} checked." if data.get("broken_links_checked", 0) > 0 else UNVERIFIED,
+        _lines(titles, lambda t: f'{t["page"]}  -  "{(t.get("title") or "(none)")[:55]}" ({t["chars"]} chars, {t["status"]})'),
+        _lines(metas, lambda m: f'{m["page"]}  -  meta {"FOUND" if m["found"] == "Yes" else "MISSING"} ({m["chars"]} chars, {m["status"]})'),
+        _lines(headers, lambda h: f'{h["page"]}  -  H1={h["h1"]}, H2={h["h2"]}, H3={h["h3"]}, H4={h["h4"]}'),
+        sm_find or UNVERIFIED,
+        rb.get("summary", UNVERIFIED),
+        (f'{len(alts)} images checked. {len([a for a in alts if a["present"] != "Yes"])} need alt text.' if alts else UNVERIFIED),
+        _lines(canons, lambda c: f'{c["page"]}  -  tag {c["found"]}, correct: {c.get("correct", "N/A")} ({c["status"]})'),
+        _lines(redirects, lambda r: f'{r["type"]}: {r["status"]}  -  {r.get("detail", "")}'),
+        (_lines(bl[:5], lambda b: f'[{b.get("location", "Content")}] {b.get("url", "")} ({b.get("status", "")})')
+         if bl else (f'No broken links found in {bl_checked} links checked.' if bl_checked > 0 else UNVERIFIED)),
     ]
+    # Domain age — show every attribute we DID find (not just "Created On"), so
+    # ccTLDs like .com.au that hide the creation date still show useful info.
     age_rows = data.get("domain_age", [])
-    age_str = ""
-    for r in age_rows:
-        if r[0] == "Created On" and r[1] != "N/A":
-            age_str = f"Registered since {r[1]}. {r[2] if len(r) > 2 else ''}"
-    findings.append(age_str or UNVERIFIED)
+    age_lines = [f"{r[0]}: {r[1]}" + (f"  ({r[2]})" if len(r) > 2 and r[2] else "")
+                 for r in age_rows if len(r) > 1 and str(r[1]).strip()]
+    findings.append("\n".join(age_lines) if age_lines else UNVERIFIED)
 
     for i, (title, desc) in enumerate(topics):
         content_slide(title, desc, findings[i])
@@ -1908,13 +1934,16 @@ def build_neon(data, out_path, log_fn=None):
         bl_checked = data.get("broken_links_checked", 0)
         age_rows = data.get("domain_age", [])
 
+        def _lines(items, fn):
+            return "\n".join(fn(x) for x in items) if items else None
+        _sm_url = sm.get("url_checked") or f"https://{domain}/sitemap.xml"
         mapping = {
             0: f"About {idx.get('count', 'N/A')} pages indexed. {idx.get('status', 'N/A')}" if not _is_empty(idx.get("count")) else None,
-            1: "; ".join(f'{t["page"]}: {t["title"][:30]} ({t["chars"]} chars, {t["status"]})' for t in titles[:3]) if titles else None,
-            2: "; ".join(f'{m["page"]}: {m["found"]}, {m["chars"]} chars, {m["status"]}' for m in metas[:3]) if metas else None,
-            3: "; ".join(f'{h["page"]}: H1={h["h1"]}, H2={h["h2"]}, H3={h["h3"]}' for h in headers[:3]) if headers else None,
-            4: sm.get("summary") if sm.get("found") else None,
-            5: "; ".join(f'{c["page"]}: {c["status"]}' for c in canons[:3]) if canons else None,
+            1: _lines(titles, lambda t: f'{t["page"]}  -  "{(t.get("title") or "(none)")[:50]}" ({t["chars"]} chars, {t["status"]})'),
+            2: _lines(metas, lambda m: f'{m["page"]}  -  meta {"FOUND" if m["found"] == "Yes" else "MISSING"} ({m["chars"]} chars, {m["status"]})'),
+            3: _lines(headers, lambda h: f'{h["page"]}  -  H1={h["h1"]}, H2={h["h2"]}, H3={h["h3"]}, H4={h["h4"]}'),
+            4: ((sm.get("summary", "") + f"\nSitemap URL: {_sm_url}").strip() if (sm.get("found") or sm.get("ok")) else None),
+            5: _lines(canons, lambda c: f'{c["page"]}  -  tag {c["found"]}, correct: {c.get("correct", "N/A")} ({c["status"]})'),
             6: rb.get("summary") if rb.get("found") else None,
             7: f"{len(alts)} images checked. {len([a for a in alts if a['present'] != 'Yes'])} need alt text." if alts else None,
             8: "Review page content for keyword optimization. Ensure at least 300 words of unique content per key page.",
@@ -1923,16 +1952,16 @@ def build_neon(data, out_path, log_fn=None):
             11: "Run a PageSpeed Insights or GTmetrix test for detailed speed metrics.",
             12: "Check Google Analytics or Search Console for organic traffic data.",
             13: "Run a full SEO audit for a comprehensive score.",
-            14: f"{len(bl)} broken link(s) found in {bl_checked} checked." if bl_checked > 0 else None,
+            14: (_lines(bl[:5], lambda b: f'[{b.get("location", "Content")}] {b.get("url", "")} ({b.get("status", "")})')
+                 if bl else (f"No broken links found in {bl_checked} checked." if bl_checked > 0 else None)),
             15: "Ensure your brand logo appears in the footer with a link to the homepage.",
             16: f"Verify the copyright year is set to {datetime.now().year}.",
         }
-        # Domain age
+        # Domain age — show every attribute found (ccTLDs may hide the creation date).
         if i == 10:
-            for r in age_rows:
-                if r[0] == "Created On" and r[1] != "N/A":
-                    return (f"Registered since {r[1]}. {r[2] if len(r) > 2 else ''}", True)
-            return (None, False)
+            age_lines = [f"{r[0]}: {r[1]}" + (f"  ({r[2]})" if len(r) > 2 and r[2] else "")
+                         for r in age_rows if len(r) > 1 and str(r[1]).strip()]
+            return ("\n".join(age_lines) if age_lines else None, bool(age_lines))
 
         val = mapping.get(i)
         return (val, val is not None)
@@ -1950,9 +1979,9 @@ def build_neon(data, out_path, log_fn=None):
 
         finding_val, data_ok = finding_for(i)
         if data_ok and finding_val:
-            _text(s, finding_val, 0.83, 5.75, 11.75, 0.65, 18, "Calibri", BODY_CLR)
+            _text(s, finding_val, 0.83, 2.5, 11.75, 4.4, 13, "Calibri", BODY_CLR)
         else:
-            _text(s, UNVERIFIED, 0.83, 5.75, 11.75, 0.65, 18, "Calibri", RED_BAD, bold=True)
+            _text(s, UNVERIFIED, 0.83, 2.5, 11.75, 0.65, 18, "Calibri", RED_BAD, bold=True)
 
     # --- Slide 19: Closing ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
