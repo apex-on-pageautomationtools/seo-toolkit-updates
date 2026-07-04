@@ -350,36 +350,67 @@ def _browser_get_domain_age(domain):
 # Data collection
 # ---------------------------------------------------------------------------
 
-def _stealth_indexing_count(domain, country="us"):
-    """Google 'site:domain' result count via the app's STEALTH engine
-    (undetected-chromedriver / Edge + a human-typed search) — the exact path the
-    rank checker uses, which sails past the CAPTCHA that a plain headless request
-    to /search?q= always hits. Returns an int, 0 (no results), or None."""
+# Indexing captcha-solving hook. web_app_batch populates this with the SAME Buster
+# solver + extension the rank checker uses, so the "site:" query can beat a CAPTCHA
+# by escalating to a visible browser instead of just giving up (N/A).
+_INDEXING = {"extensions": None, "solve_captcha": None}
+
+
+def configure_indexing(extensions=None, solve_captcha=None):
+    """Let the host (web_app_batch) share its Buster CAPTCHA solver + extension so
+    the indexing 'site:' query can solve challenges like the rank checker does."""
+    _INDEXING["extensions"] = extensions
+    _INDEXING["solve_captcha"] = solve_captcha
+
+
+def _parse_index_count(src):
+    for pat in (r'result-stats[^>]*>[^<]*?About\s*([\d,\.  ]+)',
+                r'About\s*([\d,\.  ]+?)\s*results',
+                r'([\d,\.]+)\s*results'):
+        m = re.search(pat, src, re.I)
+        if m:
+            num = re.sub(r'[^\d]', '', m.group(1))
+            if num:
+                return int(num)
+    if "did not match any documents" in src.lower() or "no results found" in src.lower():
+        return 0
+    return None
+
+
+def _run_index_query(domain, country, headless, extensions, solver, attempts=2):
+    """One Google 'site:' session via the stealth engine. Retries the search, and
+    if it hits a CAPTCHA and a solver is provided, runs Buster then re-reads."""
+    import engine
     driver = None
     profile = tempfile.mkdtemp(prefix="seo_idx_")
     try:
-        import engine
-        driver = engine.build_driver(profile, headless=True, country=country,
+        driver = engine.build_driver(profile, headless=headless, country=country,
+                                     extra_extensions=extensions,
                                      logger=lambda *a: None, browser_pref="auto")
         engine.warm_up(driver, country, logger=lambda *a: None)
-        engine.human_search(driver, f"site:{domain}", country, logger=lambda *a: None)
-        time.sleep(2.5)
-        src = driver.page_source or ""
-        try:
-            if engine.classify_page(src) in ("captcha", "soft_block", "http_403"):
-                return None
-        except Exception:
-            pass
-        for pat in [r'result-stats[^>]*>[^<]*?About\s*([\d,\.  ]+)',
-                    r'About\s*([\d,\.  ]+?)\s*results',
-                    r'([\d,\.]+)\s*results']:
-            m = re.search(pat, src, re.I)
-            if m:
-                num = re.sub(r'[^\d]', '', m.group(1))
-                if num:
-                    return int(num)
-        if "did not match any documents" in src.lower() or "no results found" in src.lower():
-            return 0
+        for _ in range(max(1, attempts)):
+            engine.human_search(driver, f"site:{domain}", country, logger=lambda *a: None)
+            time.sleep(2.5)
+            src = driver.page_source or ""
+            blocked = False
+            try:
+                blocked = engine.classify_page(src) in ("captcha", "soft_block", "http_403")
+            except Exception:
+                pass
+            if blocked:
+                if solver:
+                    try:
+                        solver(driver, 3)          # Buster CAPTCHA solver
+                    except Exception:
+                        pass
+                    time.sleep(2)
+                    src = driver.page_source or ""
+                else:
+                    time.sleep(3)                  # brief pause, then retry the search
+                    continue
+            n = _parse_index_count(src)
+            if n is not None:
+                return n
         return None
     except Exception:
         return None
@@ -389,6 +420,24 @@ def _stealth_indexing_count(domain, country="us"):
                 driver.quit()
         except Exception:
             pass
+
+
+def _stealth_indexing_count(domain, country="us"):
+    """Google 'site:domain' result count via the app's STEALTH engine — the same
+    path the rank checker uses. Tries quiet headless first; if Google blocks it and
+    a Buster solver is available, escalates to a VISIBLE browser with Buster (like
+    the rank checker) to solve the CAPTCHA. Returns an int, 0, or None."""
+    n = _run_index_query(domain, country, headless=True, extensions=None,
+                         solver=None, attempts=2)
+    if n is not None:
+        return n
+    solver = _INDEXING.get("solve_captcha")
+    if solver:
+        # Visible browser + Buster loaded (extensions only load when NOT headless).
+        n = _run_index_query(domain, country, headless=False,
+                             extensions=_INDEXING.get("extensions"),
+                             solver=solver, attempts=2)
+    return n
 
 
 def check_indexing(domain):
@@ -1445,6 +1494,14 @@ def build_xenon(data, out_path, log_fn=None):
                 _text(s, finding, bx, 3.2, 12.1 - bx + 0.6, 0.9, 13, "Calibri", TEXT_DARK)
         return s
 
+    def page_detail(s, header, lines, y=4.5):
+        """Per-page breakdown printed below the summary box (Xenon has the room),
+        so the report shows WHICH pages were checked and what was found on each."""
+        if not lines:
+            return
+        _text(s, header, 0.6, y, 12.1, 0.35, 13, "Calibri", NAVY, bold=True)
+        _text(s, "\n".join(lines), 0.6, y + 0.4, 12.1, 2.4, 12, "Calibri", TEXT_DARK)
+
     # --- Slide 1: Cover ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
     _rect(s, 0, 0, 13.33, 7.5, NAVY_DARK)
@@ -1475,6 +1532,9 @@ def build_xenon(data, out_path, log_fn=None):
     s = content_slide("Title Tag",
                       "The title tag is the HTML element that defines a page's title. It appears on search engine results and browser tabs.",
                       badge[0], badge[1], finding, data_ok=titles_ok)
+    page_detail(s, "Pages checked:", [
+        f"{t['page']}  —  \"{(t.get('title') or '(none)')[:55]}\"  ({t['chars']} chars, {t['status']})"
+        for t in titles])
 
     # --- Slide 4: Meta Description Tag ---
     metas = data.get("metas", [])
@@ -1489,6 +1549,9 @@ def build_xenon(data, out_path, log_fn=None):
     s = content_slide("Meta Description Tag",
                       "The meta description is an HTML attribute that summarises a page. Google often displays it as the snippet in search results.",
                       badge[0], badge[1], finding, data_ok=metas_ok)
+    page_detail(s, "Pages checked:", [
+        f"{m['page']}  —  meta description {'FOUND' if m['found'] == 'Yes' else 'MISSING'} "
+        f"({m['chars']} chars, {m['status']})" for m in metas])
 
     # --- Slide 5: Headings ---
     headers = data.get("headers", [])
@@ -1503,6 +1566,9 @@ def build_xenon(data, out_path, log_fn=None):
     s = content_slide("Headings",
                       "Heading tags (H1, H2, and so on) are an important part of a page and play a role in helping search engines understand the topic.",
                       badge[0], badge[1], finding, data_ok=headers_ok)
+    page_detail(s, "Pages checked:", [
+        f"{h['page']}  —  H1={h['h1']}, H2={h['h2']}, H3={h['h3']}, H4={h['h4']}, H5={h['h5']}, H6={h['h6']}"
+        for h in headers])
 
     # --- Slide 6: Heading Tags — Findings ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1522,12 +1588,18 @@ def build_xenon(data, out_path, log_fn=None):
     # --- Slide 7: Sitemap.xml ---
     sm = data.get("sitemap", {})
     sm_ok = sm.get("found") is not None
-    finding = sm.get("summary", "Sitemap status could not be determined.")
+    sm_url = sm.get("url_checked") or f"https://{domain}/sitemap.xml"
+    _parts = [sm.get("summary", "Sitemap status could not be determined.")]
+    pc = sm.get("page_count")
+    if pc:
+        _parts.append(f"{pc} page URL(s) found in the sitemap.")
+    finding = "  ".join(p for p in _parts if p)
     s = content_slide("Sitemap.xml",
                       "A sitemap is an XML file that lists a site's URLs, along with metadata, to tell search engines what to crawl.",
                       "Good" if sm.get("found") else "ISSUE",
                       "good" if sm.get("found") else "issue",
                       finding, data_ok=sm_ok)
+    page_detail(s, "Sitemap URL:", [sm_url])
 
     # --- Slide 8: Robots.txt ---
     rb = data.get("robots", {})
@@ -1592,11 +1664,14 @@ def build_xenon(data, out_path, log_fn=None):
     s = content_slide("Canonical Tag",
                       "The canonical tag tells search engines which version of a URL is the master copy, preventing duplicate content penalties.",
                       badge[0], badge[1], finding, data_ok=canons_ok)
+    page_detail(s, "Pages checked:", [
+        f"{c['page']}  —  tag {c['found']}, correct: {c.get('correct', 'N/A')} ({c['status']})"
+        for c in canons])
 
     # --- Slide 12: Redirection Issues ---
     redirects = data.get("redirects", [])
     redir_ok = bool(redirects)
-    redir_issues = [r for r in redirects if r["impact"] != "Good"]
+    redir_issues = [r for r in redirects if not str(r.get("impact", "")).startswith("Good")]
     if redir_issues:
         finding = f"{len(redir_issues)} redirection issue(s) found. " + "; ".join(f'{r["type"]}: {r["detail"][:40]}' for r in redir_issues[:2]) + "."
         badge = ("ISSUE", "issue")
@@ -1606,6 +1681,8 @@ def build_xenon(data, out_path, log_fn=None):
     s = content_slide("Redirection Issues",
                       "Redirects send users and crawlers from one URL to another. Correct 301 redirects pass full link equity to the target URL.",
                       badge[0], badge[1], finding, data_ok=redir_ok)
+    page_detail(s, "Redirects checked:", [
+        f"{r['type']}  —  {r['status']}  —  {r.get('detail', '')}" for r in redirects])
 
     # --- Slide 13: Broken Links ---
     bl = data.get("broken_links", [])
@@ -1620,6 +1697,9 @@ def build_xenon(data, out_path, log_fn=None):
     s = content_slide("Broken Links",
                       "Broken links return 404 errors, wasting crawl budget and damaging user trust. Regular audits keep your link graph healthy.",
                       badge[0], badge[1], finding, data_ok=bl_ok)
+    if bl:
+        page_detail(s, "Broken links found:", [
+            f"[{b.get('location', 'Content')}]  {b.get('url', '')}  ({b.get('status', '')})" for b in bl[:6]])
 
     # --- Slide 14: Domain Age ---
     age_rows = data.get("domain_age", [])

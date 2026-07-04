@@ -2948,6 +2948,15 @@ def api_brief_start():
         with _brief_lock:
             _brief_state["running"] = False
         return jsonify({"error": "Domain required"}), 400
+    # Share the rank checker's Buster CAPTCHA solver + extension with the brief
+    # report's indexing query, so the Google "site:" count can beat a CAPTCHA
+    # (escalates to a visible browser) instead of coming back N/A.
+    try:
+        brief_analysis.configure_indexing(
+            extensions=[BUSTER_DIR] if (CONFIG.get("use_buster", True) and os.path.isdir(BUSTER_DIR)) else None,
+            solve_captcha=solve_with_buster)
+    except Exception:
+        pass
     # Honour the selected report format + optional target pages (one path per line).
     # Pass the format through as-is; the generator builds exactly it or errors.
     fmt = (data.get("format") or "james").strip().lower()
