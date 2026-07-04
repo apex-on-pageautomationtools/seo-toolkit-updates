@@ -74,8 +74,11 @@ _NF_SIG = [None]     # a deliberately-nonexistent probe URL = the site's 404 vie
 
 
 def _page_signature(html):
-    """A stable fingerprint of a page's visible content (title + start of body
-    text) used to tell whether two URLs render the SAME page."""
+    """A fingerprint of a page's visible content (title + a large slice of body
+    text) used to tell whether two URLs render the SAME page. The slice is big so
+    a real content page (long) is clearly distinct from the short 404/shell — on
+    themed sites (Shopify/WordPress) every page shares the header/nav, so a small
+    slice would make everything look alike."""
     if not html:
         return ""
     m = re.search(r'<title[^>]*>([^<]*)</title>', html, re.I)
@@ -83,16 +86,22 @@ def _page_signature(html):
     text = re.sub(r'(?is)<(script|style|noscript)[^>]*>.*?</\1>', ' ', html)
     text = re.sub(r'(?s)<[^>]+>', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip().lower()
-    return title + "||" + text[:1500]
+    return title + "||" + text[:8000]
 
 
-def _sig_similar(a, b, thresh=0.92):
-    """True if two page signatures are (near-)identical — the fake route echoing
-    its own path is the only difference, so a high-ratio match still counts."""
+def _sig_similar(a, b, thresh=0.95):
+    """True only if two page signatures are near-identical — i.e. the browser
+    rendered essentially the SAME page (a pure-SPA catch-all)."""
     if not a or not b:
         return False
     if a == b:
         return True
+    # Length guard: a real content page and the short 404/shell differ a lot in
+    # size. Without this, two pages that merely share header/nav chrome (all pages
+    # on a Shopify/WordPress theme) would false-match and be flagged 'Not Found'.
+    la, lb = len(a), len(b)
+    if min(la, lb) < 0.6 * max(la, lb):
+        return False
     from difflib import SequenceMatcher
     return SequenceMatcher(None, a, b).ratio() >= thresh
 
@@ -341,9 +350,61 @@ def _browser_get_domain_age(domain):
 # Data collection
 # ---------------------------------------------------------------------------
 
+def _stealth_indexing_count(domain, country="us"):
+    """Google 'site:domain' result count via the app's STEALTH engine
+    (undetected-chromedriver / Edge + a human-typed search) — the exact path the
+    rank checker uses, which sails past the CAPTCHA that a plain headless request
+    to /search?q= always hits. Returns an int, 0 (no results), or None."""
+    driver = None
+    profile = tempfile.mkdtemp(prefix="seo_idx_")
+    try:
+        import engine
+        driver = engine.build_driver(profile, headless=True, country=country,
+                                     logger=lambda *a: None, browser_pref="auto")
+        engine.warm_up(driver, country, logger=lambda *a: None)
+        engine.human_search(driver, f"site:{domain}", country, logger=lambda *a: None)
+        time.sleep(2.5)
+        src = driver.page_source or ""
+        try:
+            if engine.classify_page(src) in ("captcha", "soft_block", "http_403"):
+                return None
+        except Exception:
+            pass
+        for pat in [r'result-stats[^>]*>[^<]*?About\s*([\d,\.  ]+)',
+                    r'About\s*([\d,\.  ]+?)\s*results',
+                    r'([\d,\.]+)\s*results']:
+            m = re.search(pat, src, re.I)
+            if m:
+                num = re.sub(r'[^\d]', '', m.group(1))
+                if num:
+                    return int(num)
+        if "did not match any documents" in src.lower() or "no results found" in src.lower():
+            return 0
+        return None
+    except Exception:
+        return None
+    finally:
+        try:
+            if driver:
+                driver.quit()
+        except Exception:
+            pass
+
+
 def check_indexing(domain):
-    """Estimate indexed page count — browser first, urllib fallback."""
-    # Try browser-based (bypasses Google blocks)
+    """Estimate indexed page count. Stealth engine first (beats Google's block on
+    plain headless), then plain browser, then urllib."""
+    # Stealth engine (undetected-chromedriver + human-typed search) — most reliable.
+    try:
+        n = _stealth_indexing_count(domain)
+    except Exception:
+        n = None
+    if n is not None:
+        if n <= 0:
+            return {"count": "0", "status": "Not indexed"}
+        return {"count": f"{n:,}", "status": "Indexed & serving"}
+
+    # Try plain browser next (bypasses some Google blocks)
     result = _browser_get_indexing(domain)
     if result:
         return result
@@ -489,7 +550,7 @@ def check_title_tags(domain, pages=None):
     results = []
     for pg in pages:
         url = f"https://{domain}{pg}"
-        name = _page_name(pg)
+        name = url   # show the full page URL, not a short label
         page = _get_page(url)
         if not page["exists"]:
             results.append({"page": name, "title": "Page not found", "chars": "0", "status": "Not Found"})
@@ -521,7 +582,7 @@ def check_meta_desc(domain, pages=None):
     results = []
     for pg in pages:
         url = f"https://{domain}{pg}"
-        name = _page_name(pg)
+        name = url   # show the full page URL, not a short label
         page = _get_page(url)
         if not page["exists"]:
             results.append({"page": name, "found": "No", "chars": "0", "status": "Not Found"})
@@ -553,7 +614,7 @@ def check_headers(domain, pages=None):
     results = []
     for pg in pages:
         url = f"https://{domain}{pg}"
-        name = _page_name(pg)
+        name = url   # show the full page URL, not a short label
         page = _get_page(url)
         counts = {f"h{i}": 0 for i in range(1, 7)}
         if not page["exists"]:
@@ -578,8 +639,14 @@ def check_image_alts(domain):
     results = []
     for img_tag in imgs[:20]:
         alt_m = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', img_tag, re.I)
-        src_m = re.search(r'src\s*=\s*["\']([^"\']*)["\']', img_tag, re.I)
-        src = src_m.group(1)[:40] if src_m else "unknown"
+        src_m = re.search(r'(?:data-src|src)\s*=\s*["\']([^"\']*)["\']', img_tag, re.I)
+        import html as _html
+        src = _html.unescape(src_m.group(1).strip()) if src_m else "unknown"
+        # Resolve to a full, absolute URL so the location is usable (not trimmed).
+        if src.startswith("//"):
+            src = "https:" + src
+        elif src.startswith("/"):
+            src = f"https://{domain}" + src
         if not alt_m:
             results.append({"location": src, "present": "No", "content": "(empty)", "status": "Add descriptive alt"})
         elif not alt_m.group(1).strip():
@@ -616,26 +683,27 @@ def check_redirections(domain):
                 with opener.open(req, timeout=10) as r:
                     code = r.status
                 if 200 <= code < 300:
-                    results.append({"type": rtype, "status": str(code),
-                                    "detail": "No redirect (already canonical / redirect missing)",
+                    results.append({"type": rtype, "status": str(code), "checked_url": url,
+                                    "detail": f"Checked {url} — no redirect (already canonical / redirect missing)",
                                     "impact": "Check needed"})
                 else:
-                    results.append({"type": rtype, "status": str(code),
-                                    "detail": "Unexpected response", "impact": "Review"})
+                    results.append({"type": rtype, "status": str(code), "checked_url": url,
+                                    "detail": f"Checked {url} — unexpected response", "impact": "Review"})
             except urllib.error.HTTPError as e:
                 code = e.code
-                loc = (e.headers.get("Location") or "")[:55]
+                loc = (e.headers.get("Location") or "").strip()
                 if code in (301, 308):
                     impact = "Good (permanent 301)"
                 elif code in (302, 307):
                     impact = "Check — temporary redirect, use 301"
                 else:
                     impact = "Review"
-                results.append({"type": rtype, "status": str(code),
-                                "detail": f"Redirects to {loc}" if loc else f"HTTP {code}",
+                results.append({"type": rtype, "status": str(code), "checked_url": url,
+                                "detail": f"{url}  ->  {loc}" if loc else f"Checked {url} - HTTP {code}",
                                 "impact": impact})
         except Exception as e:
-            results.append({"type": rtype, "status": "Error", "detail": str(e)[:50], "impact": "Unknown"})
+            results.append({"type": rtype, "status": "Error", "checked_url": url,
+                            "detail": f"Checked {url} — {str(e)[:40]}", "impact": "Unknown"})
     return results
 
 
@@ -646,7 +714,7 @@ def check_canonical_tags(domain, pages=None):
     results = []
     for pg in pages:
         url = f"https://{domain}{pg}"
-        name = _page_name(pg)
+        name = url   # show the full page URL, not a short label
         page = _get_page(url)
         if not page["exists"]:
             results.append({"page": name, "found": "No", "correct": "N/A",
@@ -712,6 +780,54 @@ def _discover_sitemap(domain):
         if pages:
             return sm_url, pages
     return None, []
+
+
+def _link_section(html, pos):
+    """Which region of the page a byte offset falls in: Header / Navigation /
+    Footer / Content — so a broken link can be located for the client."""
+    for tag, label in (("header", "Header"), ("nav", "Navigation"), ("footer", "Footer")):
+        for m in re.finditer(rf'<{tag}\b[^>]*>.*?</{tag}>', html, re.I | re.S):
+            if m.start() <= pos < m.end():
+                return label
+    window = html[max(0, pos - 400):pos].lower()   # fall back to class/id hints
+    if any(k in window for k in ('id="footer"', 'class="footer', 'site-footer')):
+        return "Footer"
+    if any(k in window for k in ('id="header"', 'class="header', 'site-header')):
+        return "Header"
+    if any(k in window for k in ('<nav', 'class="nav', 'navbar', 'menu')):
+        return "Navigation"
+    return "Content"
+
+
+def _check_broken_links_located(domain, pages, max_links=80):
+    """Check the real anchor (<a href>) links on each page and report ONLY the
+    genuinely-broken ones (404/410/5xx), together with WHERE they sit (header /
+    navigation / footer / content). Preconnect / stylesheet / font <link> hints are
+    ignored, so CDN & font hosts that 404 a bare request aren't false-flagged."""
+    checked, seen, broken = 0, set(), []
+    for pg in pages:
+        purl = f"https://{domain}{pg}" if str(pg).startswith("/") else str(pg)
+        html = _get_page(purl)["html"]
+        if not html:
+            continue
+        for m in re.finditer(r'<a\b[^>]*?\shref\s*=\s*["\']([^"\']+)["\']', html, re.I):
+            if checked >= max_links:
+                break
+            href = m.group(1).strip()
+            if not href or href.startswith(("#", "mailto:", "tel:", "javascript:", "data:")):
+                continue
+            full = urllib.parse.urljoin(purl, href.split("#")[0])
+            if not full.startswith("http") or full in seen:
+                continue
+            seen.add(full)
+            checked += 1
+            status = _http_status(full)
+            if status in (404, 410) or (isinstance(status, int) and 500 <= status < 600):
+                broken.append({"type": "Broken link", "location": _link_section(html, m.start()),
+                               "url": full, "status": str(status), "source": purl})
+        if checked >= max_links:
+            break
+    return checked, broken
 
 
 def run_brief_checks(domain, target_pages=None, log_fn=None):
@@ -803,10 +919,9 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
             if not sitemap.get("summary"):
                 sitemap["summary"] = f"Sitemap found with {len(_sm_paths)} page(s)."
 
-    log_fn("  Checking broken links...")
-    bl_pages = [f"https://{domain}{p}" if p.startswith("/") else p for p in pages[:3]]
+    log_fn("  Checking broken links (with location)...")
     bl_checked, bl_broken = _safe("Broken links check", (0, []),
-                                  check_broken_links, domain, bl_pages)
+                                  _check_broken_links_located, domain, pages[:3])
 
     _close_brief_driver()
     log_fn("  All checks complete.")
@@ -959,9 +1074,17 @@ def _add_table(slide, headers, rows, col_widths, start_x, start_y,
         for ci, val in enumerate(row):
             cell = table.cell(ri + 1, ci)
             cell.text = str(val)
-            for p in cell.text_frame.paragraphs:
+            # Wrap long values (full page/image URLs) instead of overflowing, and
+            # tighten margins so they fit the column.
+            tf = cell.text_frame
+            tf.word_wrap = True
+            cell.margin_left = P(3)
+            cell.margin_right = P(3)
+            cell.margin_top = P(1)
+            cell.margin_bottom = P(1)
+            for p in tf.paragraphs:
                 for r in p.runs:
-                    r.font.size = P(9)
+                    r.font.size = P(8) if any(str(val).startswith(s) for s in ("http", "//")) else P(9)
                     r.font.name = "Calibri"
                     r.font.color.rgb = _C("#2B2B2B")
             if ri % 2 == 1:
@@ -1080,8 +1203,8 @@ def build_james(data, out_path, log_fn=None):
     title_rows = [[t["page"], t["title"], t["chars"], t["status"]] for t in data.get("titles", [])][:3]
     if not title_rows:
         title_rows = [["Home", "N/A", "0", "Could not check"]]
-    _add_table(s, ["Page", "Current Title (sample)", "Chars", "Status"],
-               title_rows, [1.5, 3.5, 0.8, 1.7], 2.0, 2.0)
+    _add_table(s, ["Page URL", "Current Title (sample)", "Chars", "Status"],
+               title_rows, [3.3, 2.2, 0.6, 1.4], 2.0, 2.0)
     _suggestion_text(s, bool(data.get("titles")),
           "Rewrite thin titles to 50-60 chars with primary keyword and location intent where applicable.",
           2.0, 3.9, 7.5, 0.5)
@@ -1093,8 +1216,8 @@ def build_james(data, out_path, log_fn=None):
     meta_rows = [[m["page"], m["found"], m["chars"], m["status"]] for m in data.get("metas", [])][:3]
     if not meta_rows:
         meta_rows = [["Home", "N/A", "0", "Could not check"]]
-    _add_table(s, ["Page", "Found?", "Chars", "Status"],
-               meta_rows, [1.5, 1.2, 1.0, 3.8], 2.0, 2.0)
+    _add_table(s, ["Page URL", "Found?", "Chars", "Status"],
+               meta_rows, [3.5, 1.0, 0.8, 2.2], 2.0, 2.0)
     _suggestion_text(s, bool(data.get("metas")),
           "Write unique 140-160 char descriptions for every key page, each containing the primary keyword and a clear call to action.",
           2.0, 3.9, 7.5, 0.5)
@@ -1107,8 +1230,8 @@ def build_james(data, out_path, log_fn=None):
                  str(h["h4"]), str(h["h5"]), str(h["h6"])] for h in data.get("headers", [])][:3]
     if not hdr_rows:
         hdr_rows = [["Home", "0", "0", "0", "0", "0", "0"]]
-    _add_table(s, ["Page", "H1", "H2", "H3", "H4", "H5", "H6"],
-               hdr_rows, [2.0, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8], 2.0, 2.0)
+    _add_table(s, ["Page URL", "H1", "H2", "H3", "H4", "H5", "H6"],
+               hdr_rows, [3.0, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75], 2.0, 2.0)
     issues = [h for h in data.get("headers", []) if h["h1"] != 1]
     suggestion = "All pages have correct H1 structure." if not issues else "Ensure each page has exactly one H1 tag. Multiple H1s dilute keyword focus."
     _suggestion_text(s, bool(data.get("headers")), suggestion, 2.0, 3.9, 7.5, 0.5)
@@ -1117,11 +1240,11 @@ def build_james(data, out_path, log_fn=None):
     s = content_slide("Image Alt Tag")
     _text(s, "Alt text describes an image for screen readers and search engines. Descriptive, keyword-rich alt text improves accessibility and image SEO.",
           2.0, 1.2, 7.5, 0.6, 11, "Calibri", TEXT, bold=True)
-    alt_rows = [[a["location"][:25], a["present"], a["content"], a["status"]] for a in data.get("img_alts", [])][:3]
+    alt_rows = [[a["location"], a["present"], a["content"], a["status"]] for a in data.get("img_alts", [])][:3]
     if not alt_rows:
         alt_rows = [["N/A", "N/A", "N/A", "Could not check"]]
-    _add_table(s, ["Image Location", "Alt Present?", "Content", "Status"],
-               alt_rows, [2.5, 1.5, 1.5, 2.0], 2.0, 2.0)
+    _add_table(s, ["Image URL", "Alt Present?", "Content", "Status"],
+               alt_rows, [3.6, 1.0, 1.4, 1.5], 2.0, 2.0)
     missing = len([a for a in data.get("img_alts", []) if a["present"] != "Yes"])
     total = len(data.get("img_alts", []))
     _suggestion_text(s, bool(data.get("img_alts")),
@@ -1135,8 +1258,8 @@ def build_james(data, out_path, log_fn=None):
     redir_rows = [[r["type"], r["status"], r["detail"], r["impact"]] for r in data.get("redirects", [])]
     if not redir_rows:
         redir_rows = [["N/A", "N/A", "N/A", "N/A"]]
-    _add_table(s, ["Redirect Type", "Status", "Detail", "SEO Impact"],
-               redir_rows, [2.0, 1.5, 2.5, 1.5], 2.0, 2.0)
+    _add_table(s, ["Redirect Type", "Status", "Checked URL → Destination", "SEO Impact"],
+               redir_rows, [1.6, 0.7, 3.7, 1.5], 2.0, 2.0)
     _suggestion_text(s, bool(data.get("redirects")),
           "Ensure all HTTP and www variants redirect to the canonical version via 301. Avoid redirect chains.",
           2.0, 3.9, 7.5, 0.5)
@@ -1149,8 +1272,8 @@ def build_james(data, out_path, log_fn=None):
                   for c in data.get("canonicals", [])]
     if not canon_rows:
         canon_rows = [["N/A", "N/A", "N/A", "N/A", "N/A"]]
-    _add_table(s, ["Page", "Tag Found?", "Correct?", "Duplicate Risk", "Status"],
-               canon_rows, [1.5, 1.2, 1.2, 1.5, 2.1], 2.0, 2.0)
+    _add_table(s, ["Page URL", "Tag Found?", "Correct?", "Duplicate Risk", "Status"],
+               canon_rows, [3.0, 1.0, 1.0, 1.2, 1.3], 2.0, 2.0)
     _suggestion_text(s, bool(data.get("canonicals")),
           "Add self-referencing canonical tags to all pages. This prevents duplicate content from URL parameters or www/non-www variants.",
           2.0, 3.9, 7.5, 0.5)
@@ -1192,12 +1315,12 @@ def build_james(data, out_path, log_fn=None):
     bl = data.get("broken_links", [])
     bl_checked = data.get("broken_links_checked", 0)
     if bl:
-        bl_rows = [[b.get("type", "Broken"), b.get("source", "")[:30], b.get("url", "")[:30],
-                     str(b.get("status", ""))] for b in bl[:3]]
+        bl_rows = [[b.get("location", "Content"), b.get("url", ""),
+                     str(b.get("status", ""))] for b in bl[:4]]
     else:
-        bl_rows = [["No broken links found", f"Checked {bl_checked} links", "All OK", "Good"]]
-    _add_table(s, ["Issue Type", "Location", "Detail", "Status"],
-               bl_rows, [2.0, 2.0, 2.0, 1.5], 2.0, 2.0)
+        bl_rows = [[f"Checked {bl_checked} link(s)", "No broken links found", "Good"]]
+    _add_table(s, ["Location", "Broken Link URL", "Status"],
+               bl_rows, [1.7, 4.5, 1.3], 2.0, 2.0)
     if bl:
         _suggestion_text(s, True,
               f"{len(bl)} broken link(s) found out of {bl_checked} checked. Fix or remove broken links to improve crawl efficiency.",
