@@ -1772,6 +1772,13 @@ def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
     # like https://x.com/ produces an invalid filename).
     domain = re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
 
+    # Build EXACTLY the selected format — fail loudly rather than silently building
+    # a different one after doing all the API/screenshot work.
+    fmt = str(fmt or "").strip().lower()
+    if fmt not in GSC_FORMATS:
+        raise ValueError(f"Unknown GSC audit format '{fmt}'. "
+                         f"Available: {', '.join(sorted(GSC_FORMATS))}")
+
     if out_dir is None:
         out_dir = tempfile.mkdtemp(prefix="gsc_audit_")
     os.makedirs(out_dir, exist_ok=True)
@@ -1820,7 +1827,7 @@ def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
     report_data["screenshots"] = screenshots
 
     # Build PPTX
-    format_info = GSC_FORMATS.get(fmt, GSC_FORMATS["james"])
+    format_info = GSC_FORMATS[fmt]   # validated above — build the selected format
     timestamp = datetime.now().strftime("%d-%B-%Y")
     out_file = os.path.join(out_dir, f"GSC_Audit_{domain}_{timestamp}.pptx")
 

@@ -1814,17 +1814,18 @@ def build_content_suggestion_docx(domain, pages_data, targets, out_path):
 
 
 def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, fmt="james"):
-    """Dispatch to the format-specific DOCX builder."""
-    if fmt == "omega":
-        _build_docx_omega(domain, pages_data, findings, captured, brand, out_path)
-    elif fmt == "neon":
-        _build_docx_neon(domain, pages_data, findings, captured, brand, out_path)
-    elif fmt == "xenon":
-        _build_docx_xenon(domain, pages_data, findings, captured, brand, out_path)
-    elif fmt == "gamma":
-        _build_docx_gamma(domain, pages_data, findings, captured, brand, out_path)
-    else:
-        _build_docx_james(domain, pages_data, findings, captured, brand, out_path)
+    """Dispatch to the format-specific DOCX builder — builds EXACTLY the selected
+    format, or raises rather than silently defaulting to another one."""
+    builders = {
+        "james": _build_docx_james, "omega": _build_docx_omega,
+        "neon": _build_docx_neon, "xenon": _build_docx_xenon,
+        "gamma": _build_docx_gamma,
+    }
+    fn = builders.get(str(fmt or "").strip().lower())
+    if not fn:
+        raise ValueError(f"Unknown on-page format '{fmt}'. "
+                         f"Available: {', '.join(sorted(builders))}")
+    fn(domain, pages_data, findings, captured, brand, out_path)
 
 
 # ------------------------------------------------------------------------- main

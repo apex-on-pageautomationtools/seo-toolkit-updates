@@ -1692,7 +1692,12 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
     # paths (".png" basename -> PIL "unknown file extension") and the filename.
     domain = re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
 
-    fi = FORMAT_INFO.get(fmt, FORMAT_INFO["james"])
+    # Build EXACTLY the selected format — never silently fall back to another one.
+    fmt = str(fmt or "").strip().lower()
+    fi = FORMAT_INFO.get(fmt)
+    if not fi:
+        raise ValueError(f"Unknown health audit format '{fmt}'. "
+                         f"Available: {', '.join(sorted(FORMAT_INFO))}")
     use_keys = list(fi["keys"])
     if not psi_api_key and "pagespeed" in use_keys:
         use_keys.remove("pagespeed")

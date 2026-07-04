@@ -1906,14 +1906,20 @@ def run_brief_analysis(domain, fmt="james", target_pages=None, out_dir=None, log
         out_dir = tempfile.mkdtemp(prefix="brief_analysis_")
     os.makedirs(out_dir, exist_ok=True)
 
+    # Build EXACTLY the selected format — never silently fall back to another one.
+    fmt = str(fmt or "").strip().lower()
+    format_info = BRIEF_FORMATS.get(fmt)
+    if not format_info:
+        raise ValueError(f"Unknown brief report format '{fmt}'. "
+                         f"Available: {', '.join(sorted(BRIEF_FORMATS))}")
+
     log_fn(f"Running brief analysis for {domain}...")
     data = run_brief_checks(domain, target_pages, log_fn)
 
-    format_info = BRIEF_FORMATS.get(fmt, BRIEF_FORMATS["james"])
     timestamp = datetime.now().strftime("%d-%B-%Y")
     out_file = os.path.join(out_dir, f"Brief_Report_{domain}_{timestamp}.pptx")
 
-    log_fn(f"Building {format_info['label']} report...")
+    log_fn(f"Building {format_info['label']} report (format: {fmt})...")
     format_info["builder"](data, out_file, log_fn)
 
     return out_file

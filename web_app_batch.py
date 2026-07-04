@@ -2949,9 +2949,8 @@ def api_brief_start():
             _brief_state["running"] = False
         return jsonify({"error": "Domain required"}), 400
     # Honour the selected report format + optional target pages (one path per line).
+    # Pass the format through as-is; the generator builds exactly it or errors.
     fmt = (data.get("format") or "james").strip().lower()
-    if fmt not in brief_analysis.BRIEF_FORMATS:
-        fmt = "james"
     _targets_raw = (data.get("targets") or "").strip()
     target_pages = [ln.strip() for ln in _targets_raw.splitlines() if ln.strip()] or None
     def _run():
