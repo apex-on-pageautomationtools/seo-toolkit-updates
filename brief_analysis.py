@@ -440,6 +440,93 @@ def _stealth_indexing_count(domain, country="us"):
     return n
 
 
+def capture_brief_screenshots(domain, sitemap_url=None, log_fn=print):
+    """Capture homepage / robots.txt / sitemap screenshots via the brief browser
+    (selenium + CDP) so the report can show real page previews, not just text.
+    Returns {key: png_path}; best-effort (missing shots are simply skipped)."""
+    driver = _get_brief_driver()
+    if not driver:
+        return {}
+    import base64
+    out = {}
+    out_dir = tempfile.mkdtemp(prefix="brief_shots_")
+    root = f"https://{domain}"
+    jobs = [("homepage", root + "/", 950),
+            ("robots", root + "/robots.txt", 700),
+            ("sitemap", sitemap_url or (root + "/sitemap.xml"), 850)]
+    for key, url, height in jobs:
+        try:
+            driver.get(url)
+            time.sleep(3)
+            try:
+                driver.execute_script("window.scrollTo(0, 0);")
+            except Exception:
+                pass
+            time.sleep(0.4)
+            try:
+                _w = driver.execute_script(
+                    "return Math.max(document.documentElement.clientWidth||0, window.innerWidth||0, 1366);")
+            except Exception:
+                _w = 1366
+            res = driver.execute_cdp_cmd("Page.captureScreenshot", {
+                "format": "png", "captureBeyondViewport": True,
+                "clip": {"x": 0, "y": 0, "width": float(_w or 1366), "height": float(height), "scale": 1}})
+            p = os.path.join(out_dir, f"{key}.png")
+            with open(p, "wb") as f:
+                f.write(base64.b64decode(res["data"]))
+            out[key] = p
+            log_fn(f"  Captured screenshot: {key}")
+        except Exception as e:
+            log_fn(f"  Screenshot '{key}' skipped ({type(e).__name__})")
+    return out
+
+
+def _place_image(slide, path, x, y, w, h=None):
+    """Place a screenshot fit within a w×h box (inches), centred, preserving aspect
+    ratio. If h is None, just scales to width. Ignores a missing/broken file."""
+    from pptx.util import Inches
+    if not path or not os.path.exists(path):
+        return False
+    try:
+        if h is None:
+            slide.shapes.add_picture(path, Inches(x), Inches(y), width=Inches(w))
+            return True
+        try:
+            from PIL import Image
+            iw, ih = Image.open(path).size
+            ar = (iw / ih) if ih else 1.5
+        except Exception:
+            ar = 1.45
+        if (w / h) > ar:                     # box wider than image -> fit by height
+            nh, nw = h, h * ar
+        else:                                # fit by width
+            nw, nh = w, w / ar
+        slide.shapes.add_picture(path, Inches(x + (w - nw) / 2), Inches(y + (h - nh) / 2),
+                                 width=Inches(nw), height=Inches(nh))
+        return True
+    except Exception:
+        return False
+
+
+def _add_preview_slides(prs, screenshots, slide_w, slide_h, title_color,
+                        bg_color=None, blank_idx=6):
+    """Append 'Website Preview' image slides (homepage / robots.txt / sitemap) so
+    every format shows real screenshots, matching the manual sample reports."""
+    if not isinstance(screenshots, dict):
+        return
+    for title, key in (("Homepage Preview", "homepage"),
+                       ("Robots.txt", "robots"),
+                       ("Sitemap", "sitemap")):
+        path = screenshots.get(key)
+        if not path or not os.path.exists(path):
+            continue
+        s = prs.slides.add_slide(prs.slide_layouts[blank_idx])
+        if bg_color:
+            _rect(s, 0, 0, slide_w, slide_h, bg_color)
+        _text(s, title, 0.6, 0.3, slide_w - 1.2, 0.7, 26, "Calibri", title_color, bold=True)
+        _place_image(s, path, 0.8, 1.2, slide_w - 1.6, slide_h - 1.6)
+
+
 def check_indexing(domain):
     """Estimate indexed page count. Stealth engine first (beats Google's block on
     plain headless), then plain browser, then urllib."""
@@ -1024,6 +1111,10 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
     bl_checked, bl_broken = _safe("Broken links check", (0, []),
                                   _check_broken_links_located, domain, pages[:3])
 
+    log_fn("  Capturing screenshots (homepage, robots, sitemap)...")
+    screenshots = _safe("Screenshots", {}, capture_brief_screenshots,
+                        domain, sitemap_url, log_fn)
+
     _close_brief_driver()
     log_fn("  All checks complete.")
 
@@ -1076,6 +1167,7 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
         "robots": robots,
         "broken_links_checked": bl_checked,
         "broken_links": bl_broken,
+        "screenshots": screenshots if isinstance(screenshots, dict) else {},
     }
 
 
@@ -1431,6 +1523,9 @@ def build_james(data, out_path, log_fn=None):
               f"No broken links found in {bl_checked} links checked. Continue monitoring regularly.",
               2.0, 3.9, 7.5, 0.5)
 
+    # --- Screenshot previews (homepage / robots / sitemap) ---
+    _add_preview_slides(prs, data.get("screenshots", {}), 10, 5.625, NAVY)
+
     # --- Slide 15: Thank You ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
     _james_sidebar(s)
@@ -1723,6 +1818,9 @@ def build_xenon(data, out_path, log_fn=None):
                       "Domain age reflects registration history. Older domains often carry accumulated trust and authority with search engines.",
                       "Good", "good", age_info, data_ok=age_ok)
 
+    # --- Screenshot previews (homepage / robots / sitemap) ---
+    _add_preview_slides(prs, data.get("screenshots", {}), 13.33, 7.5, NAVY)
+
     # --- Slide 15: Thank You ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
     _rect(s, 0, 0, 13.33, 7.5, NAVY_DARK)
@@ -1864,7 +1962,8 @@ def build_omega(data, out_path, log_fn=None):
     for i, (title, desc) in enumerate(topics):
         content_slide(title, desc, findings[i])
 
-    # --- Slide 14-15: extra topics can go here in future ---
+    # --- Screenshot previews (homepage / robots / sitemap) ---
+    _add_preview_slides(prs, data.get("screenshots", {}), 10, 5.625, WHITE, bg_color=BG)
 
     # --- Slide 16: Thank You ---
     s = bg_slide()
@@ -1982,6 +2081,9 @@ def build_neon(data, out_path, log_fn=None):
             _text(s, finding_val, 0.83, 2.5, 11.75, 4.4, 13, "Calibri", BODY_CLR)
         else:
             _text(s, UNVERIFIED, 0.83, 2.5, 11.75, 0.65, 18, "Calibri", RED_BAD, bold=True)
+
+    # --- Screenshot previews (homepage / robots / sitemap) ---
+    _add_preview_slides(prs, data.get("screenshots", {}), 13.33, 7.5, TITLE_CLR)
 
     # --- Slide 19: Closing ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
