@@ -1083,7 +1083,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
               <input type="text" id="adm-new-name" placeholder="Name (optional)" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
-              <input type="text" id="adm-new-mac" placeholder="MAC address (optional)" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
+              <input type="text" id="adm-new-mac" placeholder="Device ID (optional)" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
             </div>
             <button class="btn btn-primary" style="font-size:12px;padding:6px 18px" onclick="admAddUser()">Add User</button>
           </div>
@@ -1139,7 +1139,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
             </div>
             <div>
               <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">User Auth URL <span style="font-weight:400;color:var(--text-3)">(Login, Registration, Licensing)</span></label>
-              <div class="note" style="margin-bottom:4px">Google Apps Script that handles user login, registration, MAC verification, and admin checks.</div>
+              <div class="note" style="margin-bottom:4px">Google Apps Script that handles user login, registration, Device ID verification, and admin checks.</div>
               <div style="display:flex;gap:8px;align-items:center">
                 <input type="text" id="adm-auth-url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
                 <span id="adm-auth-url-status" style="font-size:18px" title=""></span>
@@ -2229,12 +2229,12 @@ async function admLoadUsers(){
     if(r.error){$('adm-users-list').textContent=r.error;return;}
     const users=r.users||[];
     if(!users.length){$('adm-users-list').textContent='No users found.';return;}
-    $('adm-users-list').innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Email</th><th style="padding:6px">Name</th><th style="padding:6px">MAC</th><th style="padding:6px;text-align:center">Approved</th><th style="padding:6px;text-align:center">Admin</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
+    $('adm-users-list').innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Email</th><th style="padding:6px">Name</th><th style="padding:6px">Device ID</th><th style="padding:6px;text-align:center">Approved</th><th style="padding:6px;text-align:center">Admin</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
       users.map(u=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px">'+esc(u.email)+'</td><td style="padding:6px">'+esc(u.name||'')+'</td><td style="padding:6px;font-family:monospace;font-size:11px">'+esc(u.mac||'')+'</td><td style="padding:6px;text-align:center">'+(u.approved?'<span style="color:var(--ok)">Yes</span>':'<span style="color:var(--err)">No</span>')+'</td><td style="padding:6px;text-align:center">'+(u.is_admin?'<span style="color:var(--ok)">Yes</span>':'—')+'</td><td style="padding:6px;white-space:nowrap">'+
         (!u.approved?'<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admApprove(\''+esc(u.email)+'\')">Approve</button>':
         '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admReject(\''+esc(u.email)+'\')">Reject</button>')+
         '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admChgPass(\''+esc(u.email)+'\')">Password</button>'+
-        '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admChgMac(\''+esc(u.email)+'\')">MAC</button>'+
+        '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admChgMac(\''+esc(u.email)+'\')">Device ID</button>'+
         '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;color:var(--err)" onclick="admRemoveUser(\''+esc(u.email)+'\')">Remove</button>'+
       '</td></tr>').join('')+'</tbody></table>';
   }catch(e){$('adm-users-list').textContent='Failed to load users.';}
@@ -2266,10 +2266,10 @@ async function admChgPass(email){
   }catch(e){toast('Failed');}
 }
 async function admChgMac(email){
-  const mac=prompt('New MAC address for '+email+':');
+  const mac=prompt('New Device ID for '+email+':');
   if(mac===null)return;
   try{const r=await(await fetch('/api/admin/update_mac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,mac})})).json();
-    toast(r.error||'MAC updated');admLoadUsers();
+    toast(r.error||'Device ID updated');admLoadUsers();
   }catch(e){toast('Failed');}
 }
 async function admRemoveUser(email){
