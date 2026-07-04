@@ -410,6 +410,19 @@ def _run_index_query(domain, country, headless, extensions, solver, attempts=2):
                     continue
             n = _parse_index_count(src)
             if n is not None:
+                # Grab the SERP screenshot from THIS (CAPTCHA-solved) session so the
+                # report's indexing slide shows the real result, not a blank/skip.
+                try:
+                    import base64
+                    _sp = os.path.join(tempfile.mkdtemp(prefix="brief_serp_"), "serp.png")
+                    res = driver.execute_cdp_cmd("Page.captureScreenshot", {
+                        "format": "png", "captureBeyondViewport": True,
+                        "clip": {"x": 0, "y": 0, "width": 1366.0, "height": 900.0, "scale": 1}})
+                    with open(_sp, "wb") as f:
+                        f.write(base64.b64decode(res["data"]))
+                    _INDEXING["serp_shot"] = _sp
+                except Exception:
+                    pass
                 return n
         return None
     except Exception:
@@ -489,7 +502,15 @@ def capture_brief_screenshots(domain, sitemap_url=None, log_fn=print):
 
     _shot("homepage", root + "/", 950)
     _shot("viewsource", root + "/", 760, view_source=True)
-    _shot("serp", f"https://www.google.com/search?q=site:{domain}", 900, serp=True)
+    # Indexing SERP: reuse the CAPTCHA-SOLVED screenshot captured during the
+    # indexing count query (stealth engine + Buster). Only if that didn't happen do
+    # we try a plain headless shot (which skips on a CAPTCHA wall).
+    serp_shot = _INDEXING.get("serp_shot")
+    if serp_shot and os.path.exists(serp_shot):
+        out["serp"] = serp_shot
+        log_fn("  Using CAPTCHA-solved SERP screenshot")
+    else:
+        _shot("serp", f"https://www.google.com/search?q=site:{domain}", 900, serp=True)
     _shot("sitemap", sitemap_url or (root + "/sitemap.xml"), 850)
     _shot("robots", root + "/robots.txt", 700)
     return out
@@ -544,6 +565,7 @@ def _add_preview_slides(prs, screenshots, slide_w, slide_h, title_color,
 def check_indexing(domain):
     """Estimate indexed page count. Stealth engine first (beats Google's block on
     plain headless), then plain browser, then urllib."""
+    _INDEXING["serp_shot"] = None    # reset the per-run CAPTCHA-solved SERP screenshot
     # Stealth engine (undetected-chromedriver + human-typed search) — most reliable.
     try:
         n = _stealth_indexing_count(domain)
