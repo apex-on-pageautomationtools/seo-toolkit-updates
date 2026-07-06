@@ -2069,38 +2069,311 @@ def _build_docx_omega(domain, pages_data, findings, captured, brand, out_path):
 
 # ---- Format: Neon (sumitechengineers) ----
 def _build_docx_neon(domain, pages_data, findings, captured, brand, out_path):
-    """Neon section order: Additional Suggestions → URLs → Hyperlinking → Robots →
-    Image Alt → Internal Linking → External Links → Broken Links → Page Speed →
-    Canonical → Mixed Content → No Index → URL Redirection → Sitemap → Site Security"""
+    """Neon (Sjjanarrabeen) on-page report.
+
+    Neon has NO page background (white). Section headers are TEAL (215868) shaded
+    bars with white bold 13pt text — NOT the navy 000066 ribbon used by James/Xenon.
+    Body/description text is Calibri 12pt. "Result:" labels are bold BLUE (1D5489)
+    where the reference shows them, other labels (Hyperlinking/Robots "Result",
+    Broken-Link "Conclusion") are bold black. Section order + wording mirror the
+    Sjjanarrabeen.com.au reference. Result/Conclusion text stays data-driven
+    (good vs issue) using the shared ``findings`` fields. Rendered inline with a
+    local ``header`` helper so it never emits the shared navy ribbon.
+    """
+    from docx.shared import Pt, RGBColor
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
     doc, h = _setup_docx(domain)
+    # Neon has NO page background — do not call _set_page_background().
     home = next((pd for pd in pages_data if urllib.parse.urlparse(pd["url"]).path in ("", "/")),
                 pages_data[0] if pages_data else {})
     year = datetime.date.today().year
     root = h["root"]
+    d = h["d"]
+    FONT = h["FONT"]
 
-    _sec_intro(h, root)
-    _sec_on_page_analysis(h)
-    h["summary_table"](findings)
-    _sec_additional_notes(h, findings, captured, year)
-    _sec_url_structure(h, findings)
-    _sec_hyperlinking(h)
-    _sec_robots(h, findings, captured)
-    _sec_alt_tags(h, findings)
-    _sec_internal_linking(h, home)
-    _sec_external_links(h, findings, captured)
-    _sec_broken_links(h, findings, captured)
-    _sec_page_speed(h, root)
-    _sec_canonical(h, findings, captured)
-    _sec_mixed_content(h, findings, captured)
-    _sec_noindex(h, findings, captured)
-    _sec_redirection(h, findings)
-    _sec_sitemap(h, findings, captured)
-    _sec_sucuri(h, findings, captured)
-    _sec_indexing(h, findings, captured)
-    _sec_web_archive(h, captured)
-    _sec_viewport(h, findings, captured)
-    _sec_lang(h, findings, captured)
-    _sec_404(h, findings, root)
+    BLACK = RGBColor(0x00, 0x00, 0x00)
+    WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+    BLUE = RGBColor(0x1D, 0x54, 0x89)
+    SCORE = RGBColor(0xFF, 0xAA, 0x33)
+    URLCLR = RGBColor(0xF7, 0x96, 0x46)
+
+    def _run(p, text, bold=False, color=BLACK, size=12):
+        r = p.add_run(text)
+        r.font.name = FONT
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        if color is not None:
+            r.font.color.rgb = color
+        return r
+
+    def header(text):
+        # Neon's OWN section header: TEAL (215868) shaded bar, white bold 13pt.
+        # NOT the navy 000066 ribbon.
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(10)
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=True, color=WHITE, size=13)
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:fill'), '215868')
+        shd.set(qn('w:val'), 'clear')
+        p._p.get_or_add_pPr().append(shd)
+        return p
+
+    def body(text, bold=False):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(2)
+        _run(p, text, bold=bold, color=BLACK, size=12)
+        return p
+
+    def labeled(label, text="", size=12):
+        # bold black label + (optional) normal black body
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(2)
+        _run(p, label, bold=True, color=BLACK, size=size)
+        if text:
+            _run(p, text, bold=False, color=BLACK, size=size)
+        return p
+
+    def result(label, text="", color=BLUE):
+        # "Result:"/"Conclusion:"/"Recommendations:" bold colored label + black body
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(2)
+        _run(p, label, bold=True, color=color, size=12)
+        if text:
+            _run(p, text, bold=False, color=BLACK, size=12)
+        return p
+
+    tp = findings.get("target_pages", []) or []
+    tp_count = len(tp)
+
+    # ---- Title block (bold black ~25pt title + URL, then intro ~13pt) ----
+    p = doc.add_paragraph()
+    _run(p, "On-Page Optimization Report", bold=True, color=BLACK, size=25)
+    p = doc.add_paragraph()
+    _run(p, root + "/", bold=True, color=BLACK, size=25)
+    p = doc.add_paragraph()
+    _run(p, "All the measures that can be applied to the website in order to get/improve the website in "
+            "search ranking are called Ranking Improvement. The role of a page optimization report is "
+            "imperative and has to be done with care. This report contains all the issues and suggestions "
+            "to optimize the website, follow the suggestion and do changes accordingly. All the following "
+            "On-page factors and the given suggestions need attention and should be fixed likewise if "
+            "required to do so. Required changes need to be done ASAP as they often play a major role in "
+            "acquiring a good position in SERP. In time changes boost the SEO process positively.",
+         bold=False, color=BLACK, size=13)
+
+    # ---- Additional Suggestions (gated notes, bold black 14pt) ----
+    header(" Additional Suggestions ")
+    labeled("Note for Meta Suggestion:",
+            " We have created a separate Meta suggestions sheet that includes title, description, and "
+            "heading tag suggestions. Please find the attached sheet and update it on the website.", size=14)
+    labeled("Note for Content Optimization:",
+            " Kindly find the attached doc for content optimization.", size=14)
+    if not findings.get("has_faq"):
+        labeled("Note for FAQ Page:",
+                " As we analyzed your website, we did not find a FAQ page. If possible, we kindly "
+                "recommend creating a new FAQ page, as it can provide significant benefits to your users "
+                "by addressing their common questions, improving user experience, and enhancing "
+                "engagement on your site.", size=14)
+    labeled("Note for Footer Optimization:",
+            " We recommend adding quick links such as Home, About Us, Blog, and Contact, along with your "
+            "contact information. This will strengthen brand identity and improve usability and "
+            "engagement.", size=14)
+    labeled("Note for New Page:",
+            " As we analyzed your website, we noticed that your website doesn't have separate pages for "
+            "your major services. It is not good from an SEO point of view as well as from user "
+            "experience. So we suggest you create separate new pages for your major services to get our "
+            "target customers easily.", size=14)
+    h["shot"]("homepage", captured)
+    if not findings.get("has_footer_logo"):
+        labeled("Note for Footer Logo Linking:",
+                " As we analyzed your website, we noticed that the logo which is present at the footer is "
+                "not linked with proper home page URL which can affect user experiences, so we will "
+                "suggest add proper link to the footer logo.", size=14)
+        h["shot"]("homepage", captured)
+    if findings.get("copyright_stale"):
+        labeled("Note for Copyright:",
+                f" During our analysis, we did not find the updated copyright year on the website. "
+                f"Therefore, we strongly suggest that you include the copyright year ({year}) in the "
+                f"footer section at the bottom.", size=14)
+        h["shot"]("homepage", captured)
+
+    # ---- Optimization of URLs ----
+    header(" Optimization of URLs ")
+    if findings.get("url_changes"):
+        result("Result:", " The URL structure of the following pages should be changed:")
+        for ex, rec in findings["url_changes"]:
+            body(f"Existing  ->  {ex}", bold=True)
+            body(f"Recommended  ->  {rec}", bold=True)
+    else:
+        body("The existing URL structure of the website is fine. It is good from a search engine point "
+             "of view.")
+
+    # ---- Optimization of Hyperlinking ----
+    header(" Optimization of Hyperlinking")
+    result("Recommendations", ": Hyperlinks are connections established between a word/phrase/image and a "
+                              "website/file. Effective hyper-linking between different pages can help a "
+                              "website secure a good position in the search engine result pages as well.",
+           color=BLACK)
+    result("Result", ": Hyperlinking of the website is good. It's good from SEO point of view.", color=BLACK)
+
+    # ---- Optimization of Robots.txt File ----
+    header(" Optimization of Robots.txt File ")
+    if findings.get("robots_found"):
+        result("Result", ": The existing robots.txt file is optimized, which is good from an SEO point "
+                         "of view.", color=BLACK)
+    else:
+        result("Result", ": An optimized robots.txt file was created; please find it attached and upload "
+                         "it to the root folder of the website.", color=BLACK)
+    h["shot"]("robots", captured)
+
+    # ---- Image Alt Tag and Image Optimization ----
+    header(" Image Alt Tag and Image Optimization ")
+    if findings.get("alt_missing", 0) > 0:
+        body(f"Suitable Image Alt tags are not found on the website. It is not good from an SEO point of "
+             f"view. Kindly find an attached sheet for Image alt Tag Suggestion.")
+    else:
+        body("Suitable Image Alt tags are found on the website. It is good from an SEO point of view.")
+
+    # ---- Internal Linking Structure/Navigation Optimization (Landing Pages) ----
+    header(" Internal Linking Structure/Navigation Optimization (Landing Pages) ")
+    int_count = len(home.get("internal_links", []) or [])
+    if int_count:
+        body("Internal linking structure of website is good and both SEO and user friendly.")
+    else:
+        body("Please verify the internal linking structure across the website as per need.")
+
+    # ---- Optimization of External Links ----
+    header("Optimization of External Links ")
+    ext_count = findings.get("ext_count", len(findings.get("external_links", []) or []))
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(2)
+    _run(p, f"{ext_count} ", bold=True, color=BLACK, size=12)
+    _run(p, "external links found on the website, none of them seems harmful from a search engine point "
+            "of view.", bold=False, color=BLACK, size=12)
+    h["shot"]("externallinks", captured)
+
+    # ---- Broken Link Optimization (Landing Pages) ----
+    header("Broken Link Optimization (Landing Pages) ")
+    result("Conclusion", ": though the broken links do not hurt directly but it affects user experience "
+                         "and if users do not find desired info they will not come frequently and search "
+                         "engine takes this as not useful for the users and start pulling back the "
+                         "web-pages.", color=BLACK)
+    broken_links = findings.get("broken_links", []) or []
+    if broken_links:
+        result("Result:", f" {len(broken_links)} Broken links were found on the website. It is not good "
+                          "from an SEO point of view. Kindly find an attached sheet for broken link "
+                          "Suggestions.")
+        for bl in broken_links:
+            body(bl)
+    else:
+        result("Result:", " No Broken links were found on the website. It is good from an SEO point of "
+                          "view.")
+    h["shot"]("brokenlinks", captured)
+
+    # ---- Page Speed ----
+    header("Page Speed")
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(2)
+    _run(p, "Page Optimization Score:", bold=True, color=BLACK, size=12)
+    _run(p, " Kindly refer to the attached screenshot for the page optimization score.",
+         bold=True, color=SCORE, size=12)
+    h["shot"]("pagespeed", captured)
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(2)
+    _run(p, "Reference URL: ", bold=True, color=BLACK, size=12)
+    _run(p, f"https://pagespeed.web.dev/analysis?url={root}/", bold=True, color=URLCLR, size=12)
+
+    # ---- Canonical Tag Optimization (Landing Pages) ----
+    header("Canonical Tag Optimization (Landing Pages) ")
+    body(f"A canonical problem occurs when a site is running in multiple versions like www version "
+         f"(http://www.{d}), the non-www version (http://{d}) and other versions "
+         f"(http://{d}/index.html). In this case, content of website is considered as duplicate by the "
+         "search engines and as a result one version is removed from their index. The problem arises "
+         "when the wrong version is deleted (this is usually the non-www version) instead of preferred "
+         "one. So, to inform about genuine version of the page, we add canonical tag to that page in "
+         "order to avoid any such problem or confusion. We also use canonical when there is no "
+         "possibility of using 301 redirection method.")
+    if findings.get("canonical_issue"):
+        result("Result", ": An incorrect / conflicting canonical tag was found on the website. Kindly "
+                         "find the attached Canonical Tag Suggestions sheet.")
+    else:
+        result("Result", ": All Canonical tags are found on the website. It is good from a search engine "
+                         "point of view.")
+    h["shot"]("canonical", captured)
+
+    # ---- Mixed Content Optimization ----
+    header("Mixed Content Optimization")
+    labeled("Mixed content",
+            " occurs when a web page containing a combination of both secure (HTTPS) and non-secure "
+            "(HTTP) content is delivered over SSL to the browser. A mixed-content warning means that "
+            "there are both secured and unsecured elements being served up on a page that should be "
+            "completely encrypted.")
+    mixed_pages = findings.get("mixed_content_pages", []) or []
+    if mixed_pages:
+        result("Result", f": Mixed content issue found on {len(mixed_pages)} of the {tp_count} target "
+                         "page(s) checked. It's not good from an SEO point of view.")
+        for mp in mixed_pages:
+            body(mp)
+    else:
+        result("Result", ": No mixed content issue was found in the website. It's good from an SEO point "
+                         "of view.")
+
+    # ---- No Index On Target Pages Check ----
+    header("No Index On Target Pages Check")
+    body("Some pages of the website serve a purpose, and helps to improve the ranking and traffic to the "
+         "site. These pages need to be there, as glue for other pages or simply because regulations "
+         "require them to be accessible on your website. And if the main pages contain no index that "
+         "means they will not be indexed by search engines and therefore will not appear in the search "
+         "engine's result pages.")
+    noindex_pages = findings.get("noindex_pages", []) or []
+    if noindex_pages:
+        result("Result", f": Noindex tag found on {len(noindex_pages)} of the {tp_count} target page(s) "
+                         "checked. These pages will NOT get indexed on search engine. Please remove the "
+                         "noindex tag.")
+        for nip in noindex_pages:
+            body(nip)
+    else:
+        result("Result", ": No index not found on the robots of the target pages of the website. It's "
+                         "good from SEO point of view.")
+
+    # ---- URL Redirection Issue (Landing Pages) ----
+    header("URL Redirection Issue (Landing Pages) ")
+    if findings.get("www_redirect_issue"):
+        result("Result:", " The website runs with both www and non-www versions. We suggest redirecting "
+                          "the www version to the non-www version using a 301 permanent redirect.")
+    else:
+        result("Result:", " No redirection issue found on the website. It is good from a search engine "
+                          "point of view.")
+    h["shot"]("homepage", captured)
+
+    # ---- Website XML Site Map Optimization ----
+    header(" Website XML Site Map Optimization ")
+    if findings.get("sitemap_found"):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(2)
+        _run(p, "Result:", bold=True, color=BLUE, size=12)
+        _run(p, " Existing sitemap.xml file is optimized, which is good from an SEO point of view.",
+             bold=False, color=BLACK, size=12)
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(2)
+        _run(p, "Reference URL: ", bold=True, color=BLACK, size=12)
+        _run(p, findings.get("sitemap_url") or (root + "/sitemap.xml"), bold=False, color=BLACK, size=12)
+        h["shot"]("sitemap", captured)
+    else:
+        result("Result:", " Sitemap.xml file not found on the website. Please create and upload a "
+                          "sitemap.xml to the root folder of the website.")
+
+    # ---- Site Security Check ----
+    header("Site Security Check")
+    sucuri_clean = findings.get("sucuri_clean")
+    if sucuri_clean is False:
+        body(f"Security issues were detected on your website. Please review and fix them at "
+             f"https://sitecheck.sucuri.net/results/https/{d}/.")
+    else:
+        body("We didn't find any security issues on your website. It's good from an SEO point of view.")
+    h["shot"]("sucuri", captured)
 
     doc.save(out_path)
 
