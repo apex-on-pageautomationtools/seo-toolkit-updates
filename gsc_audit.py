@@ -1568,23 +1568,24 @@ def build_omega(data, out_path, log_fn=None):
         _text(s, f"Status: {removals_status}", 0.5, 1.85, 12.3, 0.35, 16, "Calibri", color, bold=True)
     img_path = screenshots.get("removals", "")
     if img_path and os.path.exists(img_path):
-        _rect(s, 0.7, 2.15, 11.93, 4.85, "#FFFFFF")
+        # Image ends at ~6.35 so the caption below (y=6.5) never overlaps it.
+        _rect(s, 0.7, 2.15, 11.93, 4.2, "#FFFFFF")
         from PIL import Image
         with Image.open(img_path) as im:
             iw, ih = im.size
         aspect = iw / ih
-        tw = Inches(11.73); th = Inches(4.65)
-        if aspect > (11.73/4.65): fw = tw; fh = int(tw / aspect)
+        tw = Inches(11.73); th = Inches(4.0)
+        if aspect > (11.73/4.0): fw = tw; fh = int(tw / aspect)
         else: fh = th; fw = int(th * aspect)
         cx = Inches(0.8) + (tw - fw) // 2
         cy = Inches(2.25) + (th - fh) // 2
         s.shapes.add_picture(img_path, cx, cy, fw, fh)
     else:
-        _rect(s, 3.5, 3.5, 6.3, 1.2, "#FFFFFF")
-        _text(s, "Not Found", 3.5, 3.5, 6.3, 1.2, 32, "Georgia", STATUS_OK,
+        _rect(s, 3.5, 3.3, 6.3, 1.2, "#FFFFFF")
+        _text(s, "Not Found", 3.5, 3.3, 6.3, 1.2, 32, "Georgia", STATUS_OK,
               bold=True, align=PP_ALIGN.CENTER)
     _text(s, "No additional issues detected in the Search Console webmaster reports for this property.",
-          0.5, 5.0, 12.3, 0.6, 14, "Calibri", TEXT_DARK, align=PP_ALIGN.CENTER)
+          0.5, 6.5, 12.3, 0.45, 12, "Calibri", TEXT_DARK, align=PP_ALIGN.CENTER)
 
     # Slide 8: Thank You
     s = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1726,17 +1727,18 @@ def build_neon(data, out_path, log_fn=None):
         _text(s, f"Status: {removals_status}", 0.5, 1.85, 12.3, 0.35, 16, "Calibri", color, bold=True)
     img_path = screenshots.get("removals", "")
     if img_path and os.path.exists(img_path):
-        _rect(s, 0.5, 2.1, 12.33, 4.85, "#FFFFFF")
+        # Image ends at ~6.3 so the caption below (y=6.5) never overlaps it.
+        _rect(s, 0.5, 2.1, 12.33, 4.2, "#FFFFFF")
         _rect(s, 0.5, 2.1, 12.33, 0.1, "#B0BEC5")
         from PIL import Image
         with Image.open(img_path) as im:
             iw, ih = im.size
         aspect = iw / ih
-        tw = Inches(12.21); th = Inches(4.65)
-        if aspect > (12.21/4.65): fw = tw; fh = int(tw / aspect)
+        tw = Inches(12.21); th = Inches(4.0)
+        if aspect > (12.21/4.0): fw = tw; fh = int(tw / aspect)
         else: fh = th; fw = int(th * aspect)
         cx = Inches(0.56) + (tw - fw) // 2
-        cy = Inches(2.25) + (th - fh) // 2
+        cy = Inches(2.2) + (th - fh) // 2
         s.shapes.add_picture(img_path, cx, cy, fw, fh)
     else:
         _rect(s, 4.16, 3.0, 5.0, 1.7, "#0F1F2E")
@@ -1745,7 +1747,7 @@ def build_neon(data, out_path, log_fn=None):
         _text(s, "NOT FOUND", 4.16, 3.0, 5.0, 1.7, 40, "Trebuchet MS", TEAL,
               align=PP_ALIGN.CENTER, char_spacing=8)
     _text(s, "No additional issues detected in Search Console for this property.",
-          0.7, 5.0, 11.9, 0.5, 14, "Calibri", TEXT_MID, align=PP_ALIGN.CENTER)
+          0.7, 6.5, 11.9, 0.45, 12, "Calibri", TEXT_MID, align=PP_ALIGN.CENTER)
 
     # Slide 8: Thank You
     s = prs.slides.add_slide(prs.slide_layouts[6])
