@@ -762,6 +762,12 @@ def _resolve_gsc_creds(domain, account=None):
     report then shows a graceful 'no GSC access' note rather than fabricating data.
     Never raises: any failure just means indexing falls back to the manual note."""
     try:
+        # gsc_audit lives in the repo ROOT (one level up from this scripts/ folder).
+        # ROOT here is the scripts dir, so add its parent so the import resolves.
+        import sys as _sys
+        _repo = str(ROOT.parent)
+        if _repo not in _sys.path:
+            _sys.path.insert(0, _repo)
         import gsc_audit
     except Exception as e:
         log(f"   [info] GSC module unavailable ({type(e).__name__}) — indexing note only")
