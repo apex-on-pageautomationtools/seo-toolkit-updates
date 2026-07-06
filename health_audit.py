@@ -878,9 +878,10 @@ OMEGA_KEYS = [
 ]
 
 NEON_KEYS = [
-    "sucuri", "manual_action", "security_issues", "robots", "sitemap", "status200",
-    "versions", "serp", "meta_source", "canonical", "meta_robots",
-    "layout", "blank_page", "broken_links", "pagespeed",
+    # Neon sequence: SEO-first, security + performance last (distinct from James)
+    "robots", "sitemap", "meta_source", "canonical", "meta_robots",
+    "serp", "status200", "versions", "layout", "blank_page",
+    "broken_links", "sucuri", "manual_action", "security_issues", "pagespeed",
 ]
 
 SIGMA_KEYS = [
@@ -1254,7 +1255,7 @@ def _safe_save_path(base_path):
 
 
 # ---------- DOCX builder ----------
-def build_health_docx(domain, captured, computed, out_dir, include_keys=None, voice="we", page_border=False):
+def build_health_docx(domain, captured, computed, out_dir, include_keys=None, voice="we", page_border=False, header_fill=None):
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import parse_xml
@@ -1331,6 +1332,25 @@ def build_health_docx(domain, captured, computed, out_dir, include_keys=None, vo
             r.font.size = Pt(11)
         return p
 
+    def _shaded_header(text, fill):
+        """A full-width shaded section-header bar (white bold) — used by Neon
+        so its sections read as coloured bars instead of plain bold labels."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(10)
+        p.paragraph_format.space_after = Pt(4)
+        r = p.add_run(text)
+        r.font.name = FONT_NAME
+        r.font.size = Pt(13)
+        r.bold = True
+        r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:fill'), fill)
+        shd.set(qn('w:val'), 'clear')
+        p._p.get_or_add_pPr().append(shd)
+        return p
+
     # Intro
     for label, body in INTRO:
         _add_label_body(label, _voice(body))
@@ -1345,12 +1365,23 @@ def build_health_docx(domain, captured, computed, out_dir, include_keys=None, vo
             body = body.format(domain=domain)
         except Exception:
             pass
-        p = _add_label_body(f"{n}. {cp['label']}", _voice(body))
-        if cp.get("red") and p.runs:
-            for r in p.runs:
-                if not r.bold:
-                    r.font.color.rgb = RGBColor(0xCC, 0x00, 0x00)
-                    r.bold = True
+        if header_fill:
+            # Neon style: coloured header bar with the section title, body below.
+            _shaded_header(f"{n}. {cp['label'].strip().rstrip(':').strip()}", header_fill)
+            btext = _voice(body)
+            if btext.strip():
+                bp = _add_label_body("", btext)
+                if cp.get("red"):
+                    for r in bp.runs:
+                        r.font.color.rgb = RGBColor(0xCC, 0x00, 0x00)
+                        r.bold = True
+        else:
+            p = _add_label_body(f"{n}. {cp['label']}", _voice(body))
+            if cp.get("red") and p.runs:
+                for r in p.runs:
+                    if not r.bold:
+                        r.font.color.rgb = RGBColor(0xCC, 0x00, 0x00)
+                        r.bold = True
 
         extra = cp.get("extra")
         if extra:
@@ -1821,7 +1852,7 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
     elif fmt == "omega":
         path, placed, miss = build_health_pptx_omega(domain, captured, computed, out_dir)
     elif fmt == "neon":
-        path, placed, miss = build_health_docx(domain, captured, computed, out_dir, NEON_KEYS, voice="i")
+        path, placed, miss = build_health_docx(domain, captured, computed, out_dir, NEON_KEYS, voice="i", header_fill="215868")
     else:
         path, placed, miss = build_health_docx(domain, captured, computed, out_dir, use_keys, page_border=True)
 
