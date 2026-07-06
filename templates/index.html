@@ -867,22 +867,12 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
       <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Run a Google Search Console audit — sitemaps, indexing, performance, manual actions, security issues. Generates a PPTX report.</p>
 
       <div id="gsc-connect-box" style="margin-bottom:14px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border)">
-        <div id="gsc-not-connected" style="display:flex;align-items:center;gap:10px">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--err)" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-          <div style="flex:1">
-            <div style="font-weight:700;font-size:13px">Google Account Not Connected</div>
-            <div style="font-size:11px;color:var(--text-3)">Connect your Google account to access Search Console data and capture screenshots.</div>
-          </div>
-          <button class="btn btn-primary" style="font-size:12px;padding:6px 16px" onclick="gscConnect()">Connect</button>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div style="font-weight:700;font-size:13px">Google Accounts</div>
+          <button class="btn btn-primary" style="font-size:12px;padding:6px 14px" onclick="gscConnect()">+ Connect account</button>
         </div>
-        <div id="gsc-connected" style="display:none;align-items:center;gap:10px">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-          <div style="flex:1">
-            <div style="font-weight:700;font-size:13px">Connected: <span id="gsc-connected-email"></span></div>
-            <div style="font-size:11px;color:var(--text-3)">Ready to run GSC audit.</div>
-          </div>
-          <button class="btn btn-tonal" style="font-size:11px;padding:4px 12px" onclick="gscDisconnect()">Disconnect</button>
-        </div>
+        <div id="gsc-none" style="font-size:11px;color:var(--text-3);margin-top:6px">No Google account connected. Click "Connect account" to add one — you can connect several and pick which to use per audit.</div>
+        <div id="gsc-accounts-list" style="margin-top:4px"></div>
       </div>
 
       <div class="field">
@@ -2152,22 +2142,33 @@ async function gscLoadAccounts(){
   try{
     const r=await fetch('/api/gsc/accounts');
     const accs=await r.json();
-    if(accs.length){
-      _gscEmail=accs[0].email;
-      $('gsc-connected-email').textContent=_gscEmail;
-      $('gsc-not-connected').style.display='none';
-      $('gsc-connected').style.display='flex';
+    const list=$('gsc-accounts-list');
+    if(accs&&accs.length){
+      // keep the current selection if it's still connected, else default to the first
+      if(!_gscEmail||!accs.some(a=>a.email===_gscEmail)) _gscEmail=accs[0].email;
+      list.innerHTML=accs.map(a=>{
+        const sel=a.email===_gscEmail;
+        return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--border)">'+
+          '<input type="radio" name="gsc-acct" '+(sel?'checked':'')+' onclick="gscSelectAccount(\''+esc(a.email)+'\')" title="Use this account" style="cursor:pointer">'+
+          '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.4"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'+
+          '<span style="flex:1;font-size:12px;font-weight:'+(sel?'700':'500')+'">'+esc(a.email)+(sel?' <span style="color:var(--ok);font-size:10px">(active)</span>':'')+'</span>'+
+          '<button class="btn btn-tonal" style="font-size:10px;padding:3px 10px" onclick="gscDisconnect(\''+esc(a.email)+'\')">Disconnect</button>'+
+        '</div>';
+      }).join('');
+      $('gsc-none').style.display='none';
     }else{
       _gscEmail='';
-      $('gsc-not-connected').style.display='flex';
-      $('gsc-connected').style.display='none';
+      list.innerHTML='';
+      $('gsc-none').style.display='block';
     }
   }catch(e){}
 }
-async function gscDisconnect(){
-  if(!_gscEmail)return;
-  await fetch('/api/gsc/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:_gscEmail})});
-  toast('Disconnected');
+function gscSelectAccount(email){_gscEmail=email;gscLoadAccounts();}
+async function gscDisconnect(email){
+  if(!email)return;
+  await fetch('/api/gsc/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email})});
+  toast('Disconnected '+email);
+  if(email===_gscEmail)_gscEmail='';
   gscLoadAccounts();
 }
 
