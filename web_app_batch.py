@@ -433,6 +433,49 @@ def _click_buster_button(driver):
     return _click_in_bframe(driver, ["#solver-button", ".help-button-holder button",
                                      "[id*='solver']", "[class*='solver']"])
 
+def _click_audio_and_buster(driver):
+    """Last-resort recovery: switch to a FRESH audio challenge (the headphones /
+    'eye' button in the challenge bar) then click Buster again. Buster is built to
+    solve audio challenges, so forcing a clean audio challenge and re-clicking it
+    often succeeds when the image challenge or a stale audio one has failed."""
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.action_chains import ActionChains
+    try:
+        driver.switch_to.default_content()
+        fr = driver.find_elements(By.CSS_SELECTOR,
+            "iframe[title*='recaptcha challenge'], iframe[src*='bframe']")
+        if not fr:
+            return False
+        driver.switch_to.frame(fr[0])
+        # 1) Click the audio-challenge button (the "eye"/headphones icon)
+        audio = driver.find_elements(By.CSS_SELECTOR,
+            "#recaptcha-audio-button, button[id*='audio'], button[title*='audio']")
+        if audio:
+            try:
+                audio[0].click()
+            except Exception:
+                try: ActionChains(driver).move_to_element(audio[0]).click().perform()
+                except Exception: pass
+            add_log("Switched to a fresh audio challenge")
+            time.sleep(2.5)
+        # 2) Click Buster's solve button on the audio challenge
+        clicked = False
+        host = driver.find_elements(By.CSS_SELECTOR, "div.help-button-holder")
+        if host:
+            try:
+                ActionChains(driver).move_to_element(host[0]).click().perform()
+                add_log("Buster clicked on the audio challenge")
+                clicked = True
+            except Exception:
+                pass
+        driver.switch_to.default_content()
+        return clicked
+    except Exception:
+        try: driver.switch_to.default_content()
+        except Exception: pass
+        return False
+
+
 def solve_with_buster(driver, max_attempts=1):
     from selenium.webdriver.common.by import By
     add_log("Trying Buster CAPTCHA solver...")
@@ -607,6 +650,23 @@ def solve_with_buster(driver, max_attempts=1):
                             return True
                     except Exception:
                         pass
+
+    # Final fallback: force a FRESH audio challenge (the "eye"/headphones button)
+    # then let Buster try once more — often solves when reloads alone didn't.
+    if is_alive(driver) and not stop_event.is_set() and _click_audio_and_buster(driver):
+        for _ in range(12):
+            time.sleep(2)
+            if not is_alive(driver):
+                return False
+            if _recaptcha_status(driver) == "CHECKED":
+                add_log("CAPTCHA solved by Buster on the audio challenge!")
+                return True
+            try:
+                if classify_page(page_source(driver)) == "ok":
+                    add_log("CAPTCHA solved!")
+                    return True
+            except Exception:
+                pass
 
     add_log("Buster could not solve.")
     return False
