@@ -420,6 +420,24 @@ def find_session_for_email(email):
     return None
 
 
+def _trim_session_cache(profile_dir):
+    """Delete a session profile's browser CACHE (not cookies/login), so each
+    per-account session stays small on disk — the login (cookies) is only a few MB;
+    the bulk is cache we don't need to keep."""
+    import shutil
+    cache_dirs = ["Cache", "Code Cache", "GPUCache", "DawnCache", "DawnGraphiteCache",
+                  "GrShaderCache", "ShaderCache", "Service Worker/CacheStorage",
+                  "Service Worker/ScriptCache", "Service Worker/Database"]
+    for base in (profile_dir, os.path.join(profile_dir, "Default")):
+        for c in cache_dirs:
+            p = os.path.join(base, *c.split("/"))
+            try:
+                if os.path.isdir(p):
+                    shutil.rmtree(p, ignore_errors=True)
+            except Exception:
+                pass
+
+
 def capture_gsc_with_session(session_id, property_url, email, out_dir,
                               pages=None, browser_pref="edge", log_fn=None):
     """Launch the GSC-login session browser and capture GSC screenshots from it.
@@ -461,6 +479,7 @@ def capture_gsc_with_session(session_id, property_url, email, out_dir,
     if isinstance(result, dict) and result.get("error") == "session_expired":
         log_fn("  Headless GSC session bounced to login — retrying in a visible window...")
         result = _attempt(headless=False)
+    _trim_session_cache(profile_dir)  # keep the session small: drop cache, keep the login
     return result
 
 
