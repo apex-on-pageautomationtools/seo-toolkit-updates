@@ -1099,7 +1099,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     add_log(f"Highlighted {hl} result(s) for {domain_clean}")
                     time.sleep(0.3)
                 safe_kw = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in keyword)[:50]
-                ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                 ss_name = f"{safe_kw}_{ts}.png"
                 ss_path = os.path.join(_domain_folder(domain, "ranking"), ss_name)
                 _save_full_page_screenshot(sess.driver, ss_path)
@@ -2255,10 +2255,11 @@ def api_export_csv():
     w = csv.DictWriter(out, fieldnames=fields, extrasaction="ignore")
     w.writeheader(); w.writerows(results); out.seek(0)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    _dslug = (domain or "report").lower().replace("https://", "").replace("http://", "").replace("www.", "").strip("/").split("/")[0].replace(":", "_") or "report"
     if m == "ranking":
-        name = f"rankings_{ts}.csv"
+        name = f"{_dslug}_rankings_{ts}.csv"
     elif m == "backlink":
-        name = f"backlink_check_{ts}.csv"
+        name = f"{_dslug}_backlink_check_{ts}.csv"
     elif m == "count":
         name = f"search_results_{ts}.csv"
     else:
