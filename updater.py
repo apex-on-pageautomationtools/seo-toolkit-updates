@@ -6,6 +6,7 @@ No reinstall needed — only Python scripts, templates, and static files are upd
 
 import os
 import json
+import time
 import hashlib
 import urllib.request
 import shutil
@@ -31,7 +32,7 @@ def _file_hash(filepath):
         return ""
 
 
-def _fetch_json(url, timeout=15):
+def _fetch_json(url, timeout=30):
     """Fetch JSON from a URL."""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "SEOToolkitPro-Updater/1.0"})
@@ -41,7 +42,7 @@ def _fetch_json(url, timeout=15):
         return None
 
 
-def _download_file(url, dest, timeout=30):
+def _download_file(url, dest, timeout=90):
     """Download a file from URL to dest path."""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "SEOToolkitPro-Updater/1.0"})
@@ -114,13 +115,18 @@ def check_and_update(log_fn=None):
                 pass
 
         log_fn(f"[update] Downloading {rel_path}...")
-        ok = _download_file(download_url, local_path)
-        # Verify the download matches the manifest hash. A truncated/corrupt download
-        # can otherwise brick a launcher file (Start Tool.vbs / app_launch.ps1) with no
-        # way to self-heal, since the broken launcher is what runs the updater.
-        if ok and remote_hash and _file_hash(local_path) != remote_hash:
-            ok = False
-            _log_update(f"Hash mismatch: {rel_path}")
+        # Retry on flaky/slow networks. A single failed or truncated download used to
+        # leave that file stale (so a feature never updated on some machines). Verify
+        # the hash each try so a corrupt/partial download is rejected and retried.
+        ok = False
+        for _attempt in range(3):
+            if _download_file(download_url, local_path):
+                if not remote_hash or _file_hash(local_path) == remote_hash:
+                    ok = True
+                    break
+                _log_update(f"Hash mismatch (try {_attempt + 1}): {rel_path}")
+            if _attempt < 2:
+                time.sleep(2 * (_attempt + 1))
         if ok:
             updated_files.append(rel_path)
             _log_update(f"Updated: {rel_path} ({local_hash[:8]}... -> {remote_hash[:8]}...)")
