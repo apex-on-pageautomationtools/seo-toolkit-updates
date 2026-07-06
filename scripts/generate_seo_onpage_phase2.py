@@ -1688,6 +1688,24 @@ def _sec_lang(h, findings, captured):
     h["shot"]("lang", captured)
 
 
+def _set_page_background(doc, color):
+    """Set the Word page background color (renders in Print Layout with the
+    'display background' flag on). color is a 6-hex string, e.g. 'FFF2CC'."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    root = doc.element  # <w:document>; <w:background> must precede <w:body>
+    if root.find(qn('w:background')) is None:
+        bg = OxmlElement('w:background')
+        bg.set(qn('w:color'), color)
+        root.insert(0, bg)
+    try:  # enable rendering of the background shape
+        settings = doc.settings.element
+        if settings.find(qn('w:displayBackgroundShape')) is None:
+            settings.append(OxmlElement('w:displayBackgroundShape'))
+    except Exception:
+        pass
+
+
 # ---- Format: James (Driftzine) ----
 def _build_docx_james(domain, pages_data, findings, captured, brand, out_path):
     doc, h = _setup_docx(domain)
@@ -1740,6 +1758,7 @@ def _build_docx_omega(domain, pages_data, findings, captured, brand, out_path):
     from docx.shared import Pt, RGBColor
 
     doc, h = _setup_docx(domain)
+    _set_page_background(doc, "FFF2CC")  # cream page background, per the alltechco reference
     home = next((pd for pd in pages_data if urllib.parse.urlparse(pd["url"]).path in ("", "/")),
                 pages_data[0] if pages_data else {})
     root = h["root"]
