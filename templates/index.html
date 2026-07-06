@@ -866,15 +866,6 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
       </div>
       <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Run a Google Search Console audit — sitemaps, indexing, performance, manual actions, security issues. Generates a PPTX report.</p>
 
-      <div id="gsc-connect-box" style="margin-bottom:14px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border)">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-          <div style="font-weight:700;font-size:13px">Google Accounts</div>
-          <button class="btn btn-primary" style="font-size:12px;padding:6px 14px" onclick="gscConnect()">+ Connect account</button>
-        </div>
-        <div id="gsc-none" style="font-size:11px;color:var(--text-3);margin-top:6px">No Google account connected. Click "Connect account" to add one — you can connect several and pick which to use per audit.</div>
-        <div id="gsc-accounts-list" style="margin-top:4px"></div>
-      </div>
-
       <div class="field">
         <label>Domain</label>
         <input type="text" id="gsc-domain" placeholder="example.com" autocomplete="off" onblur="gscCheckDomain()">
@@ -890,7 +881,16 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
           <option value="neon">Neon (8 slides)</option>
         </select>
       </div>
-      <div class="note">OAuth credentials must be set in Settings. Click Connect to authenticate with Google, then enter your domain and click Start.</div>
+
+      <div id="gsc-connect-box" style="margin-bottom:14px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div style="font-weight:700;font-size:13px">Google Accounts</div>
+          <button class="btn btn-primary" style="font-size:12px;padding:6px 14px" onclick="gscConnect()">+ Connect account</button>
+        </div>
+        <div id="gsc-none" style="font-size:11px;color:var(--text-3);margin-top:6px">No Google account connected. Click "Connect account" to add one — you can connect several; the one that owns the domain is picked automatically.</div>
+        <div id="gsc-accounts-list" style="margin-top:4px"></div>
+      </div>
+      <div class="note">The account that owns the domain is selected automatically when you enter it — you don't have to pick one. If it isn't connected yet, click "+ Connect account" above. (OAuth credentials are set in Settings.)</div>
 
       <!-- GSC Browser Sessions -->
       <div style="margin-top:18px;padding:14px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border)">
@@ -2142,6 +2142,7 @@ async function gscLoadAccounts(){
   try{
     const r=await fetch('/api/gsc/accounts');
     const accs=await r.json();
+    window._gscAccounts=(accs||[]).map(a=>String(a.email).toLowerCase());
     const list=$('gsc-accounts-list');
     if(accs&&accs.length){
       // keep the current selection if it's still connected, else default to the first
@@ -2694,10 +2695,15 @@ async function gscCheckDomain(){
   try{
     const r=await(await fetch('/api/gsc/domain-check?domain='+encodeURIComponent(domain))).json();
     if(r.found){
+      const connected = r.email && (window._gscAccounts||[]).includes(String(r.email).toLowerCase());
       info.style.display='block';
       info.style.background='var(--md-surface-variant, #e8f5e9)';
       info.style.color='var(--md-on-surface, #1b5e20)';
-      info.innerHTML='<b>'+esc(domain)+'</b><br>Account: <b>'+esc(r.email)+'</b><br>Access: <b>'+esc(r.accessLevel)+'</b>';
+      info.innerHTML='<b>'+esc(domain)+'</b><br>Account: <b>'+esc(r.email)+'</b><br>Access: <b>'+esc(r.accessLevel)+'</b>'
+        + (connected ? '<br><span style="opacity:.85">✓ selected automatically for this domain</span>'
+                     : '<br><span style="color:#b71c1c">Not connected yet — click “+ Connect account” below and sign in with this account.</span>');
+      // Auto-use the account that owns this domain (no manual pick needed)
+      if(connected && _gscEmail!==r.email){ gscSelectAccount(r.email); }
     }else{
       info.style.display='block';
       info.style.background='var(--md-error-container, #fce4ec)';
