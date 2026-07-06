@@ -2794,16 +2794,28 @@ def api_gsc_connect():
     if not client_id or not client_secret:
         return jsonify({"error": "GSC OAuth Client ID and Secret not configured. Set them in Settings."}), 400
 
+    # Run OAuth inside a per-account browser SESSION profile so the very same
+    # signed-in browser is saved for the Manual Action / Security screenshot
+    # capture — one login covers both the API token AND the screenshots. Using a
+    # fresh profile per account also avoids Google's ~10-accounts-per-browser cap.
+    session = gsc_audit.create_session(label="Connecting…")
     driver = None
     try:
         driver = engine.build_driver(
-            GSC_PROFILE_DIR, proxy=None, headless=headless,
+            session["profile_dir"], proxy=None, headless=headless,
             country="us", extra_extensions=[],
             browser_pref=browser_name,
         )
         email = gsc_audit.oauth_login_selenium(driver, client_id, client_secret)
+        # Tag this session with the account, and drop any older session for the
+        # same email so sessions don't pile up on reconnect.
+        for s in gsc_audit.list_sessions():
+            if s["id"] != session["id"] and email.lower() in [a.lower() for a in s.get("accounts", [])]:
+                gsc_audit.remove_session(s["id"])
+        gsc_audit.set_session_account(session["id"], email)
         return jsonify({"status": "connected", "email": email})
     except Exception as e:
+        gsc_audit.remove_session(session["id"])  # clean up the empty session on failure
         return jsonify({"error": str(e)}), 500
     finally:
         if driver:

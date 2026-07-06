@@ -331,6 +331,16 @@ def remove_session(session_id):
     return False
 
 
+def set_session_account(session_id, email):
+    """Tag a browser session with the Google account it's logged into (so the
+    Manual Action / Security capture can find it by email)."""
+    meta = _load_session_meta(session_id)
+    meta["accounts"] = [email]
+    meta["label"] = email
+    meta["last_login"] = datetime.now().isoformat()
+    _save_session_meta(session_id, meta)
+
+
 def launch_session_browser(session_id, browser_pref="edge", log_fn=None):
     """Launch Chrome/Edge with the session's user-data-dir so the user can
     log into Google accounts.  Returns the driver (caller must quit it)."""
