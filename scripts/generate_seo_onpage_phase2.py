@@ -591,29 +591,48 @@ def _write_rows(ws, proto, rows, start=2):
 
 
 def write_meta_xlsx(metas, out_path):
-    from openpyxl.styles import Alignment
+    from copy import copy
+    from openpyxl.styles import Alignment, Font
     wb, ws, proto = _clone_and_clear(TPL_META)
     rows = [[m["page"], m["existing_title"], m["suggested_title"], m["existing_description"],
              m["suggested_description"], m["existing_h1"], m["suggested_h1"]] for m in metas]
     _write_rows(ws, proto, rows)
     left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    # The cloned template row styles the "existing" columns in red. Real existing
+    # values should read as calm black text; keep red ONLY to flag genuinely
+    # missing/empty existing values. Columns: 2=existing title, 4=existing desc,
+    # 6=existing H1.
+    existing_cols = {2, 4, 6}
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=ws.max_column):
         for cell in row:
             cell.alignment = left
+            if cell.column in existing_cols:
+                val = str(cell.value or "").strip()
+                flagged = (not val) or val == MISSING
+                f = copy(cell.font)
+                cell.font = Font(name=f.name, size=f.size, bold=f.bold, italic=f.italic,
+                                 color=("FFC00000" if flagged else "FF000000"))
     wb.save(out_path)
 
 
 def write_alt_xlsx(self_hosted, external_cdn, out_path):
     import openpyxl
-    from openpyxl.styles import Font, Alignment
+    from openpyxl.styles import Font, Alignment, PatternFill
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Image Alt Tag Suggestions"
     headers = ["Page URL", "Image URL", "Existing Alt Text", "Suggested Alt Tag"]
-    hfont = Font(bold=True, size=11)
+    # Match the house-style header used by the Canonical / Target Pages sheets:
+    # solid 2F5496 fill with a white bold font, and a frozen header row.
+    header_fill = PatternFill("solid", fgColor="2F5496")
+    header_font = Font(bold=True, size=11, color="FFFFFF")
+    header_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
     for c, h in enumerate(headers, 1):
         cell = ws.cell(1, c, h)
-        cell.font = hfont
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+    ws.freeze_panes = "A2"
     ws.column_dimensions["A"].width = 40
     ws.column_dimensions["B"].width = 60
     ws.column_dimensions["C"].width = 30
@@ -737,6 +756,34 @@ def _http(url, method="GET", timeout=20):
         return 0, "", url
 
 
+def _resolve_gsc_creds(domain, account=None):
+    """Best-effort (token, property_url) from a connected GSC account, using the
+    shared gsc_audit module. Returns (None, None) if nothing is configured — the
+    report then shows a graceful 'no GSC access' note rather than fabricating data.
+    Never raises: any failure just means indexing falls back to the manual note."""
+    try:
+        import gsc_audit
+    except Exception as e:
+        log(f"   [info] GSC module unavailable ({type(e).__name__}) — indexing note only")
+        return None, None
+    try:
+        email = account
+        if not email:
+            accts = gsc_audit.list_accounts()
+            if not accts:
+                log("   [info] no connected GSC account — indexing note only")
+                return None, None
+            # prefer an account that has a refresh token (can mint a fresh token)
+            email = next((a["email"] for a in accts if a.get("has_refresh")), accts[0]["email"])
+        token = gsc_audit.get_access_token(email)
+        property_url = gsc_audit.resolve_property(token, safe_domain(domain))
+        log(f"   [info] GSC creds resolved for {email} -> {property_url}")
+        return token, property_url
+    except Exception as e:
+        log(f"   [info] could not resolve GSC creds ({type(e).__name__}: {e}) — indexing note only")
+        return None, None
+
+
 def check_gsc_indexing(urls, token, property_url):
     """Call GSC URL Inspection API for each target page. Returns list of dicts."""
     import urllib.request
@@ -769,6 +816,43 @@ def check_gsc_indexing(urls, token, property_url):
         except Exception as e:
             results.append({"url": url, "verdict": "ERROR", "coverageState": str(e)})
     return results
+
+
+def _detect_footer_logo(home_html):
+    """True if the site's footer region contains a logo-like element. Conservative
+    about false-NEGATIVES (the original bug) while avoiding wild false-positives:
+    we only search the footer region, not the whole page."""
+    if not home_html:
+        return False
+    html = home_html
+    low = html.lower()
+
+    # 1) Find where the footer region starts. Prefer the LAST literal <footer …>,
+    #    else the last element whose class/id contains "footer".
+    start = low.rfind("<footer")
+    if start == -1:
+        best = -1
+        for m in re.finditer(r'<(?:div|section|nav)\b[^>]*\b(?:class|id)\s*=\s*["\'][^"\']*footer[^"\']*["\']',
+                              html, re.I):
+            best = m.start()
+        start = best
+    if start == -1:
+        return False
+
+    # 2) Window after the footer start (footers are near the end; cap the span so a
+    #    huge single-page app footer doesn't swallow the rest of the document).
+    region = html[start:start + 20000]
+
+    # 3) Any logo-like element inside the footer region counts.
+    if re.search(r"<img\b", region, re.I):
+        return True
+    if re.search(r"<svg\b", region, re.I):
+        return True
+    if re.search(r"background(?:-image)?\s*:\s*[^;\"']*url\(", region, re.I):
+        return True
+    if re.search(r'\b(?:class|id)\s*=\s*["\'][^"\']*logo[^"\']*["\']', region, re.I):
+        return True
+    return False
 
 
 def audit_site(domain, pages_data, dry_run=False):
@@ -827,8 +911,13 @@ def audit_site(domain, pages_data, dry_run=False):
     f["alt_total"] = len(imgs)
     f["alt_missing"] = sum(1 for im in imgs if not im.get("alt"))
 
-    # footer logo: check if <footer> contains an <img> tag
-    f["has_footer_logo"] = bool(re.search(r"<footer[^>]*>[\s\S]*?<img\b", home_html[:50000], re.I))
+    # footer logo: robustly detect a logo in the footer region. The old check only
+    # matched a literal <footer>…<img> in the first 50k chars, missing SVG logos,
+    # CSS background-image logos, <a class="logo">, footers built from
+    # <div class="...footer...">, or footers beyond the slice. Detect the footer
+    # region (last <footer>, else last element whose class/id contains "footer"),
+    # then look for any logo-like element within a window after it.
+    f["has_footer_logo"] = _detect_footer_logo(home_html)
 
     f["ext_count"] = len(home.get("external_links", []))
     f["lang"] = home.get("lang", "") or ""
@@ -1299,6 +1388,7 @@ def _sec_intro(h, root):
               "to optimize the content and the source code of a page.")
 
 def _sec_on_page_analysis(h):
+    h["ribbon"]("On Page Analysis")
     h["result"]("On Page Analysis:")
     h["para"]("These are the most important factors to be checked before optimizing a website. "
               "Proper implementation will help keyword ranking in search engine for your website.")
@@ -1330,6 +1420,7 @@ def _sec_additional_notes(h, findings, captured, year):
         h["shot"]("homepage", captured)
 
 def _sec_alt_tags(h, findings):
+    h["ribbon"]("Image ALT Optimization (Main Pages)")
     if findings.get("alt_missing", 0) > 0:
         h["result"](f"Result: {findings['alt_missing']} image(s) without Alt tags found on the target pages "
                     f"checked. It is not good from an SEO point of view. Kindly find the attached Image Alt "
@@ -1339,6 +1430,7 @@ def _sec_alt_tags(h, findings):
                     "an SEO point of view.")
 
 def _sec_robots(h, findings, captured):
+    h["ribbon"]("Robots.txt Optimization")
     h["para"]("Robots.txt is a regular text file that through its name has special meaning to the majority "
               "of \"honorable\" robots on the web. By defining a few rules in this text file, you can "
               "instruct robots to not crawl & index certain files, directories within a site or the entire "
@@ -1383,11 +1475,17 @@ def _sec_indexing(h, findings, captured):
         h["para"](f"{len(findings['target_pages'])} target page(s) found:", bold=True)
         for u in findings["target_pages"]:
             h["para"](u)
-        h["para_red"]("Please verify the indexing status of these pages manually using Google Search Console "
-                      "or by searching site:domain.com on Google.")
+        if findings.get("gsc_available"):
+            h["para_red"]("Indexing was checked via Google Search Console but the URL-Inspection "
+                          "API returned no usable data. Please verify the indexing status of these "
+                          "pages manually in GSC or via a site: search on Google.")
+        else:
+            h["para_red"]("Indexing could not be verified automatically (no Google Search Console "
+                          "access configured) — please verify via GSC or a site: search.")
     h["shot"]("serp", captured)
 
 def _sec_sitemap(h, findings, captured):
+    h["ribbon"]("XML Sitemap Optimization")
     h["para"]("Sitemap: A sitemap is a file where you can list the web pages of your site to tell Google "
               "and other search engines about the organization of your site content. Search engine web "
               "crawlers read this file to more intelligently crawl your site.")
@@ -1405,6 +1503,7 @@ def _sec_sitemap(h, findings, captured):
                       "- Other CMS: Check your platform's documentation for sitemap generation")
 
 def _sec_redirection(h, findings):
+    h["ribbon"]("URL Redirection Issue Optimization")
     if findings.get("www_redirect_issue"):
         h["result"]("Redirection: The website runs with both www and non-www versions. We suggest redirecting "
                     "the www version to the non-www version using a 301 permanent redirect.")
@@ -1412,13 +1511,17 @@ def _sec_redirection(h, findings):
         h["result"]("No redirection issue found on the website. It is good from a search engine point of view.")
 
 def _sec_404(h, findings, root):
+    h["ribbon"]("Custom 404 Page Optimization")
     if not findings.get("has_custom_404"):
         h["label_body"]("404 Custom Page Suggestion:")
         h["para"](f"We did not find a custom 404 page. Opening a mistyped URL such as {root}/asdfg redirects "
                   "to the default page instead of a 404 page. We recommend creating a custom 404 page.")
+    else:
+        h["result"]("Result: A custom 404 page is present. It is good from an SEO point of view.")
 
 def _sec_canonical(h, findings, captured):
     d = h["d"]
+    h["ribbon"]("Canonical Issue Checking")
     h["para"]("A canonical problem occurs when a site is running in multiple versions like www version "
               f"(http://www.{d}), the non-www version (http://{d}), trailing slash, "
               "or /index.html. Search engines may treat these as duplicates; a canonical tag tells them "
@@ -1431,13 +1534,14 @@ def _sec_canonical(h, findings, captured):
     h["shot"]("canonical", captured)
 
 def _sec_external_links(h, findings, captured):
+    h["ribbon"]("External Link Optimization")
     h["result"](f"{findings.get('ext_count', 0)} external links found on the target pages checked.")
     if findings.get('ext_count', 0) > 0:
         h["para_red"]("Please verify whether any external links are harmful or beneficial as per need.")
     h["shot"]("externallinks", captured)
 
 def _sec_broken_links(h, findings, captured):
-    h["label_body"]("Broken Link Optimization")
+    h["ribbon"]("Broken/Dead Link Optimization")
     h["para"]("Though the broken links do not hurt directly but it affects user experience and if users "
               "do not find desired info they will not come frequently and search engine will rank the "
               "website down.", bold=True)
@@ -1456,6 +1560,7 @@ def _sec_broken_links(h, findings, captured):
     h["shot"]("brokenlinks", captured)
 
 def _sec_internal_linking(h, home):
+    h["ribbon"]("Internal Linking Optimization")
     h["result"]("Internal Linking: Internal linking is called perfect when every live webpage is "
                 "accessed/visited from every other live and available webpage in a website.")
     int_count = len(home.get("internal_links", []))
@@ -1463,12 +1568,14 @@ def _sec_internal_linking(h, home):
     h["para_red"]("Please verify the internal linking structure across the full website as per need.")
 
 def _sec_page_speed(h, root):
+    h["ribbon"]("Page Speed Optimization")
     h["label_body"]("Page Optimization Score:")
     h["para_red"](f"Need to check it once. Check manually at: "
                   f"https://pagespeed.web.dev/analysis?url={root}/")
 
 def _sec_url_structure(h, findings):
     root = h["root"]
+    h["ribbon"]("URL Structure Optimization")
     h["green"]("Recommendations: Search Engines like static URLs instead of dynamic one. And presently "
                "URL structure of your website's inner pages is user and search engine friendly.")
     if findings.get("url_changes"):
@@ -1483,6 +1590,7 @@ def _sec_url_structure(h, findings):
             h["para"](u)
 
 def _sec_hyperlinking(h):
+    h["ribbon"]("Hyperlinking Optimization")
     h["green"]("Recommendations: Hyperlinks are connections established between a word/phrase/image and a "
                "website/file. Effective hyper-linking between different pages of a website helps a website "
                "to rank better.")
@@ -1588,9 +1696,10 @@ def _build_docx_james(domain, pages_data, findings, captured, brand, out_path):
     year = datetime.date.today().year
     root = h["root"]
 
-    _sec_intro(h, root)
+    # Cover image already shows the site URL + intro, and _sec_alt_tags prints the
+    # ALT result — so the James body starts at "On Page Analysis" (no duplicate
+    # intro paragraph, no duplicate "SEO Factors" ALT summary table).
     _sec_on_page_analysis(h)
-    h["summary_table"](findings)
     _sec_additional_notes(h, findings, captured, year)
     _sec_alt_tags(h, findings)
     _sec_robots(h, findings, captured)
@@ -1763,11 +1872,24 @@ def _build_docx_gamma(domain, pages_data, findings, captured, brand, out_path):
     doc.save(out_path)
 
 
-def build_content_suggestion_docx(domain, pages_data, targets, out_path):
-    """Generate the Content Suggestion DOCX — per-page content optimization notes."""
+def build_content_suggestion_docx(domain, pages_data, targets, out_path, captured=None):
+    """Generate the Content Suggestion DOCX — per-page content optimization notes,
+    matching the reference layout: a navy 'Content Optimization' ribbon, a
+    highlighted 'More Content Required:' lead-in, then per target page the URL,
+    keywords, a red 'Section' label, a 'Screenshots:' label + bordered page
+    screenshot (when available), separated by a dashed line."""
     from docx import Document
     from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_COLOR_INDEX
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
     FONT, SIZE = "Arial", 11
+    captured = captured or {}
+
+    try:
+        import generate_health_report as _hr
+    except Exception:
+        _hr = None
 
     doc = Document()
     for sname in ("Normal",):
@@ -1778,39 +1900,68 @@ def build_content_suggestion_docx(domain, pages_data, targets, out_path):
         except KeyError:
             pass
 
-    def _run(p, text, bold=False, color=None, size=None):
+    def _run(p, text, bold=False, color=None, size=None, highlight=None):
         r = p.add_run(text)
         r.font.name = FONT
         r.font.size = Pt(size or SIZE)
         r.font.bold = bold
         if color:
             r.font.color.rgb = color
+        if highlight is not None:
+            r.font.highlight_color = highlight
         return r
 
+    def _ribbon(text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(12)
+        p.paragraph_format.space_after = Pt(6)
+        r = p.add_run(text)
+        r.font.name = FONT
+        r.font.size = Pt(14)
+        r.font.bold = True
+        r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:fill'), '000066')
+        shd.set(qn('w:val'), 'clear')
+        p._p.get_or_add_pPr().append(shd)
+        return p
+
+    def _dashed_sep():
+        p = doc.add_paragraph()
+        pPr = p._p.get_or_add_pPr()
+        pbdr = OxmlElement('w:pBdr')
+        bottom = OxmlElement('w:bottom')
+        bottom.set(qn('w:val'), 'dashed')
+        bottom.set(qn('w:sz'), '6')
+        bottom.set(qn('w:space'), '1')
+        bottom.set(qn('w:color'), '808080')
+        pbdr.append(bottom)
+        pPr.append(pbdr)
+        return p
+
+    _ribbon("Content Optimization")
+
     p = doc.add_paragraph()
-    _run(p, "Content Optimization", bold=True, size=14)
+    _run(p, "More Content Required:", bold=True, highlight=WD_COLOR_INDEX.TURQUOISE)
+    _run(p, " We have found content in following Target pages, but we recommend you to add more "
+            "unique and relevant content (containing targeted keywords) in following pages up to "
+            "100-120 words. Use the keyword respective to the pages as suggested below-", bold=True)
 
     for i, t in enumerate(targets):
         page_url = t.get("page", "")
         keywords = t.get("keywords", [])
         kw_str = ", ".join(keywords) if keywords else ""
 
-        if i == 0:
-            p = doc.add_paragraph()
-            _run(p, "Fresh Content Required: ", bold=True)
-            _run(p, "We didn't find enough amount of keywords-oriented content integrated web-page. "
-                     "We highly recommend you add some unique and relevant content (about 150-200 words) "
-                     "containing targeted keywords within it on the following pages-", bold=True)
-            p = doc.add_paragraph()
-            _run(p, f"Page URL: {page_url}", bold=True)
-        else:
-            p = doc.add_paragraph()
-            sep = "-" * 70
-            _run(p, f"{sep}\nPage URL: {page_url}", bold=True)
+        if i > 0:
+            _dashed_sep()
 
-        if kw_str:
-            p = doc.add_paragraph()
-            _run(p, f"Keywords: {kw_str}", bold=True)
+        p = doc.add_paragraph()
+        _run(p, "Page URL: ", bold=True)
+        _run(p, page_url)
+
+        p = doc.add_paragraph()
+        _run(p, "Keywords: ", bold=True)
+        _run(p, kw_str)
 
         p = doc.add_paragraph()
         _run(p, "Section", bold=True, color=RGBColor(0xFF, 0x00, 0x00))
@@ -1818,8 +1969,13 @@ def build_content_suggestion_docx(domain, pages_data, targets, out_path):
         p = doc.add_paragraph()
         _run(p, "Screenshots:", bold=True)
 
-    p = doc.add_paragraph()
-    _run(p, "=" * 82, bold=True)
+        # bordered page screenshot when one was captured for this page/target
+        shot = t.get("screenshot") or captured.get(page_url) or captured.get(t.get("screenshot_key", ""))
+        if shot and _hr is not None and Path(str(shot)).exists():
+            try:
+                _hr._add_bordered_image(doc, str(shot))
+            except Exception:
+                pass
 
     doc.save(out_path)
 
@@ -1852,7 +2008,7 @@ def main():
                     help="Report sub-format: james (Driftzine), omega (alltechco), neon (sumitechengineers), xenon, gamma (Hawkeev)")
     ap.add_argument("--gsc-token", default=None, help="GSC API access token for URL inspection")
     ap.add_argument("--property-url", default=None, help="GSC property URL (e.g. sc-domain:example.com)")
-    # tolerate flags the shared task-runner may append (e.g. --account)
+    ap.add_argument("--account", default=None, help="Connected GSC account email to resolve a token/property from")
     args, _ = ap.parse_known_args()
 
     raw_domain = args.domain.strip()           # used verbatim for the output filename (glob match)
@@ -1908,12 +2064,19 @@ def main():
     findings["sitemap_found"] = bool(sitemap_body)
     findings["sitemap_url"] = sitemap_url
 
-    # GSC URL Inspection — check indexing status of target pages via API
+    # GSC URL Inspection — check indexing status of target pages via API.
+    # Creds come from explicit --gsc-token/--property-url, or are auto-resolved
+    # from a connected GSC account (the web app launches us WITHOUT these flags,
+    # so without this the indexing section always fell back to "verify manually").
     findings["gsc_indexing"] = None
-    if args.gsc_token and args.property_url:
+    gsc_token, property_url = args.gsc_token, args.property_url
+    if not args.dry_run and not (gsc_token and property_url):
+        gsc_token, property_url = _resolve_gsc_creds(domain, args.account)
+    findings["gsc_available"] = bool(gsc_token and property_url)
+    if gsc_token and property_url:
         log("[3.5/5] Checking indexing status via GSC API...")
         findings["gsc_indexing"] = check_gsc_indexing(
-            [pd["url"] for pd in pages_data], args.gsc_token, args.property_url)
+            [pd["url"] for pd in pages_data], gsc_token, property_url)
 
     captured = {}
     if not (args.dry_run or args.no_capture):

@@ -2417,7 +2417,9 @@ def _run_onpage_report(domain, targets_json, fmt, no_capture):
                              "output_zip": "", "error_msg": "", "progress": "Starting..."})
     onpage_stop.clear()
 
-    out_dir = os.path.join(_data_dir(), "onpage_output")
+    # Save into the user's configured Downloads folder (per-domain), same as every
+    # other tool — not a hidden "onpage_output" folder inside the install dir.
+    out_dir = _domain_folder(domain, "onpage")
     os.makedirs(out_dir, exist_ok=True)
 
     targets_file = None
