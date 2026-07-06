@@ -2278,6 +2278,18 @@ def api_export_csv():
 def api_health():
     return jsonify({"ok": True, "version": APP_VERSION})
 
+
+@app.route("/api/check-updates", methods=["POST"])
+def api_check_updates():
+    """Run the OTA updater on demand — used by the Settings 'Check for updates'
+    button and the auto-check on open, so users never touch the command line.
+    Downloads any changed files to disk; a relaunch applies backend changes."""
+    try:
+        result = updater.check_and_update(log_fn=lambda _m: None)
+    except Exception as e:
+        return jsonify({"updated": False, "updated_files": [], "failed": [], "reason": str(e)})
+    return jsonify(result)
+
 # --------------------------------------------------------------------------- #
 # SEO On-Page Report — runs phase2 script as subprocess
 # --------------------------------------------------------------------------- #

@@ -1384,6 +1384,11 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
 
     <div class="sec-t" style="margin-top:22px;color:var(--text-3)">API Keys & Credentials</div>
     <div class="note" style="margin-bottom:8px">API keys for PageSpeed, GSC, and Apps Script are managed by the admin in the <b>Admin</b> tab. Contact your admin to configure.</div>
+
+    <div class="sec-t" style="margin-top:22px;color:var(--text-3)">Software Updates</div>
+    <div class="note" style="margin-bottom:8px">Updates download automatically when you open the app. You can also check right now — no command line needed.</div>
+    <button class="btn btn-tonal" style="width:100%" id="btn-check-updates" onclick="checkUpdates()">Check for updates</button>
+    <div id="update-status" style="font-size:12px;color:var(--text-3);margin-top:8px"></div>
   </div>
   <div class="sheet-foot">
     <button class="btn btn-tonal" style="flex:1" onclick="closeSettings()">Cancel</button>
@@ -1392,6 +1397,10 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
 </div>
 
 <div class="toast" id="toast"></div>
+<div id="update-banner" style="display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:22px;z-index:99999;background:#1a73e8;color:#fff;padding:11px 16px;border-radius:12px;font-size:13px;box-shadow:0 6px 22px rgba(0,0,0,.28);max-width:92vw">
+  <span id="update-banner-text">Update installed — please relaunch to apply.</span>
+  <button onclick="document.getElementById('update-banner').style.display='none'" style="margin-left:14px;background:rgba(255,255,255,.22);border:none;color:#fff;border-radius:7px;padding:4px 12px;cursor:pointer;font-size:12px">Dismiss</button>
+</div>
 
 <style>
 @keyframes authspin{to{transform:rotate(360deg)}}
@@ -2288,6 +2297,33 @@ async function saveSettings(){
 }
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('sheet').classList.contains('open'))closeSettings();});
 
+/* ===================== software updates ===================== */
+async function checkUpdates(){
+  const btn=$('btn-check-updates'), st=$('update-status');
+  const old=btn?btn.textContent:''; if(btn){btn.disabled=true;btn.textContent='Checking…';} if(st)st.textContent='';
+  try{
+    const d=await(await fetch('/api/check-updates',{method:'POST'})).json();
+    if(!d.updated && d.reason){
+      st.textContent = /reach/i.test(d.reason) ? 'Could not reach the update server — check internet/firewall.' : d.reason;
+    }else if(d.updated && (d.updated_files||[]).length){
+      st.innerHTML='<span style="color:var(--ok)">Updated '+d.updated_files.length+' file(s). Please close and reopen the app to apply.</span>';
+    }else{
+      st.textContent='You are on the latest version.';
+    }
+  }catch(e){ if(st)st.textContent='Update check failed — try again.'; }
+  if(btn){btn.disabled=false;btn.textContent=old;}
+}
+async function autoCheckUpdates(){
+  try{
+    const d=await(await fetch('/api/check-updates',{method:'POST'})).json();
+    if(d.updated && (d.updated_files||[]).length){
+      const n=d.updated_files.length;
+      $('update-banner-text').textContent='Update installed ('+n+' file'+(n>1?'s':'')+') — please close and reopen the app to apply.';
+      $('update-banner').style.display='block';
+    }
+  }catch(e){}
+}
+
 /* ===================== auth ===================== */
 function authMsg(msg,type){
   const el=$('auth-msg');el.textContent=msg;el.style.display='block';
@@ -2740,6 +2776,7 @@ async function initApp(){
   gscSessionsLoad();
   admCheckAdmin();
   applyFormatFilter();
+  setTimeout(autoCheckUpdates, 3500);  // quietly pull any new files after the app opens
 }
 (async function(){
   const ok=await authCheck();
