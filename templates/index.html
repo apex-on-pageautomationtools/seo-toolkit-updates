@@ -438,13 +438,12 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
       <div class="row2 field">
         <div>
           <label>Target country</label>
-          <select id="r-country"></select>
+          <input type="text" id="r-country" list="country-list" placeholder="Type or pick a country" value="United States" autocomplete="off">
         </div>
         <div>
           <label>City <span class="hint">(geolocation)</span></label>
-          <select id="r-city">
-            <option value="">Loading cities…</option>
-          </select>
+          <input type="text" id="r-city" list="r-city-list" placeholder="Type or pick a city" autocomplete="off">
+          <datalist id="r-city-list"></datalist>
         </div>
       </div>
       <div class="field">
@@ -556,7 +555,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
       <div class="row2 field">
         <div>
           <label>City <span class="hint">(geolocation)</span></label>
-          <select id="i-city"><option value="">Loading cities…</option></select>
+          <input type="text" id="i-city" list="i-city-list" placeholder="Type or pick a city" autocomplete="off"><datalist id="i-city-list"></datalist>
         </div>
         <div>
           <label>Language <span class="hint">(hl=)</span></label>
@@ -641,11 +640,11 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
       <div class="row2 field">
         <div>
           <label>Target country</label>
-          <select id="c-country"></select>
+          <input type="text" id="c-country" list="country-list" placeholder="Type or pick a country" value="United States" autocomplete="off">
         </div>
         <div>
           <label>City <span class="hint">(geolocation)</span></label>
-          <select id="c-city"><option value="">Loading cities…</option></select>
+          <input type="text" id="c-city" list="c-city-list" placeholder="Type or pick a city" autocomplete="off"><datalist id="c-city-list"></datalist>
         </div>
       </div>
       <div class="field">
@@ -1458,22 +1457,17 @@ let _cities=[];
   }catch(e){}
 })();
 function updateCityDropdown(prefix, countryCode){
-  const sel=document.getElementById(prefix+'-city');
-  if(!sel)return;
-  const prev=sel.value;
+  const inp=document.getElementById(prefix+'-city');
+  const dl=document.getElementById(prefix+'-city-list');
+  if(!inp||!dl)return;
+  const prev=inp.value;
   const cc=(countryCode||'').toUpperCase();
   const list=_cities.filter(c=>c.name.endsWith(', '+cc)).sort((a,b)=>a.name.localeCompare(b.name));
-  sel.innerHTML='';
-  if(!list.length){ sel.innerHTML='<option value="">— No cities for this country —</option>'; return; }
-  list.forEach(c=>{
-    const o=document.createElement('option');
-    o.value=c.name;
-    o.textContent=c.name.replace(', '+cc,'');
-    sel.appendChild(o);
-  });
-  // Keep the previous pick if still valid; otherwise auto-select the first city
-  if(prev && list.some(c=>c.name===prev)) sel.value=prev;
-  else sel.selectedIndex=0;
+  dl.innerHTML='';
+  list.forEach(c=>{ const o=document.createElement('option'); o.value=c.name; dl.appendChild(o); });
+  // Keep the previous city if it's valid for this country, else auto-fill the first one
+  if(prev && list.some(c=>c.name===prev)) inp.value=prev;
+  else inp.value = list.length ? list[0].name : '';
 }
 
 /* ===================== theme ===================== */
@@ -1609,24 +1603,18 @@ const $=id=>document.getElementById(id);
 ['p_type','p_host','p_port','p_user','p_pass'].forEach(k=>window[k]=document.getElementById(k.replace('_','-')));
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
 
-/* country → city sync */
+/* country → city sync — both country and city are searchable dropdowns (type to filter
+   or pick from the list). country-list (alphabetical) is shared; each city gets its own
+   datalist filled from the chosen country. */
 (function(){
-  // Fill the country <select>s (alphabetical) from the shared country list, default US.
-  function fillCountry(id, selName){
-    const s=$(id); if(!s)return;
-    s.innerHTML='';
-    document.querySelectorAll('#country-list option').forEach(o=>{
-      const opt=document.createElement('option');
-      opt.value=o.value; opt.textContent=o.value;
-      if(o.value===selName) opt.selected=true;
-      s.appendChild(opt);
-    });
-  }
-  fillCountry('r-country','United States');
-  fillCountry('c-country','United States');
   const rc=$('r-country'), cc=$('c-country');
-  if(rc) rc.addEventListener('change',function(){updateCityDropdown('r',countryCode(rc.value));});
-  if(cc) cc.addEventListener('change',function(){updateCityDropdown('c',countryCode(cc.value));});
+  function wire(el, prefix){
+    if(!el) return;
+    const h=function(){ updateCityDropdown(prefix, countryCode(el.value)); };
+    el.addEventListener('change', h);
+    el.addEventListener('input', h);
+  }
+  wire(rc, 'r'); wire(cc, 'c');
   // Init cities once loaded
   const _wait=setInterval(()=>{if(_cities.length){clearInterval(_wait);updateCityDropdown('r',countryCode(rc?rc.value:'us'));updateCityDropdown('i','us');updateCityDropdown('c',countryCode(cc?cc.value:'us'));}},200);
 })();
