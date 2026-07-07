@@ -47,6 +47,7 @@ Source: "brief_analysis.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "config.json";       DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist
 Source: "Start Tool.vbs";   DestDir: "{app}"; Flags: ignoreversion
 Source: "app_launch.ps1";   DestDir: "{app}"; Flags: ignoreversion
+Source: "splash.ps1";       DestDir: "{app}"; Flags: ignoreversion
 Source: "rank-checker-search-bars.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Embedded Python

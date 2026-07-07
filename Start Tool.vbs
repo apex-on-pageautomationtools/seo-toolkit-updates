@@ -25,6 +25,12 @@ If FSO.FileExists(portFile) Then FSO.DeleteFile portFile
 ' Updates are now pulled AFTER the server is up (below) and by the app's own auto-check.
 WshShell.Run "cmd /c ""set GRC_NO_BROWSER=1&& set GRC_PORT_FILE=" & portFile & "&& """ & strDir & "\python\python.exe"" -s """ & strDir & "\web_app_batch.py""""", 0, False
 
+' Show a lightweight "Starting..." splash so the user has feedback while the server
+' comes up. It self-closes when the port file appears (or times out). Cosmetic only.
+If FSO.FileExists(strDir & "\splash.ps1") Then
+    WshShell.Run "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & strDir & "\splash.ps1""", 0, False
+End If
+
 ' Wait for port file (server writes it when ready) — generous for slower machines.
 Dim port, appUrl, attempts
 port = ""

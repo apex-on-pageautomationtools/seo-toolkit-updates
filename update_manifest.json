@@ -153,13 +153,18 @@
     },
     {
       "path": "Start Tool.vbs",
-      "hash": "8a5d99a8396c7001e7479475bb1b3e03b6e140d2f7a2bf1356fee3b3fcd44a02",
+      "hash": "00952a21a6f5e3d6eb8be27f1c07b0cb8dcf7bcd6978acf208e21d8b00b7549b",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/Start%20Tool.vbs"
     },
     {
       "path": "app_launch.ps1",
       "hash": "16e3dff61fb460c1b6027c39b21e8107e4fb720d75045d55588c5e608bf89d5f",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/app_launch.ps1"
+    },
+    {
+      "path": "splash.ps1",
+      "hash": "373a1e646837924e347d8987cbd751030d0d23ebcd8e3a005a3e612c1d7964a1",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/splash.ps1"
     }
   ]
 }
