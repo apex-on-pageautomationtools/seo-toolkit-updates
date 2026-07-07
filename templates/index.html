@@ -1388,6 +1388,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
     <div class="note" style="margin-bottom:8px">Updates download automatically when you open the app. You can also check right now — no command line needed.</div>
     <button class="btn btn-tonal" style="width:100%" id="btn-check-updates" onclick="checkUpdates()">Check for updates</button>
     <div id="update-status" style="font-size:12px;color:var(--text-3);margin-top:8px"></div>
+    <button class="btn btn-tonal" style="width:100%;margin-top:8px" onclick="restartTool()">Restart tool</button>
   </div>
   <div class="sheet-foot">
     <button class="btn btn-tonal" style="flex:1" onclick="closeSettings()">Cancel</button>
@@ -1398,7 +1399,8 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
 <div class="toast" id="toast"></div>
 <div id="update-banner" style="display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:22px;z-index:99999;background:#1a73e8;color:#fff;padding:11px 16px;border-radius:12px;font-size:13px;box-shadow:0 6px 22px rgba(0,0,0,.28);max-width:92vw">
   <span id="update-banner-text">Update installed — please relaunch to apply.</span>
-  <button onclick="document.getElementById('update-banner').style.display='none'" style="margin-left:14px;background:rgba(255,255,255,.22);border:none;color:#fff;border-radius:7px;padding:4px 12px;cursor:pointer;font-size:12px">Dismiss</button>
+  <button onclick="restartTool()" style="margin-left:14px;background:#fff;border:none;color:#1a73e8;border-radius:7px;padding:4px 14px;cursor:pointer;font-size:12px;font-weight:700">Restart now</button>
+  <button onclick="document.getElementById('update-banner').style.display='none'" style="margin-left:8px;background:rgba(255,255,255,.22);border:none;color:#fff;border-radius:7px;padding:4px 12px;cursor:pointer;font-size:12px">Dismiss</button>
 </div>
 
 <style>
@@ -2316,10 +2318,16 @@ async function autoCheckUpdates(){
     const d=await(await fetch('/api/check-updates',{method:'POST'})).json();
     if(d.updated && (d.updated_files||[]).length){
       const n=d.updated_files.length;
-      $('update-banner-text').textContent='Update installed ('+n+' file'+(n>1?'s':'')+') — please close and reopen the app to apply.';
+      $('update-banner-text').textContent='Update installed ('+n+' file'+(n>1?'s':'')+') — restart to apply.';
       $('update-banner').style.display='block';
     }
   }catch(e){}
+}
+async function restartTool(){
+  toast('Restarting — a fresh window will open…');
+  try{ fetch('/api/restart',{method:'POST'}).catch(()=>{}); }catch(e){}
+  // The new launcher kills this server and opens a new window; close this one.
+  setTimeout(()=>{ try{ window.close(); }catch(e){} }, 1500);
 }
 
 /* ===================== auth ===================== */

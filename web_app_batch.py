@@ -2291,6 +2291,21 @@ def api_check_updates():
         return jsonify({"updated": False, "updated_files": [], "failed": [], "reason": str(e)})
     return jsonify(result)
 
+
+@app.route("/api/restart", methods=["POST"])
+def api_restart():
+    """Relaunch the app from a button: start a fresh launcher, which kills this server
+    and opens a new window. The current window closes itself client-side."""
+    try:
+        vbs = os.path.join(BUNDLE_DIR, "Start Tool.vbs")
+        if os.path.exists(vbs):
+            subprocess.Popen(["wscript.exe", vbs], cwd=BUNDLE_DIR,
+                             creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+            return jsonify({"ok": True})
+        return jsonify({"ok": False, "error": "launcher not found"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
 # --------------------------------------------------------------------------- #
 # SEO On-Page Report — runs phase2 script as subprocess
 # --------------------------------------------------------------------------- #

@@ -77,23 +77,11 @@ If FSO.FileExists(edgePath) Then
     If FSO.FolderExists(iconCache) Then FSO.DeleteFolder iconCache, True
     WshShell.Run "cmd /c del /q """ & appProfile & "\Default\Favicons*"" 2>nul & del /q """ & appProfile & "\Default\Web Applications\Manifest Resources\*\Icons\*"" 2>nul", 0, True
 
-    ' Launch the Edge app window through a shortcut that carries our own
-    ' AppUserModelID + icon, so the TASKBAR shows the app icon (not Edge's).
-    ' (--app-icon is a removed Chrome/Edge flag and does nothing.) Falls back
-    ' to a direct Edge launch inside the helper if anything fails.
-    Dim psHelper, psCmd
-    psHelper = strDir & "\app_launch.ps1"
-    If FSO.FileExists(psHelper) Then
-        psCmd = "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & psHelper & """ " & _
-                "-Edge """ & edgePath & """ " & _
-                "-Url """ & appUrl & """ " & _
-                "-Profile """ & appProfile & """ " & _
-                "-Icon """ & strDir & "\rank-checker-search-bars.ico"" " & _
-                "-WorkDir """ & strDir & """"
-        WshShell.Run psCmd, 0, False
-    Else
-        WshShell.Run """" & edgePath & """ --app=" & appUrl & " --user-data-dir=""" & appProfile & """ --window-size=1100,820", 1, False
-    End If
+    ' Open the app window DIRECTLY in Edge (no PowerShell helper). One antivirus
+    ' (Quick Heal) flagged app_launch.ps1's window-icon code as a threat and quarantined
+    ' it, which broke launching. The title bar + favicon already show the app icon; the
+    ' taskbar button groups under Edge, a harmless cosmetic Edge --app limitation.
+    WshShell.Run """" & edgePath & """ --app=" & appUrl & " --user-data-dir=""" & appProfile & """ --window-size=1100,820 --no-first-run --no-default-browser-check", 1, False
 Else
     WshShell.Run appUrl, 1, False
 End If

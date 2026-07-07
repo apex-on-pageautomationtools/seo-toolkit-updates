@@ -28,7 +28,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "cfb47c9d418b98b4351d7175b0898614db55601f03ea75bd46ad26ffd3a02cd3",
+      "hash": "cfca3fa0056539d0a0862ff18895156959e59813913aac07f36c71f2eed7b2ee",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -133,7 +133,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "18d2748f7f0f6bf452c90c97d6a678b0e981a7a046dcaf66162b7b191f7d83d2",
+      "hash": "ad67df6a6b7474112ba1c9a2e3368231333e4c0c43907dd5da85657c032f9e52",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {
@@ -153,12 +153,12 @@
     },
     {
       "path": "Start Tool.vbs",
-      "hash": "00952a21a6f5e3d6eb8be27f1c07b0cb8dcf7bcd6978acf208e21d8b00b7549b",
+      "hash": "1a05efd8af140112e124afb194aef3978587ce29c86c14163cfa9afda584ac9c",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/Start%20Tool.vbs"
     },
     {
       "path": "app_launch.ps1",
-      "hash": "b743551ac305c52aa2276de657d854aca6defbe4daa026c738d16734fe73a0c7",
+      "hash": "ae16b5d83b5254797912e340a654193cfe5f518c719533f6df40f6cb0a731905",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/app_launch.ps1"
     },
     {
