@@ -1877,6 +1877,11 @@ def api_auth_formats():
     fmts = auth.get_allowed_formats()
     return jsonify({"formats": fmts})
 
+@app.route("/api/auth/tools")
+def api_auth_tools():
+    """Return allowed tools for the current user."""
+    return jsonify({"tools": auth.get_allowed_tools()})
+
 # --------------------------------------------------------------------------- #
 # Flask routes — API
 # --------------------------------------------------------------------------- #

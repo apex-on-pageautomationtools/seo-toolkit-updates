@@ -146,7 +146,8 @@ def login(email, password):
     })
     if result.get("status") == "approved":
         _save_account(email, password, mac, is_admin=result.get("is_admin", False),
-                      allowed_formats=result.get("allowed_formats"))
+                      allowed_formats=result.get("allowed_formats"),
+                      allowed_tools=result.get("allowed_tools"))
     return result
 
 
@@ -235,6 +236,8 @@ def _validate_account(email, acct, mac, accounts):
         acct["is_admin"] = result.get("is_admin", False)
         if result.get("allowed_formats"):
             acct["allowed_formats"] = result["allowed_formats"]
+        if result.get("allowed_tools"):
+            acct["allowed_tools"] = result["allowed_tools"]
         _save_accounts(accounts)
         return result
     accounts.pop(email, None)
@@ -271,13 +274,26 @@ def get_allowed_formats():
     return None
 
 
-def _save_account(email, password, mac, is_admin=False, allowed_formats=None):
+def get_allowed_tools():
+    """Return the allowed tools for the currently logged-in user, or None (all allowed)."""
+    accounts = _load_accounts()
+    for em, acct in accounts.items():
+        tools = acct.get("allowed_tools")
+        if tools:
+            return tools
+    return None
+
+
+def _save_account(email, password, mac, is_admin=False, allowed_formats=None,
+                  allowed_tools=None):
     """Add or update one account in the multi-account token file."""
     accounts = _load_accounts()
     accounts[email] = {"password": password, "mac": mac, "is_admin": is_admin,
                        "login_time": time.time()}
     if allowed_formats:
         accounts[email]["allowed_formats"] = allowed_formats
+    if allowed_tools:
+        accounts[email]["allowed_tools"] = allowed_tools
     _save_accounts(accounts)
 
 

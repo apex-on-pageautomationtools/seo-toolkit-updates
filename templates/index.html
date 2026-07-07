@@ -2773,6 +2773,24 @@ async function applyFormatFilter(){
     });
   }catch(e){}
 }
+async function applyToolFilter(){
+  try{
+    const r=await(await fetch('/api/auth/tools')).json();
+    let t=r.tools;
+    if(!t)return;                                   // null/empty = all allowed
+    if(typeof t==='string')t=t.split(',');          // accept comma string
+    const allowed=t.map(x=>String(x).trim().toLowerCase()).filter(x=>x);
+    if(allowed.length===0||allowed.includes('all'))return;
+    const KEYS=['ranking','index','count','backlink','onpage','health','gsc','crawl','brief'];
+    KEYS.forEach(key=>{
+      if(!allowed.includes(key)){const b=$('tab-'+key);if(b)b.style.display='none';}
+    });
+    if(!allowed.includes(mode)){
+      const first=KEYS.find(k=>allowed.includes(k));
+      if(first)switchTab(first);
+    }
+  }catch(e){}
+}
 async function initApp(){
   try{const c=await(await fetch('/api/config')).json();
     if('use_buster' in c)$('opt-buster').checked=!!c.use_buster;
@@ -2782,6 +2800,7 @@ async function initApp(){
   gscSessionsLoad();
   admCheckAdmin();
   applyFormatFilter();
+  applyToolFilter();
   setTimeout(autoCheckUpdates, 3500);  // quietly pull any new files after the app opens
 }
 (async function(){
