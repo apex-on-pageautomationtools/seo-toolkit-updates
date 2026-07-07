@@ -1754,10 +1754,10 @@ async function doStart(){
     if(!p.keywords){toast('Enter at least one URL');return;}
   }
   await saveEngineOpts();
-  clearResults();lastCount=0;
   const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
   const d=await r.json();
-  if(d.error){toast(d.error);return;}
+  if(d.error){toast(d.error);return;}   // rejected (e.g. another batch tool running) — keep existing results on screen
+  clearResults();lastCount=0;           // only clear once the new run is actually accepted
   toast('Started');startPoll();setButtons('running');
 }
 async function doPause(){if(mode==='crawl'){crawlPause();return;}await fetch('/api/pause',{method:'POST'});setButtons('paused');}
@@ -1769,7 +1769,15 @@ async function doStop(){
   if(mode==='brief'){await baStop();return;}
   await fetch('/api/stop',{method:'POST'});setButtons('stopped');stopPoll();showAlert(false);toast('Stopped');
 }
-async function doReset(){await fetch('/api/reset',{method:'POST'});setButtons('idle');showAlert(false);clearResults();updateProgress(0,0,'');setStatus('idle');stopPoll();$('log').textContent='';}
+async function doReset(){
+  // Reset only the tool for the current tab — the shared toolbar is used by every tool,
+  // so resetting must never reach into a different tool's state/results.
+  if(mode==='onpage'){opReset();return;}
+  if(mode==='health'){haReset();return;}
+  if(mode==='gsc'){gscReset();return;}
+  if(mode==='brief'){baReset();return;}
+  if(mode==='crawl'){crawlReset();return;}
+  await fetch('/api/reset',{method:'POST'});setButtons('idle');showAlert(false);clearResults();updateProgress(0,0,'');setStatus('idle');stopPoll();$('log').textContent='';}
 async function loadPrevious(){
   const r=await fetch('/api/load-autosave');const d=await r.json();
   if(d.loaded&&d.count>0){clearResults();lastCount=0;await poll();setStatus('completed');setButtons('completed');$('btn-export').disabled=false;toast('Loaded '+d.count+' previous results');}
@@ -1843,7 +1851,11 @@ function clearResults(){
   tbody_r.innerHTML='';tbody_i.innerHTML='';tbody_b.innerHTML='';if(window.tbody_c)tbody_c.innerHTML='';
   document.querySelectorAll('.col-target').forEach(el=>el.classList.add('hidden'));
   $('tbl-r').classList.add('hidden');$('tbl-i').classList.add('hidden');$('tbl-b').classList.add('hidden');$('tbl-c').classList.add('hidden');
-  $('empty-ranking').style.display='block';$('empty-index').style.display='block';$('empty-count').style.display='block';$('empty-backlink').style.display='block';$('empty-onpage').style.display='block';$('onpage-active').classList.add('hidden');$('empty-health').style.display='block';$('health-active').classList.add('hidden');
+  $('empty-ranking').style.display='block';$('empty-index').style.display='block';$('empty-count').style.display='block';$('empty-backlink').style.display='block';
+  // NOTE: onpage/health/gsc/brief are independent tools with their own panels and
+  // their own reset (opReset/haReset/...). clearResults() only clears the batch tables
+  // (ranking/index/count/backlink) — it must never hide another tool's results, or
+  // starting a ranking check would wipe an on-page report that's still on screen.
   $('count').textContent='0 results';$('btn-export').disabled=true;lastCount=0;
 }
 window.tbody_r=document.getElementById('tbody-r');
