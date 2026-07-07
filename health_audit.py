@@ -238,55 +238,64 @@ def check_meta_robots(target_pages, domain, driver=None):
 
 
 def check_versions_full(domain):
+    """Determine whether the site runs as a single canonical version or as several
+    independent ones. Each variant is followed through its FULL redirect chain to the
+    final destination — a site that 301-redirects http/non-www/etc. to one canonical URL
+    (e.g. http://x -> https://x -> https://www.x/) is a single version, NOT multiple.
+    Only variants that independently land on DIFFERENT HTTP 200 URLs count as multiple."""
     variants = [
         f"http://{domain}/", f"http://www.{domain}/",
         f"https://{domain}/", f"https://www.{domain}/",
     ]
-    active = []
-    final_urls = set()
+    results = []  # (variant, final_url, final_code, redirected)
     for url in variants:
+        final_url, final_code = None, 0
         try:
-            class _NoRedirect(_ur.HTTPErrorProcessor):
-                def http_response(self, req, resp):
-                    return resp
-                https_response = http_response
-            opener = _ur.build_opener(_NoRedirect)
+            # urlopen follows redirects by default, so geturl() is the FINAL landing URL
+            # after the whole chain (http -> https -> www ...), not just the first hop.
             req = _ur.Request(url, headers={"User-Agent": _UA})
-            with opener.open(req, timeout=10) as r:
-                code = r.status
-                location = r.getheader("Location", "")
-            if code in (200, 301, 302, 307, 308):
-                active.append((url, code, location))
-                if code == 200:
-                    final_urls.add(url.rstrip("/"))
-                elif location:
-                    final_urls.add(location.rstrip("/"))
+            with _ur.urlopen(req, timeout=12) as r:
+                final_url = (r.geturl() or url).rstrip("/")
+                final_code = r.status
+        except _ue.HTTPError as he:
+            final_url, final_code = url.rstrip("/"), he.code
         except Exception:
-            pass
+            final_url, final_code = None, 0
+        redirected = bool(final_url and final_url != url.rstrip("/"))
+        results.append((url, final_url, final_code, redirected))
 
-    returning_200 = [url for url, code, _ in active if code == 200]
-    redirecting = [(url, code, loc) for url, code, loc in active if code != 200]
+    # Distinct URLs that actually serve content (HTTP 200) after following redirects.
+    final_200 = sorted({fu for _, fu, code, _ in results if code == 200 and fu})
 
-    is_ok = False
-    summary = ""
-    if len(returning_200) == 1:
-        canonical = returning_200[0].rstrip("/")
-        if all(loc.rstrip("/") == canonical or loc.rstrip("/") == "" for _, _, loc in redirecting):
-            is_ok = True
-            summary = f"No issue found. All variants correctly consolidate to a single version: {returning_200[0]}"
-    if not is_ok and len(returning_200) == 0 and len(final_urls) == 1:
+    if len(final_200) == 1:
         is_ok = True
-        summary = f"No issue found. All variants redirect to: {list(final_urls)[0]}"
-    if not is_ok:
-        summary = (f"Issue found — {len(returning_200)} URL variant(s) return HTTP 200 independently. "
-                   f"Fix: redirect (301) all variants to one canonical URL via server config or .htaccess.")
+        canonical = final_200[0]
+        if any(red for _, _, code, red in results if code == 200):
+            summary = (f"No issue found. All variants correctly redirect to a single "
+                       f"canonical version: {canonical}")
+        else:
+            summary = f"No issue found. The site runs on a single version: {canonical}"
+    elif len(final_200) >= 2:
+        is_ok = False
+        summary = (f"Issue found — the site is reachable at {len(final_200)} independent "
+                   f"versions ({', '.join(final_200)}) that each return HTTP 200 without "
+                   f"redirecting to one canonical URL. Fix: 301-redirect all variants to "
+                   f"a single canonical URL.")
+    else:
+        is_ok = False
+        summary = ("Could not verify the site version(s) — no variant returned HTTP 200. "
+                   "Please check the site's availability manually.")
 
     rows = []
-    for url, code, loc in active:
-        if code == 200:
-            rows.append((url, "200", "OK (active)", is_ok))
+    for url, fu, code, redirected in results:
+        if code == 200 and not redirected:
+            rows.append((url, "200", "OK (canonical)", is_ok))
+        elif code == 200 and redirected:
+            rows.append((url, "200", f"redirects -> {fu}", True))
+        elif code:
+            rows.append((url, str(code), f"-> {fu or '?'}", True))
         else:
-            rows.append((url, str(code), f"-> {loc or '?'}", True))
+            rows.append((url, "ERR", "unreachable", False))
     return summary, rows
 
 
@@ -357,8 +366,12 @@ def check_broken_links(domain, target_pages=None):
                 break
             except Exception:
                 code = 0
-        if code is None or code == 0 or code >= 400:
-            broken.append((u, code or "ERR"))
+        # Only genuinely dead links count as broken: 404 (Not Found) / 410 (Gone).
+        # 429 (rate-limited), 403/401/405 (bot-blocked), 5xx (temporary server errors)
+        # and timeouts are NOT broken links — they're the server refusing the automated
+        # request, so flagging them gives false "broken link" counts.
+        if code in (404, 410):
+            broken.append((u, code))
     return len(all_links), broken
 
 

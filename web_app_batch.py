@@ -1645,6 +1645,34 @@ def run_count_analysis(keywords, delay, headless, country, proxies,
 # --------------------------------------------------------------------------- #
 # Backlink checker — visits each backlink URL, finds domain link, checks meta
 # --------------------------------------------------------------------------- #
+def _wait_page_ready(driver, timeout=10):
+    """Block until the browser reports the document has finished loading, so anchors
+    are actually present in the DOM before we scan for the backlink."""
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            if driver.execute_script("return document.readyState") == "complete":
+                return
+        except Exception:
+            return
+        time.sleep(0.4)
+
+
+def _page_blocked_or_empty(src):
+    """True when the fetched page is a transient challenge / rate-limit / empty shell
+    rather than the real content. On such pages the backlink would falsely read as
+    'not found', so we retry once — this is what caused the '404 first, Ok on retry'
+    inconsistency."""
+    if not src or len(src) < 800:
+        return True
+    low = src.lower()
+    markers = ("just a moment", "checking your browser", "enable javascript and cookies",
+               "access denied", "attention required", "429 too many requests",
+               "too many requests", "rate limited", "request blocked",
+               "you have been blocked", "captcha-delivery", "cf-error-details")
+    return any(m in low for m in markers)
+
+
 def backlink_one(sess, backlink_url, target_domain, check_da=True):
     from urllib.parse import urlparse
     import re as _re
@@ -1653,12 +1681,29 @@ def backlink_one(sess, backlink_url, target_domain, check_da=True):
         url = "https://" + url
     target_clean = target_domain.lower().replace("www.", "").strip("/")
 
-    try:
-        safe_get(sess.driver, url)
+    # Load the page, waiting for it to finish and retrying ONCE if the first response
+    # is a transient block / empty shell. Without this a slow or rate-limited first
+    # load made the link read as missing ("404"), then present ("Ok") on a re-check.
+    src = ""
+    for attempt in range(2):
+        try:
+            safe_get(sess.driver, url)
+        except Exception as e:
+            if attempt == 0:
+                human_pause(2, 4)
+                continue
+            return {"status": "error", "domain_found": "Error", "meta_robots": "—",
+                    "link_type": "—", "link_url": "", "error": str(e)}
+        if not is_alive(sess.driver):
+            return {"status": "error", "domain_found": "Error", "meta_robots": "—",
+                    "link_type": "—", "link_url": ""}
+        _wait_page_ready(sess.driver, timeout=10)
         human_pause(2, 4)
-    except Exception as e:
-        return {"status": "error", "domain_found": "Error", "meta_robots": "—",
-                "link_type": "—", "link_url": "", "error": str(e)}
+        src = page_source(sess.driver)
+        if not _page_blocked_or_empty(src):
+            break
+        if attempt == 0:
+            human_pause(3, 6)  # settle, then one clean retry
 
     if not is_alive(sess.driver):
         return {"status": "error", "domain_found": "Error", "meta_robots": "—",
@@ -1669,8 +1714,6 @@ def backlink_one(sess, backlink_url, target_domain, check_da=True):
         final_url = sess.driver.current_url
     except Exception:
         final_url = url
-
-    src = page_source(sess.driver)
 
     # Check meta robots
     meta_robots = "index"
