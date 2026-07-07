@@ -777,8 +777,8 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
       </div>
       <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Generate a detailed on-page SEO analysis report — meta tags, headings, images, links, and more.</p>
       <div class="field">
-        <label>Domain</label>
-        <input type="text" id="op-domain" placeholder="example.com" autocomplete="off">
+        <label>Website URL <span class="hint">(the report is generated for the version that actually works — e.g. https://www.example.com/)</span></label>
+        <input type="text" id="op-domain" placeholder="https://example.com" autocomplete="off">
       </div>
       <div class="field">
         <label>Target pages &amp; keywords <span class="hint">(paste or upload Excel — leave empty to auto-discover)</span></label>
@@ -1663,7 +1663,7 @@ async function doStart(){
     p.targets=$('op-targets').value.trim();
     p.format=$('op-format').value;
     p.no_capture=$('op-capture').value==='no';
-    if(!p.domain){toast('Enter a domain');return;}
+    if(!p.domain){toast('Enter a website URL');return;}
     await saveEngineOpts();
     const r=await fetch('/api/onpage/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
     const d=await r.json();
@@ -2790,7 +2790,21 @@ function crawlDownloadCSV(){
 }
 
 /* ===================== GSC domain check ===================== */
+// Trim a pasted URL down to its bare host (keeps subdomain). The backend enforces the
+// same thing; this just gives the user immediate visual feedback in domain fields.
+function hostOnly(v){
+  v=(v||'').trim();
+  if(!/^[a-z][a-z0-9+.\-]*:\/\//i.test(v) && !v.includes('/') && !v.includes('?')) return v;
+  return v.replace(/^\s*[a-z][a-z0-9+.\-]*:\/\//i,'').split('/')[0].split('?')[0].split('#')[0].split('@').pop().trim();
+}
+function wireDomainTrim(){
+  ['r-domain','b-domain','ha-domain','ba-domain','gsc-domain'].forEach(id=>{
+    const el=$(id); if(!el||el._trimWired) return; el._trimWired=true;
+    el.addEventListener('blur',()=>{const h=hostOnly(el.value); if(h) el.value=h;});
+  });
+}
 async function gscCheckDomain(){
+  $('gsc-domain').value=hostOnly($('gsc-domain').value);
   const domain=$('gsc-domain').value.trim();
   const info=$('gsc-domain-info');
   if(!domain){info.style.display='none';return;}
@@ -2856,6 +2870,7 @@ async function initApp(){
     if('use_buster' in c)$('opt-buster').checked=!!c.use_buster;
     if('manual_fallback' in c)$('opt-manual').checked=!!c.manual_fallback;}catch(e){}
   reconnectBatch();
+  wireDomainTrim();
   gscLoadAccounts();
   gscSessionsLoad();
   admCheckAdmin();

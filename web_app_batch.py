@@ -282,6 +282,67 @@ def _domain_folder(domain, mode="ranking"):
     os.makedirs(folder, exist_ok=True)
     return folder
 
+
+# --------------------------------------------------------------------------- #
+# Domain / URL input normalization
+# --------------------------------------------------------------------------- #
+_NORM_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+def to_domain(value):
+    """Reduce a URL (or already-bare domain) to just its host, keeping any subdomain
+    exactly as entered. Strips scheme, path, query and fragment so a user pasting a full
+    URL into a domain field (ranking, backlink, GSC, health, brief) becomes the plain
+    domain/subdomain the tool expects. e.g. https://blog.example.com/a/b?x=1 -> blog.example.com"""
+    import re as _r
+    v = str(value or "").strip()
+    v = _r.sub(r'^\s*[a-zA-Z][a-zA-Z0-9+.\-]*://', '', v)   # drop scheme
+    v = v.split('/')[0].split('?')[0].split('#')[0]         # host only
+    v = v.split('@')[-1]                                    # drop any user:pass@
+    v = v.strip().strip('.').lower()
+    return v
+
+def resolve_working_url(value, log=None):
+    """Given a domain OR a URL, follow the full redirect chain to the version that
+    actually serves content (HTTP 200), and return (final_url, host). Tries the entered
+    value first, then https/http x www/non-www variants. Used for URL-based tools
+    (on-page) so the report is generated for the version that really works — e.g. a site
+    that redirects http/non-www to https://www.x/ resolves to https://www.x. Returns
+    (None, host) if nothing responds."""
+    import re as _r
+    import urllib.request as _u, urllib.error as _ue
+    from urllib.parse import urlparse as _uparse
+    raw = str(value or "").strip()
+    host = to_domain(raw)
+    if not host:
+        return None, ""
+    bare = host[4:] if host.startswith("www.") else host
+    candidates = []
+    if _r.match(r'^[a-zA-Z][a-zA-Z0-9+.\-]*://', raw):
+        candidates.append(raw)                       # honour exactly what the user typed first
+    for h in (host, f"www.{bare}", bare):
+        for scheme in ("https", "http"):
+            candidates.append(f"{scheme}://{h}/")
+    seen = set()
+    for url in candidates:
+        if url in seen:
+            continue
+        seen.add(url)
+        try:
+            req = _u.Request(url, headers={"User-Agent": _NORM_UA})
+            with _u.urlopen(req, timeout=12) as r:
+                final = (r.geturl() or url).rstrip("/")
+                if r.status == 200:
+                    fh = _uparse(final).netloc
+                    if log:
+                        log(f"Working version detected: {final}")
+                    return final, fh
+        except Exception:
+            continue
+    if log:
+        log(f"Could not reach any version of {host} — proceeding with {host} as entered.")
+    return None, host
+
 # --------------------------------------------------------------------------- #
 # Per-mode run state (parallel jobs)
 # --------------------------------------------------------------------------- #
@@ -2087,7 +2148,9 @@ def api_start():
         if state["status"] in ("running", "paused", "starting"):
             return jsonify({"error": f"{mode.title()} is already running. Stop or wait first."}), 400
 
-    domain = (data.get("domain") or "").strip()
+    # Domain-based tools: if the user pasted a full URL into the domain field
+    # (ranking domain, backlink "your domain to find"), trim it to just the host.
+    domain = to_domain(data.get("domain") or "")
     keywords, target_pages = _parse_keywords(data.get("keywords") or "")
     if not domain and target_pages:
         from urllib.parse import urlparse as _up
@@ -2611,13 +2674,28 @@ def _lines_from_excel(file_storage):
 
 def _run_onpage_report(domain, targets_json, fmt, no_capture):
     """Run the on-page phase2 script as a subprocess, stream logs."""
-    # Normalize to a bare host so the script's output filename is valid and the
-    # output-zip glob below still matches (a full URL breaks the filename).
-    domain = _re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
     with onpage_lock:
-        onpage_state.update({"status": "running", "log": [], "domain": domain,
-                             "output_zip": "", "error_msg": "", "progress": "Starting..."})
+        onpage_state.update({"status": "running", "log": [], "domain": to_domain(domain),
+                             "output_zip": "", "error_msg": "", "progress": "Checking working version..."})
     onpage_stop.clear()
+
+    def _log0(msg):
+        with onpage_lock:
+            onpage_state["log"].append(msg)
+            onpage_state["progress"] = msg
+
+    # On-page takes a Website URL: before generating, find which version actually works
+    # (follow the redirect chain to the live HTTP 200 version) and build the report for
+    # THAT version — e.g. an entry of example.com that redirects to https://www.example.com/
+    # produces a report for www.example.com, not a dead non-www host.
+    _log0("Checking which website version is running...")
+    final_url, host = resolve_working_url(domain, log=_log0)
+    # Pass the canonical HOST to the script (it builds https://<host>); keep the working
+    # subdomain (www or not) so the report reflects the version that actually serves.
+    domain = to_domain(host or domain)
+    with onpage_lock:
+        onpage_state["domain"] = domain
+        onpage_state["progress"] = "Starting..."
 
     # Save into the user's configured Downloads folder (per-domain), same as every
     # other tool — not a hidden "onpage_output" folder inside the install dir.
@@ -2851,7 +2929,9 @@ def api_ha_start():
             return jsonify({"error": "Health audit already running."}), 400
 
     data = request.get_json(silent=True) or {}
-    domain = (data.get("domain") or "").strip()
+    # Health audit is domain-based (it does its own www/non-www version detection),
+    # so trim a pasted URL down to the bare domain.
+    domain = to_domain(data.get("domain") or "")
     if not domain:
         return jsonify({"error": "Domain is required."}), 400
 
@@ -3056,7 +3136,8 @@ def api_gsc_start():
             return jsonify({"error": "GSC audit already running."}), 400
 
     data = request.get_json(silent=True) or {}
-    domain = (data.get("domain") or "").strip()
+    # GSC audit is domain/property-based — trim a pasted URL to the bare domain.
+    domain = to_domain(data.get("domain") or "")
     email = (data.get("email") or "").strip()
     if not domain:
         return jsonify({"error": "Domain is required."}), 400
@@ -3463,7 +3544,8 @@ def api_brief_start():
             return jsonify({"error": "Brief analysis already running"}), 400
         _brief_state.update({"running": True, "progress": 0, "status": "starting", "result": None, "error": None, "error_msg": None, "stop": False, "log": []})
     data = request.get_json(silent=True) or {}
-    domain = (data.get("domain") or "").strip()
+    # Brief analysis is domain-based — trim a pasted URL to the bare domain.
+    domain = to_domain(data.get("domain") or "")
     if not domain:
         with _brief_lock:
             _brief_state["running"] = False
