@@ -19,18 +19,17 @@ Dim portFile
 portFile = WshShell.ExpandEnvironmentStrings("%TEMP%") & "\.grc_port"
 If FSO.FileExists(portFile) Then FSO.DeleteFile portFile
 
-' Apply OTA updates BEFORE launching, so a single start picks up new code
-' (the app then imports the freshly downloaded modules). Runs hidden, waits.
-WshShell.Run "cmd /c """ & strDir & "\python\python.exe"" -s """ & strDir & "\updater.py""", 0, True
-
-' Start Flask server silently, pass port file location via env var
+' Start the Flask server FIRST so the window opens quickly. The updater used to run
+' (and block) BEFORE the server; on slower machines that pushed startup past the wait
+' and showed "could not start", and the long wait made users re-launch (the 2-3 times).
+' Updates are now pulled AFTER the server is up (below) and by the app's own auto-check.
 WshShell.Run "cmd /c ""set GRC_NO_BROWSER=1&& set GRC_PORT_FILE=" & portFile & "&& """ & strDir & "\python\python.exe"" -s """ & strDir & "\web_app_batch.py""""", 0, False
 
-' Wait for port file (server writes it when ready)
+' Wait for port file (server writes it when ready) — generous for slower machines.
 Dim port, appUrl, attempts
 port = ""
 attempts = 0
-Do While attempts < 40
+Do While attempts < 80
     WScript.Sleep 500
     attempts = attempts + 1
     If FSO.FileExists(portFile) Then
@@ -46,6 +45,10 @@ If port = "" Then
     MsgBox "SEO Toolkit Pro could not start. Please try launching it again.", vbExclamation, "SEO Toolkit Pro"
     WScript.Quit
 End If
+
+' Server is up — pull OTA updates in the BACKGROUND (does not delay the window; new
+' files apply on the next launch, and the app shows an "update installed" note).
+WshShell.Run "cmd /c """ & strDir & "\python\python.exe"" -s """ & strDir & "\updater.py""", 0, False
 
 appUrl = "http://127.0.0.1:" & port
 

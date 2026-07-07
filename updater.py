@@ -73,13 +73,35 @@ def check_and_update(log_fn=None):
     if not UPDATE_MANIFEST_URL:
         return {"updated": False, "reason": "No update URL configured"}
 
+    # Prevent two updaters (launcher background run + in-app auto-check) from writing
+    # the same files at once, which could corrupt them. Stale locks (>5 min) are ignored.
+    _lock = os.path.join(BUNDLE_DIR, ".update_lock")
+    _have_lock = False
+    try:
+        if os.path.exists(_lock) and (time.time() - os.path.getmtime(_lock)) < 300:
+            return {"updated": False, "reason": "Update already in progress"}
+        with open(_lock, "w") as _lf:
+            _lf.write(str(int(time.time())))
+        _have_lock = True
+    except Exception:
+        pass
+
+    def _unlock():
+        if _have_lock and os.path.exists(_lock):
+            try:
+                os.remove(_lock)
+            except Exception:
+                pass
+
     manifest = _fetch_json(UPDATE_MANIFEST_URL)
     if not manifest:
+        _unlock()
         return {"updated": False, "reason": "Could not reach update server"}
 
     remote_version = manifest.get("version", "0")
     files = manifest.get("files", [])
     if not files:
+        _unlock()
         return {"updated": False, "reason": "No files in manifest", "remote_version": remote_version}
 
     updated_files = []
@@ -169,6 +191,7 @@ def check_and_update(log_fn=None):
     else:
         log_fn("[update] Everything up to date")
 
+    _unlock()
     return result
 
 
