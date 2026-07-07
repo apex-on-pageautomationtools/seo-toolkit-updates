@@ -10,7 +10,23 @@ import json
 import time
 import hashlib
 import tempfile
+import threading
 import urllib.request
+
+# One lock per browser-session profile directory. Chrome locks a --user-data-dir, so two
+# GSC screenshot captures on the SAME account/session must serialize — but captures on
+# DIFFERENT accounts run fully in parallel (different profile dirs -> different locks).
+_PROFILE_LOCKS = {}
+_PROFILE_LOCKS_GUARD = threading.Lock()
+
+def _profile_lock(profile_dir):
+    key = os.path.abspath(profile_dir)
+    with _PROFILE_LOCKS_GUARD:
+        lk = _PROFILE_LOCKS.get(key)
+        if lk is None:
+            lk = threading.Lock()
+            _PROFILE_LOCKS[key] = lk
+        return lk
 import urllib.parse
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -475,12 +491,22 @@ def capture_gsc_with_session(session_id, property_url, email, out_dir,
                 except Exception:
                     pass
 
-    result = _attempt(headless=True)
-    if isinstance(result, dict) and result.get("error") == "session_expired":
-        log_fn("  Headless GSC session bounced to login — retrying in a visible window...")
-        result = _attempt(headless=False)
-    _trim_session_cache(profile_dir)  # keep the session small: drop cache, keep the login
-    return result
+    # Serialize captures that share this session's profile (Chrome locks the profile
+    # dir); captures for other accounts hold different locks and run in parallel.
+    lock = _profile_lock(profile_dir)
+    acquired = lock.acquire(timeout=180)
+    if not acquired:
+        log_fn("  Another capture is using this Google session — timed out waiting.")
+        return {"error": "session_busy", "session_id": session_id}
+    try:
+        result = _attempt(headless=True)
+        if isinstance(result, dict) and result.get("error") == "session_expired":
+            log_fn("  Headless GSC session bounced to login — retrying in a visible window...")
+            result = _attempt(headless=False)
+        _trim_session_cache(profile_dir)  # keep the session small: drop cache, keep the login
+        return result
+    finally:
+        lock.release()
 
 
 # ---------------------------------------------------------------------------

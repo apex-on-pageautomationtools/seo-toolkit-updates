@@ -1448,7 +1448,14 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
 
 <script>
 /* ===================== state ===================== */
-let mode='ranking', pollTimer=null, lastCount=0;
+let mode='ranking';
+// The four browser tools run in parallel, so each keeps its OWN poll timer, its own
+// running count, and its own last-seen status. The shared status bar / log / result
+// count reflect only the ACTIVE tab; every tool's table keeps filling in the background.
+const BATCH=['ranking','index','count','backlink'];
+const pollTimers={ranking:null,index:null,count:null,backlink:null};
+const lastCounts={ranking:0,index:0,count:0,backlink:0};
+const applyPrev={};
 
 /* ===================== geolocation cities ===================== */
 let _cities=[];
@@ -1583,6 +1590,15 @@ function switchTab(m){
     $('badge').className='badge b-idle';$('dot').className='dot d-idle';
     $('status-txt').textContent='Idle';
     $('prog').style.width='0%';$('prog-lbl').textContent='';
+  }
+  // For a batch tool, refresh the shared result count + log + live status from its own
+  // job so the active tab shows the right tool's data (each runs independently). The
+  // table rows are already in the DOM from background polling.
+  if(BATCH.includes(m)){
+    $('count').textContent=lastCounts[m]+(lastCounts[m]===1?' result':' results');
+    $('btn-export').disabled=lastCounts[m]===0;
+    $('log').textContent='';
+    poll(m);
   }
 }
 
@@ -1754,20 +1770,22 @@ async function doStart(){
     if(!p.keywords){toast('Enter at least one URL');return;}
   }
   await saveEngineOpts();
+  const m=p.mode;   // pin to the tool being started (user may switch tabs mid-request)
   const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
   const d=await r.json();
-  if(d.error){toast(d.error);return;}   // rejected (e.g. another batch tool running) — keep existing results on screen
-  clearResults();lastCount=0;           // only clear once the new run is actually accepted
-  toast('Started');startPoll();setButtons('running');
+  if(d.error){toast(d.error);return;}   // rejected (this tool already running) — keep existing results on screen
+  clearResults(m);lastCounts[m]=0;applyPrev[m]='starting';  // only clear once the new run is actually accepted
+  toast('Started');startPoll(m);setButtons('running',m);
 }
-async function doPause(){if(mode==='crawl'){crawlPause();return;}await fetch('/api/pause',{method:'POST'});setButtons('paused');}
-async function doResume(){if(mode==='crawl'){crawlResume();return;}await fetch('/api/resume',{method:'POST'});setButtons('running');showAlert(false);}
+const _mkbody=m=>({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:m})});
+async function doPause(){if(mode==='crawl'){crawlPause();return;}const m=mode;await fetch('/api/pause',_mkbody(m));setButtons('paused',m);}
+async function doResume(){if(mode==='crawl'){crawlResume();return;}const m=mode;await fetch('/api/resume',_mkbody(m));setButtons('running',m);showAlert(false);}
 async function doStop(){
   if(mode==='crawl'){crawlStop();return;}
   if(mode==='onpage'){await opStop();return;}
   if(mode==='health'){await haStop();return;}
   if(mode==='brief'){await baStop();return;}
-  await fetch('/api/stop',{method:'POST'});setButtons('stopped');stopPoll();showAlert(false);toast('Stopped');
+  const m=mode;await fetch('/api/stop',_mkbody(m));setButtons('stopped',m);stopPoll(m);showAlert(false);toast('Stopped');
 }
 async function doReset(){
   // Reset only the tool for the current tab — the shared toolbar is used by every tool,
@@ -1777,13 +1795,15 @@ async function doReset(){
   if(mode==='gsc'){gscReset();return;}
   if(mode==='brief'){baReset();return;}
   if(mode==='crawl'){crawlReset();return;}
-  await fetch('/api/reset',{method:'POST'});setButtons('idle');showAlert(false);clearResults();updateProgress(0,0,'');setStatus('idle');stopPoll();$('log').textContent='';}
+  const m=mode;await fetch('/api/reset',_mkbody(m));setButtons('idle',m);showAlert(false);clearResults(m);updateProgress(0,0,'');setStatus('idle');stopPoll(m);$('log').textContent='';}
 async function loadPrevious(){
-  const r=await fetch('/api/load-autosave');const d=await r.json();
-  if(d.loaded&&d.count>0){clearResults();lastCount=0;await poll();setStatus('completed');setButtons('completed');$('btn-export').disabled=false;toast('Loaded '+d.count+' previous results');}
+  const m=mode;
+  const r=await fetch('/api/load-autosave?mode='+m);const d=await r.json();
+  if(d.loaded&&d.count>0){clearResults(m);lastCounts[m]=0;await poll(m);setStatus('completed');setButtons('completed',m);$('btn-export').disabled=false;toast('Loaded '+d.count+' previous results');}
   else toast('No previous results found');
 }
-function exportCSV(){window.location.href='/api/export/csv';}
+function exportCSV(){exportCSVMode(mode);}
+function exportCSVMode(m){window.location.href='/api/export/csv?mode='+(m||mode);}
 function saveLog(){
   const txt=$('log').innerText;if(!txt.trim()){toast('Log is empty');return;}
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain'}));
@@ -1791,32 +1811,51 @@ function saveLog(){
 }
 
 /* ===================== polling ===================== */
-function startPoll(){stopPoll();pollTimer=setInterval(poll,1600);}
-function stopPoll(){if(pollTimer){clearInterval(pollTimer);pollTimer=null;}}
-async function poll(){try{const r=await fetch('/api/status');apply(await r.json());}catch(e){}}
+// On page load / re-open, rejoin any batch tools still running so their tables refill
+// and their poll timers resume — all four can be in progress at once.
+async function reconnectBatch(){
+  for(const m of BATCH){
+    try{
+      const d=await(await fetch('/api/status?mode='+m)).json();
+      apply(d,m);
+      if(['running','starting','paused'].includes(d.status)) startPoll(m);
+    }catch(e){}
+  }
+}
+function startPoll(m){m=m||mode;stopPoll(m);pollTimers[m]=setInterval(()=>poll(m),1600);}
+function stopPoll(m){m=m||mode;if(pollTimers[m]){clearInterval(pollTimers[m]);pollTimers[m]=null;}}
+async function poll(m){m=m||mode;try{const r=await fetch('/api/status?mode='+m);apply(await r.json(),m);}catch(e){}}
 
-function apply(d){
-  const _pm=d.mode||mode;
-  const isActive=['ranking','index','count','backlink'].includes(mode)&&(mode===_pm);
-  if(isActive){setStatus(d.status);updateProgress(d.current_index,d.total,d.current_keyword);}
-  else{$('cur-kw').textContent='';}
-  if(d.captcha_msg) showAlert(true,d.captcha_msg); else if(d.status!=='paused') showAlert(false);
-  if(d.log&&d.log.length){const el=$('log');el.textContent=d.log.join('\n');el.scrollTop=el.scrollHeight;}
-  if(d.results&&d.results.length>lastCount){
-    d.results.slice(lastCount).forEach((row,i)=>appendRow(row,lastCount+i+1,d.mode||mode));
-    lastCount=d.results.length;
-    $('count').textContent=lastCount+(lastCount===1?' result':' results');
-    $('btn-export').disabled=false;
+function apply(d,m){
+  m=m||d.mode||mode;
+  const isActive=(m===mode);   // only the active tab drives the shared status bar / log
+  if(isActive){
+    setStatus(d.status);updateProgress(d.current_index,d.total,d.current_keyword);
+    if(d.captcha_msg) showAlert(true,d.captcha_msg); else if(d.status!=='paused') showAlert(false);
+    if(d.log&&d.log.length){const el=$('log');el.textContent=d.log.join('\n');el.scrollTop=el.scrollHeight;}
   }
-  if(d.status==='paused'){showAlert(true);setButtons('paused',_pm);}
-  else if(d.status==='running'||d.status==='starting'){setButtons('running',_pm);}
+  // Results ALWAYS append to their own tool's table (even when running in the background)
+  if(d.results&&d.results.length>lastCounts[m]){
+    d.results.slice(lastCounts[m]).forEach((row,i)=>appendRow(row,lastCounts[m]+i+1,m));
+    lastCounts[m]=d.results.length;
+    if(isActive){$('count').textContent=lastCounts[m]+(lastCounts[m]===1?' result':' results');$('btn-export').disabled=false;}
+  }
+  if(d.status==='paused'){if(isActive)showAlert(true);setButtons('paused',m);}
+  else if(d.status==='running'||d.status==='starting'){setButtons('running',m);}
   else if(['completed','stopped','error'].includes(d.status)){
-    setButtons(d.status,_pm);stopPoll();$('cur-kw').textContent='';
-    if(d.results&&d.results.length) $('btn-export').disabled=false;
-    if(d.status==='error'&&d.error_msg){showAlert(true,d.error_msg);}
-    if(d.status==='completed'){toast('Completed');if(_pm==='ranking'&&(apply._prev==='running'||apply._prev==='starting'))exportCSV();}
+    setButtons(d.status,m);stopPoll(m);
+    if(isActive){
+      $('cur-kw').textContent='';
+      if(d.results&&d.results.length) $('btn-export').disabled=false;
+      if(d.status==='error'&&d.error_msg) showAlert(true,d.error_msg);
+    }
+    const transitioned=(applyPrev[m]==='running'||applyPrev[m]==='starting');
+    if(d.status==='completed'&&transitioned){
+      if(isActive)toast('Completed');
+      if(m==='ranking')exportCSVMode('ranking');   // auto-download ranking CSV on completion
+    }
   }
-  apply._prev=d.status;
+  applyPrev[m]=d.status;
 }
 
 /* ===================== UI helpers ===================== */
@@ -1847,16 +1886,25 @@ function showAlert(show,msg){
   $('alert').classList.toggle('show',!!show);
   if(msg) $('alert-msg').textContent=msg;
 }
-function clearResults(){
-  tbody_r.innerHTML='';tbody_i.innerHTML='';tbody_b.innerHTML='';if(window.tbody_c)tbody_c.innerHTML='';
-  document.querySelectorAll('.col-target').forEach(el=>el.classList.add('hidden'));
-  $('tbl-r').classList.add('hidden');$('tbl-i').classList.add('hidden');$('tbl-b').classList.add('hidden');$('tbl-c').classList.add('hidden');
-  $('empty-ranking').style.display='block';$('empty-index').style.display='block';$('empty-count').style.display='block';$('empty-backlink').style.display='block';
-  // NOTE: onpage/health/gsc/brief are independent tools with their own panels and
-  // their own reset (opReset/haReset/...). clearResults() only clears the batch tables
-  // (ranking/index/count/backlink) — it must never hide another tool's results, or
-  // starting a ranking check would wipe an on-page report that's still on screen.
-  $('count').textContent='0 results';$('btn-export').disabled=true;lastCount=0;
+// Clear ONLY the given tool's table. The four browser tools run in parallel, so
+// starting/resetting one must never touch another's results (nor an on-page/health
+// report — those are separate tools with their own reset). Omitting m clears the
+// active tab's tool.
+function clearResults(m){
+  m=m||mode;
+  const map={
+    ranking:['tbody-r','tbl-r','empty-ranking'],
+    index:['tbody-i','tbl-i','empty-index'],
+    count:['tbody-c','tbl-c','empty-count'],
+    backlink:['tbody-b','tbl-b','empty-backlink']};
+  const spec=map[m]; if(!spec) return;
+  const [tb,tbl,emp]=spec;
+  const tbe=$(tb); if(tbe) tbe.innerHTML='';
+  $(tbl).classList.add('hidden');
+  $(emp).style.display='block';
+  if(m==='ranking') document.querySelectorAll('.col-target').forEach(el=>el.classList.add('hidden'));
+  lastCounts[m]=0;
+  if(m===mode){$('count').textContent='0 results';$('btn-export').disabled=true;}
 }
 window.tbody_r=document.getElementById('tbody-r');
 window.tbody_i=document.getElementById('tbody-i');
@@ -2807,7 +2855,7 @@ async function initApp(){
   try{const c=await(await fetch('/api/config')).json();
     if('use_buster' in c)$('opt-buster').checked=!!c.use_buster;
     if('manual_fallback' in c)$('opt-manual').checked=!!c.manual_fallback;}catch(e){}
-  poll();
+  reconnectBatch();
   gscLoadAccounts();
   gscSessionsLoad();
   admCheckAdmin();

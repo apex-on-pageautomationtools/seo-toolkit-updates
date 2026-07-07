@@ -169,6 +169,32 @@ def pick_profile():
     return chosen
 
 
+def mode_profile(profile_key):
+    """Return a DEDICATED browser profile for one tool (ranking/index/count/backlink).
+
+    Each tool gets its own profile directory so the four tools can run in parallel —
+    Chrome locks a --user-data-dir, so two tools sharing one profile would fail to
+    launch the second browser. A dedicated profile per tool also keeps each tool's
+    Google cookies/session separate. Falls back to a pooled profile for unknown keys."""
+    if not profile_key or profile_key not in BATCH_MODES:
+        return pick_profile()
+    p = os.path.join(PROFILES_DIR, f"profile_{profile_key}")
+    try:
+        if os.path.isdir(p):
+            age_h = (time.time() - os.path.getmtime(p)) / 3600
+            if age_h > PROFILE_MAX_AGE_H:
+                shutil.rmtree(p, ignore_errors=True)
+                os.makedirs(p, exist_ok=True)
+            else:
+                _clear_profile_cache(p)
+                _prune_cookies_keep_google(p)
+        else:
+            os.makedirs(p, exist_ok=True)
+    except Exception:
+        os.makedirs(p, exist_ok=True)
+    return p
+
+
 _profile_pool_init()
 # Migrate old single profile if it exists
 _old_profile = os.path.join(DATA_DIR, "chrome_profile")
@@ -257,16 +283,80 @@ def _domain_folder(domain, mode="ranking"):
     return folder
 
 # --------------------------------------------------------------------------- #
-# Global run state
+# Per-mode run state (parallel jobs)
 # --------------------------------------------------------------------------- #
-state = {
-    "status": "idle", "current_keyword": "", "current_index": 0, "total": 0,
-    "results": [], "captcha_msg": "", "error_msg": "", "log": [],
-    "driver": None, "mode": "ranking", "domain": "",
-}
-pause_event = threading.Event(); pause_event.set()
-stop_event  = threading.Event()
-state_lock  = threading.Lock()
+# The four browser tools (ranking / index / count / backlink) each drive their own
+# Chrome and used to share ONE global state + ONE stop/pause event + ONE browser, so
+# only one could run at a time and starting a second clobbered the first. Each now has
+# its own independent Job (state, events, lock, browser profile). The module-level
+# `state`, `stop_event`, `pause_event`, `state_lock` names below are thread-aware
+# proxies that transparently resolve to the CURRENT thread's job — so every existing
+# `state[...]` / `stop_event.set()` call keeps working unchanged while operating on the
+# right job. A worker thread pins its mode at the top of run_*(); Flask request handlers
+# pin the mode from the request. See _ctx / _set_mode / _current_job below.
+BATCH_MODES = ("ranking", "index", "count", "backlink")
+
+def _fresh_state(mode):
+    return {"status": "idle", "current_keyword": "", "current_index": 0, "total": 0,
+            "results": [], "captcha_msg": "", "error_msg": "", "log": [],
+            "driver": None, "mode": mode, "domain": ""}
+
+class _Job:
+    def __init__(self, mode):
+        self.mode = mode
+        self.state = _fresh_state(mode)
+        self.pause = threading.Event(); self.pause.set()
+        self.stop  = threading.Event()
+        self.lock  = threading.RLock()   # re-entrant: safe even if a helper re-acquires
+
+JOBS = {m: _Job(m) for m in BATCH_MODES}
+
+_ctx = threading.local()
+
+def _set_mode(mode):
+    """Pin the mode for the current thread (worker thread or Flask request thread)."""
+    _ctx.mode = mode if mode in JOBS else "ranking"
+
+def _current_job():
+    return JOBS.get(getattr(_ctx, "mode", None), JOBS["ranking"])
+
+class _StateProxy:
+    """Dict-like view of the current thread's job state (supports dict(state))."""
+    def __getitem__(self, k):        return _current_job().state[k]
+    def __setitem__(self, k, v):     _current_job().state[k] = v
+    def __delitem__(self, k):        del _current_job().state[k]
+    def __contains__(self, k):       return k in _current_job().state
+    def __iter__(self):              return iter(_current_job().state)
+    def __len__(self):               return len(_current_job().state)
+    def get(self, k, d=None):        return _current_job().state.get(k, d)
+    def update(self, *a, **kw):      _current_job().state.update(*a, **kw)
+    def setdefault(self, k, d=None): return _current_job().state.setdefault(k, d)
+    def pop(self, k, *a):            return _current_job().state.pop(k, *a)
+    def keys(self):                  return _current_job().state.keys()
+    def values(self):                return _current_job().state.values()
+    def items(self):                 return _current_job().state.items()
+
+class _EventProxy:
+    def __init__(self, attr):        self._attr = attr
+    def _e(self):                    return getattr(_current_job(), self._attr)
+    def set(self):                   self._e().set()
+    def clear(self):                 self._e().clear()
+    def is_set(self):                return self._e().is_set()
+    def wait(self, timeout=None):    return self._e().wait(timeout)
+
+class _LockProxy:
+    # __enter__ and __exit__ both resolve _current_job() in the SAME thread, so they
+    # always acquire/release the same RLock. Never store the lock on the shared proxy —
+    # that would race across threads.
+    def __enter__(self):             _current_job().lock.acquire(); return _current_job().lock
+    def __exit__(self, *a):          _current_job().lock.release(); return False
+    def acquire(self, *a, **kw):     return _current_job().lock.acquire(*a, **kw)
+    def release(self):               return _current_job().lock.release()
+
+state       = _StateProxy()
+pause_event = _EventProxy("pause")
+stop_event  = _EventProxy("stop")
+state_lock  = _LockProxy()
 
 def add_log(msg, to_activity=False):
     ts = datetime.now().strftime("%H:%M:%S")
@@ -282,32 +372,44 @@ def add_log(msg, to_activity=False):
 # --------------------------------------------------------------------------- #
 # Auto-save
 # --------------------------------------------------------------------------- #
+def _autosave_file(mode=None):
+    # Per-mode autosave so parallel tools don't overwrite each other's results.
+    mode = mode or _current_job().mode
+    return os.path.join(DATA_DIR, f"autosave_{mode}.json")
+
 def autosave():
     try:
         with state_lock:
-            data = {"mode": state.get("mode", "ranking"),
+            mode = state.get("mode", "ranking")
+            data = {"mode": mode,
                     "results": list(state["results"]),
                     "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-        with open(AUTOSAVE_FILE, "w", encoding="utf-8") as f:
+        with open(_autosave_file(mode), "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
     except Exception:
         pass
 
 def load_autosave():
     try:
+        f = _autosave_file()
+        if os.path.exists(f):
+            with open(f, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        # Fall back to the legacy single-file autosave (pre-parallel builds)
         if os.path.exists(AUTOSAVE_FILE):
-            with open(AUTOSAVE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(AUTOSAVE_FILE, "r", encoding="utf-8") as fh:
+                return json.load(fh)
     except Exception:
         pass
     return None
 
 def clear_autosave():
-    try:
-        if os.path.exists(AUTOSAVE_FILE):
-            os.remove(AUTOSAVE_FILE)
-    except Exception:
-        pass
+    for f in (_autosave_file(), AUTOSAVE_FILE):
+        try:
+            if os.path.exists(f):
+                os.remove(f)
+        except Exception:
+            pass
 
 # --------------------------------------------------------------------------- #
 # Buster captcha solver
@@ -676,7 +778,7 @@ def solve_with_buster(driver, max_attempts=1):
 # --------------------------------------------------------------------------- #
 class Session:
     def __init__(self, headless, country, proxy_pool, browser_pref="auto", vpn_method="none",
-                 latitude=None, longitude=None, lang="en"):
+                 latitude=None, longitude=None, lang="en", profile_key=None):
         self.headless = headless
         self.country = country
         self.pool = proxy_pool
@@ -685,6 +787,8 @@ class Session:
         self.latitude = latitude
         self.longitude = longitude
         self.lang = lang
+        # Dedicated per-tool browser profile so the four tools can run in parallel.
+        self.profile_key = profile_key
         self.driver = None
 
     def _extensions(self):
@@ -708,7 +812,7 @@ class Session:
 
     def start(self, rotate=False):
         self.quit()
-        self.profile = pick_profile()
+        self.profile = mode_profile(self.profile_key) if self.profile_key else pick_profile()
         add_log(f"Using profile: {os.path.basename(self.profile)}")
         proxy = self.pool.next() if rotate else self.pool.current()
         if proxy is None and self.pool:
@@ -1266,8 +1370,9 @@ def _vpn_disconnect_pause(vpn_method, driver=None):
 def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, proxies,
                       browser_pref="auto", search_mode="stop_on_found", vpn_method="none",
                       latitude=None, longitude=None, city=None, lang="en", target_pages=None):
+    _set_mode("ranking")
     sess = Session(headless, country, ProxyPool(proxies), browser_pref, vpn_method,
-                   latitude, longitude, lang=lang)
+                   latitude, longitude, lang=lang, profile_key="ranking")
     try:
         with state_lock:
             state["status"] = "starting"
@@ -1420,8 +1525,9 @@ def index_one(sess, raw_url, country, city=None, lang="en"):
 def run_index_analysis(urls, delay, headless, country, proxies,
                        browser_pref="auto", vpn_method="none",
                        latitude=None, longitude=None, city=None, lang="en"):
+    _set_mode("index")
     sess = Session(headless, country, ProxyPool(proxies), browser_pref, vpn_method,
-                   latitude, longitude, lang=lang)
+                   latitude, longitude, lang=lang, profile_key="index")
     try:
         with state_lock:
             state["status"] = "starting"
@@ -1571,8 +1677,9 @@ def count_one(sess, keyword, country, city=None, lang="en"):
 def run_count_analysis(keywords, delay, headless, country, proxies,
                        browser_pref="auto", vpn_method="none",
                        latitude=None, longitude=None, city=None, lang="en"):
+    _set_mode("count")
     sess = Session(headless, country, ProxyPool(proxies), browser_pref, vpn_method,
-                   latitude, longitude, lang=lang)
+                   latitude, longitude, lang=lang, profile_key="count")
     try:
         with state_lock:
             state["status"] = "starting"
@@ -1770,8 +1877,9 @@ def backlink_one(sess, backlink_url, target_domain, check_da=True):
 def run_backlink_analysis(urls, domain, delay, headless, country, proxies,
                           browser_pref="auto", vpn_method="none", check_da=True,
                           latitude=None, longitude=None):
+    _set_mode("backlink")
     sess = Session(headless, country, ProxyPool(proxies), browser_pref, vpn_method,
-                   latitude, longitude)
+                   latitude, longitude, profile_key="backlink")
     try:
         with state_lock:
             state["status"] = "starting"
@@ -1971,12 +2079,14 @@ def _parse_keywords(raw_text):
 
 @app.route("/api/start", methods=["POST"])
 def api_start():
-    with state_lock:
-        if state["status"] in ("running", "paused", "starting"):
-            return jsonify({"error": "Already running. Stop or wait first."}), 400
-
     data = request.get_json(silent=True) or {}
     mode = data.get("mode", "ranking")
+    # Pin this request to the requested tool's job so all state below is per-mode.
+    _set_mode(mode)
+    with state_lock:
+        if state["status"] in ("running", "paused", "starting"):
+            return jsonify({"error": f"{mode.title()} is already running. Stop or wait first."}), 400
+
     domain = (data.get("domain") or "").strip()
     keywords, target_pages = _parse_keywords(data.get("keywords") or "")
     if not domain and target_pages:
@@ -2051,8 +2161,18 @@ def api_start():
     activity(f"{mode.title()} started — {domain or 'multi-target'} ({len(keywords)} keywords)")
     return jsonify({"status": "started", "total": len(keywords), "mode": mode})
 
+def _pin_request_mode():
+    """Pin the current request to a specific tool's job. Mode comes from JSON body or
+    ?mode= query; defaults to ranking for backward compatibility."""
+    m = None
+    data = request.get_json(silent=True) or {}
+    m = data.get("mode") or request.args.get("mode")
+    _set_mode(m or "ranking")
+    return getattr(_ctx, "mode")
+
 @app.route("/api/pause", methods=["POST"])
 def api_pause():
+    _pin_request_mode()
     with state_lock:
         if state["status"] == "running":
             state["status"] = "paused"
@@ -2061,6 +2181,7 @@ def api_pause():
 
 @app.route("/api/resume", methods=["POST"])
 def api_resume():
+    _pin_request_mode()
     with state_lock:
         if state["status"] == "paused":
             state["status"] = "running"; state["captcha_msg"] = ""
@@ -2069,6 +2190,7 @@ def api_resume():
 
 @app.route("/api/stop", methods=["POST"])
 def api_stop():
+    _pin_request_mode()
     stop_event.set(); pause_event.set(); autosave()
     with state_lock:
         state["status"] = "stopped"
@@ -2076,6 +2198,7 @@ def api_stop():
 
 @app.route("/api/reset", methods=["POST"])
 def api_reset():
+    _pin_request_mode()
     stop_event.set(); pause_event.set()
     with state_lock:
         state.update({"status": "idle", "current_keyword": "", "current_index": 0,
@@ -2226,6 +2349,7 @@ def api_screenshot(filename):
 
 @app.route("/api/status")
 def api_status():
+    _pin_request_mode()
     with state_lock:
         snap = dict(state)
     snap.pop("driver", None)
@@ -2233,6 +2357,7 @@ def api_status():
 
 @app.route("/api/load-autosave")
 def api_load_autosave():
+    _pin_request_mode()
     data = load_autosave()
     if data and data.get("results"):
         with state_lock:
@@ -2273,6 +2398,7 @@ def api_config():
 
 @app.route("/api/export/csv")
 def api_export_csv():
+    _pin_request_mode()
     with state_lock:
         results = list(state["results"]); m = state.get("mode", "ranking")
         domain = state.get("domain", "")
@@ -3056,9 +3182,14 @@ def api_gsc_session_refresh(sid):
     data = request.get_json(silent=True) or {}
     browser_name = data.get("browser", "edge")
     driver = None
+    profile_dir = os.path.join(gsc_audit._sessions_dir(), sid, "chrome_profile")
+    # Share the per-session profile lock so this can't collide with a screenshot capture
+    # that's using the same Google session's Chrome profile.
+    lock = gsc_audit._profile_lock(profile_dir)
+    if not lock.acquire(timeout=180):
+        return jsonify({"error": "session_busy"}), 409
     try:
         import engine as _eng
-        profile_dir = os.path.join(gsc_audit._sessions_dir(), sid, "chrome_profile")
         driver = _eng.build_driver(
             profile_dir, proxy=None, headless=True,
             country="us", extra_extensions=[],
@@ -3074,6 +3205,7 @@ def api_gsc_session_refresh(sid):
                 driver.quit()
             except Exception:
                 pass
+        lock.release()
 
 
 # --------------------------------------------------------------------------- #
