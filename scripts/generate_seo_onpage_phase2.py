@@ -3166,13 +3166,21 @@ def build_content_suggestion_docx(domain, pages_data, targets, out_path, capture
     doc.save(out_path)
 
 
+def _build_docx_sara(domain, pages_data, findings, captured, brand, out_path):
+    """Sara — same teal (#215868) template as Neon (verified against the client
+    reference On Page Suggestion Report format Sara / dcmshriramchemicals: identical
+    bar colour, 'Optimization of X' section titles, Calibri, section set). Kept as its
+    own builder so the 313 team's 'Sara' format can diverge later without touching Neon."""
+    return _build_docx_neon(domain, pages_data, findings, captured, brand, out_path)
+
+
 def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, fmt="james"):
     """Dispatch to the format-specific DOCX builder — builds EXACTLY the selected
     format, or raises rather than silently defaulting to another one."""
     builders = {
         "james": _build_docx_james, "omega": _build_docx_omega,
         "neon": _build_docx_neon, "xenon": _build_docx_xenon,
-        "gamma": _build_docx_gamma,
+        "gamma": _build_docx_gamma, "sara": _build_docx_sara,
     }
     fn = builders.get(str(fmt or "").strip().lower())
     if not fn:
@@ -3190,8 +3198,8 @@ def main():
     ap.add_argument("--out", default=str(OUTPUT_DIR))
     ap.add_argument("--dry-run", action="store_true", help="use mock crawl data (no network)")
     ap.add_argument("--no-capture", action="store_true", help="skip live screenshots (text-only docx)")
-    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma"],
-                    help="Report sub-format: james (Driftzine), omega (alltechco), neon (sumitechengineers), xenon, gamma (Hawkeev)")
+    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma", "sara"],
+                    help="Report sub-format: james (Driftzine), omega (alltechco), neon (sumitechengineers), xenon, gamma (Hawkeev), sara (teal template)")
     ap.add_argument("--gsc-token", default=None, help="GSC API access token for URL inspection")
     ap.add_argument("--property-url", default=None, help="GSC property URL (e.g. sc-domain:example.com)")
     ap.add_argument("--account", default=None, help="Connected GSC account email to resolve a token/property from")
