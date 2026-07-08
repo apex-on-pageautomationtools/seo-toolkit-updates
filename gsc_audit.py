@@ -1208,28 +1208,34 @@ def build_james_full(data, out_path, log_fn=None):
     ]
     for shot_key, title, desc in SHOT_SLIDES:
         img_path = screenshots.get(shot_key, "")
-        if not (img_path and os.path.exists(img_path)):
-            continue
         status_text = gsc_statuses.get(shot_key, "")
+        # Always emit the Manual Action / Security / Removals slide — never skip it. If a
+        # screenshot couldn't be captured, show a "please check this manually" note instead
+        # of silently dropping the section (Google's most-looked-at checks must appear).
         s = header_slide(title, desc)
         if status_text:
             color = C("#2E7D32") if "no issue" in status_text.lower() or "no removal" in status_text.lower() else C("#C62828")
             _text(s, f"Status: {status_text}", 0.5, 1.65, 12.3, 0.4, 16, "Calibri", color, bold=True)
-        from PIL import Image
-        with Image.open(img_path) as im:
-            iw, ih = im.size
-        aspect = iw / ih
-        img_top = 2.4 if status_text else 2.2
-        img_h_avail = 4.4 if status_text else 4.6
-        target_w = Inches(12.33)
-        target_h = Inches(img_h_avail)
-        if aspect > (12.33 / img_h_avail):
-            fw = target_w; fh = int(target_w / aspect)
+        if img_path and os.path.exists(img_path):
+            from PIL import Image
+            with Image.open(img_path) as im:
+                iw, ih = im.size
+            aspect = iw / ih
+            img_top = 2.4 if status_text else 2.2
+            img_h_avail = 4.4 if status_text else 4.6
+            target_w = Inches(12.33)
+            target_h = Inches(img_h_avail)
+            if aspect > (12.33 / img_h_avail):
+                fw = target_w; fh = int(target_w / aspect)
+            else:
+                fh = target_h; fw = int(target_h * aspect)
+            cx = Inches(0.5) + (target_w - fw) // 2
+            cy = Inches(img_top) + (target_h - fh) // 2
+            s.shapes.add_picture(img_path, cx, cy, fw, fh)
         else:
-            fh = target_h; fw = int(target_h * aspect)
-        cx = Inches(0.5) + (target_w - fw) // 2
-        cy = Inches(img_top) + (target_h - fh) // 2
-        s.shapes.add_picture(img_path, cx, cy, fw, fh)
+            _text(s, "Please check this manually in Google Search Console.",
+                  0.5, 4.0, 12.33, 0.6, 20, "Calibri", C("#C62828"), bold=True,
+                  align=PP_ALIGN.CENTER)
 
     # --- Slide 19: Thank You ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1294,7 +1300,7 @@ def build_james_short(data, out_path, log_fn=None):
             cy = Inches(2.7) + (target_h - fh) // 2
             s.shapes.add_picture(img_path, cx, cy, fw, fh)
         else:
-            _text(s, "Screenshot not captured", 3, 4.5, 7, 0.5, 18, "Calibri",
+            _text(s, "Please check this manually", 3, 4.5, 7, 0.5, 18, "Calibri",
                   TEAL_MD, align=PP_ALIGN.CENTER)
         return s
 
@@ -1412,7 +1418,7 @@ def build_sigma(data, out_path, log_fn=None):
             cy = Inches(2.7) + (th - fh) // 2
             s.shapes.add_picture(img_path, cx, cy, fw, fh)
         else:
-            _text(s, "Screenshot not captured", 3, 4.5, 7, 0.5, 18, "Calibri",
+            _text(s, "Please check this manually", 3, 4.5, 7, 0.5, 18, "Calibri",
                   INK_SOFT, align=PP_ALIGN.CENTER)
         return s
 
@@ -1577,7 +1583,7 @@ def build_omega(data, out_path, log_fn=None):
             cy = Inches(2.25) + (th - fh) // 2
             s.shapes.add_picture(img_path, cx, cy, fw, fh)
         else:
-            _text(s, "Screenshot not captured.", 3, 4.5, 7, 0.5, 18, "Calibri",
+            _text(s, "Please check this manually", 3, 4.5, 7, 0.5, 18, "Calibri",
                   TEXT_SOFT, align=PP_ALIGN.CENTER)
         return s
 
@@ -1714,7 +1720,7 @@ def build_neon(data, out_path, log_fn=None):
             cy = Inches(2.25) + (th - fh) // 2
             s.shapes.add_picture(img_path, cx, cy, fw, fh)
         else:
-            _text(s, "Screenshot not captured", 3, 4.5, 7, 0.5, 18, "Calibri",
+            _text(s, "Please check this manually", 3, 4.5, 7, 0.5, 18, "Calibri",
                   TEXT_SOFT, align=PP_ALIGN.CENTER)
         return s
 
@@ -1891,13 +1897,36 @@ def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
                                           api_data.get("topPages", []), log_fn)
             report_data["inspections"] = inspections
 
-    # Capture screenshots via Selenium
+    # Capture screenshots from the per-account LOGGED-IN browser session — NOT a shared
+    # profile. The shared profile isn't signed into the account, so it would screenshot
+    # the Google sign-in page instead of the real GSC data (Manual Actions / Security /
+    # Removals). capture_gsc_with_session verifies the login and retries in a visible
+    # window if Google bounces the headless relaunch. If no session works we leave the
+    # screenshots empty so the report shows a clear "please check manually" note rather
+    # than a misleading sign-in page.
     screenshots = {}
-    if driver:
-        log_fn("  Capturing GSC screenshots...")
-        ss_dir = os.path.join(out_dir, "gsc_screenshots")
-        screenshots = capture_gsc_screenshots(driver, property_url, email, ss_dir, log_fn=log_fn)
-        log_fn(f"  {len(screenshots)} screenshot(s) captured.")
+    ss_dir = os.path.join(out_dir, "gsc_screenshots")
+    sessions = list_sessions()
+
+    def _match(s):
+        return bool(email) and email.lower() in [a.lower() for a in s.get("accounts", [])]
+    ordered = [s for s in sessions if _match(s)] + [s for s in sessions if not _match(s)]
+
+    for sess in ordered:
+        tag = "matched" if _match(sess) else "untagged"
+        log_fn(f"  Capturing GSC screenshots via session {sess.get('label', sess['id'])} ({tag})...")
+        ss = capture_gsc_with_session(sess["id"], property_url, email, ss_dir, log_fn=log_fn)
+        if isinstance(ss, dict) and "error" not in ss:
+            screenshots = ss
+            break
+        if isinstance(ss, dict) and ss.get("error") == "session_expired":
+            log_fn(f"  Session {sess.get('label', sess['id'])} needs re-login (GSC Audit > Browser Sessions).")
+    if not screenshots:
+        if not sessions:
+            log_fn("  No GSC browser session found — connect the account in GSC Audit > Browser Sessions.")
+        else:
+            log_fn("  Could not capture from any session — slides will show a 'check manually' note.")
+    log_fn(f"  {len(screenshots)} screenshot(s) captured.")
     report_data["screenshots"] = screenshots
 
     # Build PPTX

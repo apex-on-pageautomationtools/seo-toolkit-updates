@@ -3023,39 +3023,28 @@ def _run_gsc_audit(domain, email, fmt, headless, browser_name):
                 gsc_state["progress"] = msg
 
     out_folder = _domain_folder(domain, "gsc_audit")
-    driver = None
 
     try:
-        _log("[1/3] Launching GSC browser...")
-        driver = engine.build_driver(
-            GSC_PROFILE_DIR, proxy=None, headless=headless,
-            country="us", extra_extensions=[],
-            logger=_log, browser_pref=browser_name,
-        )
-
-        _log("[2/3] Running GSC audit...")
+        # Screenshots are captured from the per-account logged-in session inside
+        # run_gsc_audit (each session opens its own browser), so we no longer launch a
+        # shared-profile browser here — that shared profile isn't signed in and was
+        # screenshotting the Google sign-in page instead of real GSC data.
+        _log("[1/2] Running GSC audit (API data + session screenshots)...")
         path = gsc_audit.run_gsc_audit(
-            domain, email, fmt=fmt, out_dir=out_folder,
-            driver=driver, log_fn=_log,
+            domain, email, fmt=fmt, out_dir=out_folder, log_fn=_log,
         )
 
         with gsc_lock:
             gsc_state["status"] = "completed"
             gsc_state["output_file"] = path
             gsc_state["progress"] = "Report ready for download"
-        _log(f"[3/3] Report saved: {os.path.basename(path)}")
+        _log(f"[2/2] Report saved: {os.path.basename(path)}")
 
     except Exception as e:
         _log(f"Error: {e}")
         with gsc_lock:
             gsc_state["status"] = "error"
             gsc_state["error_msg"] = str(e)
-    finally:
-        if driver:
-            try:
-                driver.quit()
-            except Exception:
-                pass
 
 
 @app.route("/api/gsc/accounts")
