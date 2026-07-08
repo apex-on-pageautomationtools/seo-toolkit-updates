@@ -1897,21 +1897,33 @@ def backlink_one(sess, backlink_url, target_domain, check_da=True):
         else:
             meta_robots = "index"
 
-    # Find target domain links
+    # Find target domain links. Profile/directory sites usually wrap the outbound
+    # website link in a redirect/tracking URL (e.g. href="/outbound?url=https%3A%2F%2F
+    # target.com" or a l.php?u=... wrapper), so the anchor's NETLOC is the host site, not
+    # the target — matching only the netloc misses a link that's genuinely there. We match
+    # the target anywhere in the DECODED href, and fall back to scanning the rendered HTML.
+    from urllib.parse import unquote as _unquote
     domain_found = "No"
     link_url = ""
     link_type = "—"
+
+    def _host_is_target(host):
+        host = (host or "").lower().replace("www.", "").strip("/")
+        return bool(host) and (host == target_clean
+                               or host.endswith("." + target_clean)
+                               or target_clean.endswith("." + host))
+
     try:
         from selenium.webdriver.common.by import By
         anchors = sess.driver.find_elements(By.TAG_NAME, "a")
         for a in anchors:
             try:
                 href = (a.get_attribute("href") or "").strip()
-                if not href or href.startswith("javascript:") or href == "#":
+                if not href or href.startswith(("javascript:", "#", "mailto:", "tel:")):
                     continue
                 parsed = urlparse(href)
-                link_domain = parsed.netloc.lower().replace("www.", "")
-                if target_clean in link_domain or link_domain in target_clean:
+                decoded = _unquote(href).lower()
+                if _host_is_target(parsed.netloc) or target_clean in decoded:
                     domain_found = "Yes"
                     link_url = href
                     rel = (a.get_attribute("rel") or "").lower()
@@ -1921,6 +1933,20 @@ def backlink_one(sess, backlink_url, target_domain, check_da=True):
                 continue
     except Exception:
         pass
+
+    # Fallback: some sites inject the website link via JS or nest it in a way the anchor
+    # scan misses. Look for the target inside any href in the rendered HTML.
+    if domain_found == "No" and target_clean:
+        try:
+            m = _re.search(r'href=["\']([^"\']*' + _re.escape(target_clean) + r'[^"\']*)["\']',
+                           src, _re.IGNORECASE)
+            if m:
+                domain_found = "Yes"
+                link_url = m.group(1)
+                seg = src[max(0, m.start() - 220): m.end() + 60]
+                link_type = "nofollow" if _re.search(r'rel=["\'][^"\']*nofollow', seg, _re.IGNORECASE) else "dofollow"
+        except Exception:
+            pass
 
     da_val, pa_val, da_src = "—", "—", "—"
     if check_da:
