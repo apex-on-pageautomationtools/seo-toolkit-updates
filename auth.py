@@ -165,7 +165,10 @@ def login(email, password):
     if result.get("status") == "approved":
         _save_account(email, password, mac, is_admin=result.get("is_admin", False),
                       allowed_formats=result.get("allowed_formats"),
-                      allowed_tools=result.get("allowed_tools"))
+                      allowed_tools=result.get("allowed_tools"),
+                      gsc_url=result.get("gsc_url"),
+                      building=result.get("building"),
+                      role=result.get("role"))
     return result
 
 
@@ -256,6 +259,10 @@ def _validate_account(email, acct, mac, accounts):
             acct["allowed_formats"] = result["allowed_formats"]
         if result.get("allowed_tools"):
             acct["allowed_tools"] = result["allowed_tools"]
+        # Keep the per-building GSC endpoint / building / role fresh on each re-validate.
+        acct["gsc_url"] = result.get("gsc_url", acct.get("gsc_url", ""))
+        acct["building"] = result.get("building", acct.get("building", ""))
+        acct["role"] = result.get("role", acct.get("role", ""))
         _save_accounts(accounts)
         return result
     accounts.pop(email, None)
@@ -302,8 +309,29 @@ def get_allowed_tools():
     return None
 
 
+def get_gsc_url():
+    """Per-building GSC endpoint for the logged-in user (empty if none/super admin).
+    The tool routes Crawl/GSC to this so a teammate only reaches their building's accounts."""
+    accounts = _load_accounts()
+    for em, acct in accounts.items():
+        url = (acct.get("gsc_url") or "").strip()
+        if url:
+            return url
+    return ""
+
+
+def get_building():
+    """Building of the logged-in user (empty if none/super admin)."""
+    accounts = _load_accounts()
+    for em, acct in accounts.items():
+        b = (acct.get("building") or "").strip()
+        if b:
+            return b
+    return ""
+
+
 def _save_account(email, password, mac, is_admin=False, allowed_formats=None,
-                  allowed_tools=None):
+                  allowed_tools=None, gsc_url=None, building=None, role=None):
     """Add or update one account in the multi-account token file."""
     accounts = _load_accounts()
     accounts[email] = {"password": password, "mac": mac, "is_admin": is_admin,
@@ -312,6 +340,12 @@ def _save_account(email, password, mac, is_admin=False, allowed_formats=None,
         accounts[email]["allowed_formats"] = allowed_formats
     if allowed_tools:
         accounts[email]["allowed_tools"] = allowed_tools
+    if gsc_url:
+        accounts[email]["gsc_url"] = gsc_url
+    if building:
+        accounts[email]["building"] = building
+    if role:
+        accounts[email]["role"] = role
     _save_accounts(accounts)
 
 

@@ -3010,6 +3010,19 @@ GSC_PROFILE_DIR = os.path.join(DATA_DIR, "gsc_profile")
 os.makedirs(GSC_PROFILE_DIR, exist_ok=True)
 
 
+def _gsc_webapp_url():
+    """GSC / Crawl endpoint. Prefers the logged-in user's BUILDING GSC script (returned
+    by the gateway at login) so a teammate only ever reaches their own building's GSC
+    accounts. Falls back to the configured default (PTP) for super admins / if unset."""
+    try:
+        u = auth.get_gsc_url()
+        if u:
+            return u
+    except Exception:
+        pass
+    return CONFIG.get("auth_api_url", "").strip()
+
+
 def _run_gsc_audit(domain, email, fmt, headless, browser_name):
     with gsc_lock:
         gsc_state.update({"status": "running", "log": [], "domain": domain,
@@ -3368,7 +3381,7 @@ def api_admin_save_config():
 @app.route("/api/admin/sync_keys", methods=["POST"])
 def api_admin_sync_keys():
     global CONFIG
-    webapp_url = CONFIG.get("auth_api_url", "").strip()
+    webapp_url = _gsc_webapp_url()
     if not webapp_url:
         return jsonify({"ok": False, "error": "Apps Script URL not configured"})
     try:
@@ -3437,7 +3450,7 @@ def api_gsc_check_for_domain():
                                     "permission": p.get("permissionLevel", "")})
         except Exception:
             continue
-    webapp_url = CONFIG.get("auth_api_url", "").strip()
+    webapp_url = _gsc_webapp_url()
     if webapp_url:
         try:
             resp = http_requests.get(webapp_url, params={"action": "get_config"}, timeout=15)
@@ -3464,7 +3477,7 @@ def api_gsc_domain_check():
     domain = request.args.get("domain", "").strip().lower().replace("www.", "")
     if not domain:
         return jsonify({"error": "No domain"})
-    webapp_url = CONFIG.get("auth_api_url", "").strip()
+    webapp_url = _gsc_webapp_url()
     if not webapp_url:
         return jsonify({"found": False, "reason": "Apps Script URL not configured"})
     try:
@@ -3492,7 +3505,7 @@ def api_gsc_domain_check():
 # --------------------------------------------------------------------------- #
 @app.route("/api/crawl/validate", methods=["POST"])
 def api_crawl_validate():
-    webapp_url = CONFIG.get("auth_api_url", "").strip()
+    webapp_url = _gsc_webapp_url()
     if not webapp_url:
         return jsonify({"error": "GSC accounts not configured. Set Apps Script URL in Admin."}), 400
     data = request.get_json(silent=True) or {}
@@ -3504,7 +3517,7 @@ def api_crawl_validate():
 
 @app.route("/api/crawl/inspect", methods=["POST"])
 def api_crawl_inspect():
-    webapp_url = CONFIG.get("auth_api_url", "").strip()
+    webapp_url = _gsc_webapp_url()
     if not webapp_url:
         return jsonify({"error": "GSC accounts not configured. Set Apps Script URL in Admin."}), 400
     data = request.get_json(silent=True) or {}
