@@ -1010,6 +1010,13 @@ def _recover_page(sess, page_num):
             if not _recover(sess, kind):
                 add_log(f"Could not clear CAPTCHA on page {page_num} — stopping (results incomplete)")
                 return [], "blocked"
+            # Cool down before reloading — reloading immediately after a solve usually just
+            # re-serves the challenge (Google is rate-limiting this IP). A short backoff
+            # gives it a moment; the durable fix for repeated page-2 blocks is a proxy/VPN.
+            backoff = min(45.0, 8.0 * attempt) + random.uniform(0, 4)
+            slept = 0.0
+            while slept < backoff and not stop_event.is_set():
+                time.sleep(1); slept += 1
             # Reload the page we were on so its results render after the solve.
             try:
                 if cur and is_alive(sess.driver):
@@ -1302,8 +1309,18 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     if not nxt:
                         add_log(f"No 'Next' button on page {page_num} — stopping")
                         break
+                    # Human-like paging: scroll to the Next button and pause before AND after
+                    # the click. Rapid back-to-back page clicks from one IP are what trip
+                    # Google's CAPTCHA on page 2+; slowing this down reduces (does not
+                    # eliminate) blocks. The real fix for deep pagination is a proxy/VPN.
+                    try:
+                        sess.driver.execute_script(
+                            "arguments[0].scrollIntoView({block:'center'});", nxt[0])
+                    except Exception:
+                        pass
+                    human_pause(1.2, 2.4)
                     nxt[0].click()
-                    human_pause(1.5, 2.5)
+                    human_pause(2.8, 5.5)
                     page_num += 1
                     page_links = extract_organic(sess.driver)
                     if not page_links:
@@ -1318,10 +1335,14 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                             else:
                                 add_log(f"Page {page_num}: 0 links — reached end of results")
                             break
+                    prev_total = total_links   # organic results counted on all prior pages
                     total_links += len(page_links)
                     add_log(f"Page {page_num}: {len(page_links)} links")
-                    offset = (page_num - 1) * 10
-                    page_matches = find_domain_in_page(sess.driver, domain_clean, page_offset=offset)
+                    # Rank = results on prior pages + position on THIS page. Use the ACTUAL
+                    # cumulative count, not page_num*10 — Google frequently shows fewer than
+                    # 10 organic results per page (ads/snippets/local pack take slots; page 1
+                    # here had 9), and assuming 10/page inflates the reported position.
+                    page_matches = find_domain_in_page(sess.driver, domain_clean, page_offset=prev_total)
                     if page_matches:
                         all_matches.extend(page_matches)
                         add_log(f"  Found at position {page_matches[0]['position']}")
