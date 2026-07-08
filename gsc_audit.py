@@ -1051,22 +1051,31 @@ def build_james_full(data, out_path, log_fn=None):
 
     # --- Slides 5-10: Inspection-based slides ---
     insp_valid = [i for i in inspections if not i.get("error")]
+    # URLs whose inspection FAILED — never hidden. They show as ERROR rows on each slide
+    # and are folded into the verdicts (a URL we couldn't check is not a pass).
+    _err = len(inspections) - len(insp_valid)
 
     # Slide 5: URL Indexing
     _tot = len(insp_valid)
     _not_idx = sum(1 for ins in insp_valid
                    if (ins.get("indexStatusResult", {}).get("verdict", "") or "").upper() != "PASS")
-    if _tot == 0:
+    if len(inspections) == 0:
         _iv, _iok = "No inspection data available", False
-    elif _not_idx:
-        _iv, _iok = f"Issue found — {_not_idx} of {_tot} URL(s) not indexed", False
+    elif _not_idx or _err:
+        _p = []
+        if _not_idx: _p.append(f"{_not_idx} not indexed")
+        if _err: _p.append(f"{_err} could not be inspected")
+        _iv, _iok = f"Issue found — {', '.join(_p)} of {len(inspections)} URL(s)", False
     else:
         _iv, _iok = f"All {_tot} URL(s) indexed", True
     s = header_slide("URL INDEXING CHECK",
         "Verifies whether each inspected URL is indexed by Google and confirms its coverage state "
         "directly from the GSC URL Inspection API.", status_text=_iv, status_ok=_iok)
     idx_rows = []
-    for ins in insp_valid:
+    for ins in inspections:
+        if ins.get("error"):
+            idx_rows.append([ins.get("url", ""), "ERROR", str(ins.get("error", ""))[:40], ""])
+            continue
         isr = ins.get("indexStatusResult", {})
         idx_rows.append([ins["url"], isr.get("verdict", "N/A"),
                          isr.get("coverageState", "N/A"), isr.get("indexingState", "N/A")])
@@ -1090,7 +1099,10 @@ def build_james_full(data, out_path, log_fn=None):
         "Compares the user-declared canonical URL against the canonical URL Google has chosen. "
         "A mismatch means Google is indexing a different version than intended.", status_text=_cv, status_ok=_cok)
     canon_rows = []
-    for ins in insp_valid:
+    for ins in inspections:
+        if ins.get("error"):
+            canon_rows.append([ins.get("url", "")[:35], "ERROR", "", ""])
+            continue
         isr = ins.get("indexStatusResult", {})
         user_c = isr.get("userCanonical", "N/A")
         google_c = isr.get("googleCanonical", "N/A")
@@ -1114,7 +1126,10 @@ def build_james_full(data, out_path, log_fn=None):
         "Checks whether Google's crawler is allowed to access each inspected URL. "
         "BLOCKED means the page cannot be crawled, which prevents indexing.", status_text=_rv, status_ok=_rok)
     robot_rows = []
-    for ins in insp_valid:
+    for ins in inspections:
+        if ins.get("error"):
+            robot_rows.append([ins.get("url", "")[:70], "ERROR"])
+            continue
         isr = ins.get("indexStatusResult", {})
         robot_rows.append([ins["url"][:70], isr.get("robotsTxtState", "N/A")])
     add_table(s, ["URL", "Robots.txt State"],
@@ -1137,7 +1152,10 @@ def build_james_full(data, out_path, log_fn=None):
         "Confirms Google can successfully fetch each page and reports when Google last crawled it. "
         "Pages not crawled in 90+ days may signal crawl budget or discovery issues.", status_text=_fv, status_ok=_fok)
     fetch_rows = []
-    for ins in insp_valid:
+    for ins in inspections:
+        if ins.get("error"):
+            fetch_rows.append([ins.get("url", ""), "ERROR", ""])
+            continue
         isr = ins.get("indexStatusResult", {})
         fetch_rows.append([ins["url"], isr.get("pageFetchState", "N/A"),
                            isr.get("lastCrawlTime", "N/A")[:19]])
@@ -1158,7 +1176,10 @@ def build_james_full(data, out_path, log_fn=None):
         "Google uses mobile-first indexing. All inspected pages should show MOBILE as the crawl type. "
         "DESKTOP crawl is a flag that the page may not be mobile-optimised.", status_text=_dv, status_ok=_dok)
     crawl_rows = []
-    for ins in insp_valid:
+    for ins in inspections:
+        if ins.get("error"):
+            crawl_rows.append([ins.get("url", "")[:70], "ERROR"])
+            continue
         isr = ins.get("indexStatusResult", {})
         crawl_rows.append([ins["url"][:70], isr.get("crawledAs", "N/A")])
     add_table(s, ["URL", "Crawled As"],
@@ -1177,7 +1198,10 @@ def build_james_full(data, out_path, log_fn=None):
         "Identifies rich result types detected in page markup via URL inspection. "
         "Rich results improve SERP visibility and CTR.", status_text=_rrv, status_ok=_rrok)
     rich_rows = []
-    for ins in insp_valid:
+    for ins in inspections:
+        if ins.get("error"):
+            rich_rows.append([ins.get("url", ""), "—", "ERROR"])
+            continue
         rr = ins.get("richResultsResult", {})
         verdict = rr.get("verdict", "N/A")
         items = rr.get("detectedItems", [])
