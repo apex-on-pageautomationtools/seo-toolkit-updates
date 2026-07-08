@@ -597,10 +597,10 @@ def _click_buster_button(driver):
                                      "[id*='solver']", "[class*='solver']"])
 
 def _click_audio_and_buster(driver):
-    """Last-resort recovery: switch to a FRESH audio challenge (the headphones /
-    'eye' button in the challenge bar) then click Buster again. Buster is built to
-    solve audio challenges, so forcing a clean audio challenge and re-clicking it
-    often succeeds when the image challenge or a stale audio one has failed."""
+    """Recovery when Buster/audio keeps failing: FIRST toggle to the IMAGE challenge
+    (the image / 'eye' button) and reload it a couple of times — this clears the audio
+    'automated queries' rate-limit — THEN switch to a fresh AUDIO challenge and click
+    Buster (which solves audio). Image-reload → audio → Buster is what gets it unstuck."""
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.action_chains import ActionChains
     try:
@@ -610,18 +610,40 @@ def _click_audio_and_buster(driver):
         if not fr:
             return False
         driver.switch_to.frame(fr[0])
-        # 1) Click the audio-challenge button (the "eye"/headphones icon)
-        audio = driver.find_elements(By.CSS_SELECTOR,
-            "#recaptcha-audio-button, button[id*='audio'], button[title*='audio']")
-        if audio:
-            try:
-                audio[0].click()
-            except Exception:
-                try: ActionChains(driver).move_to_element(audio[0]).click().perform()
-                except Exception: pass
-            add_log("Switched to a fresh audio challenge")
-            time.sleep(2.5)
-        # 2) Click Buster's solve button on the audio challenge
+
+        def _click(selectors, label=None):
+            for sel in selectors:
+                els = driver.find_elements(By.CSS_SELECTOR, sel)
+                if not els:
+                    continue
+                try:
+                    els[0].click()
+                except Exception:
+                    try:
+                        ActionChains(driver).move_to_element(els[0]).click().perform()
+                    except Exception:
+                        continue
+                if label:
+                    add_log(label)
+                return True
+            return False
+
+        # 1) Switch to the IMAGE challenge (the image / "eye" button) and reload it 2x.
+        #    Reloading the image challenge resets the audio rate-limit for the next step.
+        _click(["#recaptcha-image-button", "button[id*='image']", "button[title*='image']"],
+               "Switched to the image challenge (eye)")
+        time.sleep(1.5)
+        for _ in range(2):
+            if _click(["#recaptcha-reload-button", ".reload-button-holder button",
+                       "button[id*='reload']"], "Reloaded the challenge"):
+                time.sleep(1.5)
+
+        # 2) Switch to a FRESH audio challenge (the headphones button).
+        _click(["#recaptcha-audio-button", "button[id*='audio']", "button[title*='audio']"],
+               "Switched to a fresh audio challenge")
+        time.sleep(2.5)
+
+        # 3) Click Buster's solve button on the audio challenge.
         clicked = False
         host = driver.find_elements(By.CSS_SELECTOR, "div.help-button-holder")
         if host:
@@ -781,24 +803,11 @@ def solve_with_buster(driver, max_attempts=1):
             if _recaptcha_status(driver) == "CHECKED":
                 add_log("CAPTCHA solved after reload!")
                 return True
-            # Try Buster again on the new challenge
-            clicked2 = False
-            try:
-                driver.switch_to.default_content()
-                fr = driver.find_elements(By.CSS_SELECTOR,
-                    "iframe[title*='recaptcha challenge'], iframe[src*='bframe']")
-                if fr:
-                    driver.switch_to.frame(fr[0])
-                    host = driver.find_elements(By.CSS_SELECTOR, "div.help-button-holder")
-                    if host:
-                        from selenium.webdriver.common.action_chains import ActionChains
-                        ActionChains(driver).move_to_element(host[0]).click().perform()
-                        add_log("Buster clicked on reloaded CAPTCHA")
-                        clicked2 = True
-                    driver.switch_to.default_content()
-            except Exception:
-                try: driver.switch_to.default_content()
-                except Exception: pass
+            # On the reloaded challenge, force a FRESH AUDIO challenge (the "eye"/
+            # headphones toggle) and re-click Buster. Buster solves AUDIO challenges best,
+            # and switching to a fresh audio challenge clears the "automated queries"
+            # audio rate-limit that makes repeated solves fail.
+            clicked2 = _click_audio_and_buster(driver)
             if clicked2:
                 for _ in range(10):
                     time.sleep(2)
