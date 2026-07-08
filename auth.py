@@ -42,8 +42,18 @@ APP_VERSION = "3.9"
 SESSION_MAX_HOURS = 12   # a saved login stays valid this long, then re-login is required
 
 
+# Central login gateway (multi-tenant). Delivered via OTA so the whole team's login
+# can be pointed at a new backend with a single push. This TAKES PRECEDENCE over any
+# user_auth_url in config.json — set it to "" to fall back to per-machine config.
+# ROLLBACK: replace this with the previous PTP script /exec URL and re-push via OTA.
+DEFAULT_AUTH_URL = "https://script.google.com/macros/s/AKfycbyYhBdjOinGEFgN_unzHXlSuhQWpqdGoipN4dB1iVTRxrqoq_5c_grAi1LAjCG80VTwmw/exec"
+
+
 def _get_api_url():
-    """Read user_auth_url from config.json. Returns empty string if not configured."""
+    """Login endpoint. Prefers the OTA-managed DEFAULT_AUTH_URL; if that's blank,
+    falls back to user_auth_url in config.json (legacy per-machine setting)."""
+    if DEFAULT_AUTH_URL.strip():
+        return DEFAULT_AUTH_URL.strip()
     try:
         cf = _config_file()
         if os.path.exists(cf):
@@ -111,18 +121,26 @@ def get_mac_address():
 
 
 def _api_call(params, timeout=15):
-    """Call the auth API (GET with query params for Apps Script compatibility)."""
+    """Call the auth API (GET with query params for Apps Script compatibility).
+
+    Apps Script web apps can cold-start with a transient 404/timeout on the first hit,
+    so retry a couple of times before giving up — otherwise a valid login would fail."""
     api_url = _get_api_url()
     if not api_url:
         return {"error": "Auth API URL not configured"}
-    try:
-        qs = urllib.parse.urlencode(params)
-        url = f"{api_url}?{qs}"
-        req = urllib.request.Request(url, headers={"User-Agent": "SEOToolkitPro-Auth/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except Exception as e:
-        return {"error": str(e)}
+    qs = urllib.parse.urlencode(params)
+    url = f"{api_url}?{qs}"
+    last_err = None
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "SEOToolkitPro-Auth/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(1.2 * (attempt + 1))
+    return {"error": str(last_err)}
 
 
 def check_version():
