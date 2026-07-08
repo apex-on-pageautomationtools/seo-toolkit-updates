@@ -911,7 +911,7 @@ def build_james_full(data, out_path, log_fn=None):
     inspections = data.get("inspections", [])
     screenshots = data.get("screenshots", {})
 
-    def header_slide(title, desc="", status_text=""):
+    def header_slide(title, desc="", status_text="", status_ok=True):
         slide = prs.slides.add_slide(prs.slide_layouts[6])
         _rect(slide, 0, 0, 13.33, 1.0, "#0D3D4A")
         _rect(slide, 0, 1.0, 13.33, 0.08, "#C9A84C")
@@ -919,8 +919,17 @@ def build_james_full(data, out_path, log_fn=None):
         if desc:
             _text(slide, desc, 0.5, 0.62, 12.3, 0.3, 14, "Calibri", OFF_WHITE)
         if status_text:
-            _text(slide, status_text, 0.5, 1.18, 12.3, 0.3, 14, "Calibri", STATUS_OK)
+            # Green when the check passes, red when it flags an issue — turns each data
+            # slide from a raw table into an audit verdict the reader can scan.
+            _text(slide, status_text, 0.5, 1.18, 12.3, 0.3, 14, "Calibri",
+                  C("#2E7D32") if status_ok else C("#C62828"), bold=True)
         return slide
+
+    def _verdict_ok(text):
+        return (text, True)
+
+    def _verdict_bad(text):
+        return (text, False)
 
     def add_table(slide, headers, rows, col_widths, start_y=1.8):
         from pptx.util import Inches as I, Pt as P
@@ -1000,9 +1009,19 @@ def build_james_full(data, out_path, log_fn=None):
         _text(s, val, bx + 0.3, 3.2, 3.4, 1.0, 12, "Calibri", TEXT_DARK)
 
     # --- Slide 3: Sitemap Status ---
+    _sm_err = sum(int(sm.get("errors", 0) or 0) for sm in sitemaps)
+    _sm_warn = sum(int(sm.get("warnings", 0) or 0) for sm in sitemaps)
+    if not sitemaps:
+        _sv, _sok = "Issue found — no sitemaps submitted", False
+    elif _sm_err:
+        _sv, _sok = f"Issue found — {_sm_err} error(s) across sitemaps", False
+    elif _sm_warn:
+        _sv, _sok = f"{_sm_warn} warning(s) found", False
+    else:
+        _sv, _sok = "No issues found", True
     s = header_slide("SITEMAP SUBMITTED & STATUS",
         "Checks whether sitemaps are submitted to GSC, whether they are active (not pending), "
-        "and reports any errors or warnings on each sitemap.")
+        "and reports any errors or warnings on each sitemap.", status_text=_sv, status_ok=_sok)
     sitemap_rows = []
     for sm in sitemaps:
         path = sm.get("path", "")
@@ -1034,9 +1053,18 @@ def build_james_full(data, out_path, log_fn=None):
     insp_valid = [i for i in inspections if not i.get("error")]
 
     # Slide 5: URL Indexing
+    _tot = len(insp_valid)
+    _not_idx = sum(1 for ins in insp_valid
+                   if (ins.get("indexStatusResult", {}).get("verdict", "") or "").upper() != "PASS")
+    if _tot == 0:
+        _iv, _iok = "No inspection data available", False
+    elif _not_idx:
+        _iv, _iok = f"Issue found — {_not_idx} of {_tot} URL(s) not indexed", False
+    else:
+        _iv, _iok = f"All {_tot} URL(s) indexed", True
     s = header_slide("URL INDEXING CHECK",
         "Verifies whether each inspected URL is indexed by Google and confirms its coverage state "
-        "directly from the GSC URL Inspection API.")
+        "directly from the GSC URL Inspection API.", status_text=_iv, status_ok=_iok)
     idx_rows = []
     for ins in insp_valid:
         isr = ins.get("indexStatusResult", {})
@@ -1047,9 +1075,20 @@ def build_james_full(data, out_path, log_fn=None):
               [5.5, 1.5, 2.8, 2.5])
 
     # Slide 6: Canonical Check
+    _mm = 0
+    for ins in insp_valid:
+        isr = ins.get("indexStatusResult", {})
+        if isr.get("userCanonical", "N/A") != isr.get("googleCanonical", "N/A"):
+            _mm += 1
+    if not insp_valid:
+        _cv, _cok = "No inspection data available", False
+    elif _mm:
+        _cv, _cok = f"Issue found — {_mm} canonical mismatch(es)", False
+    else:
+        _cv, _cok = "No mismatches found", True
     s = header_slide("CANONICAL CHECK",
         "Compares the user-declared canonical URL against the canonical URL Google has chosen. "
-        "A mismatch means Google is indexing a different version than intended.")
+        "A mismatch means Google is indexing a different version than intended.", status_text=_cv, status_ok=_cok)
     canon_rows = []
     for ins in insp_valid:
         isr = ins.get("indexStatusResult", {})
@@ -1063,9 +1102,17 @@ def build_james_full(data, out_path, log_fn=None):
               [3.8, 4.0, 4.0, 0.5])
 
     # Slide 7: Robots.txt
+    _blocked = sum(1 for ins in insp_valid
+                   if "BLOCK" in (ins.get("indexStatusResult", {}).get("robotsTxtState", "") or "").upper())
+    if not insp_valid:
+        _rv, _rok = "No inspection data available", False
+    elif _blocked:
+        _rv, _rok = f"Issue found — {_blocked} URL(s) blocked by robots.txt", False
+    else:
+        _rv, _rok = "No URLs blocked", True
     s = header_slide("ROBOTS.TXT BLOCKING",
         "Checks whether Google's crawler is allowed to access each inspected URL. "
-        "BLOCKED means the page cannot be crawled, which prevents indexing.")
+        "BLOCKED means the page cannot be crawled, which prevents indexing.", status_text=_rv, status_ok=_rok)
     robot_rows = []
     for ins in insp_valid:
         isr = ins.get("indexStatusResult", {})
@@ -1075,9 +1122,20 @@ def build_james_full(data, out_path, log_fn=None):
               [9.3, 3.0])
 
     # Slide 8: Fetchability
+    _badfetch = 0
+    for ins in insp_valid:
+        st = (ins.get("indexStatusResult", {}).get("pageFetchState", "") or "").upper()
+        if st and not st.startswith("SUCCESS"):
+            _badfetch += 1
+    if not insp_valid:
+        _fv, _fok = "No inspection data available", False
+    elif _badfetch:
+        _fv, _fok = f"Issue found — {_badfetch} page(s) not fetchable", False
+    else:
+        _fv, _fok = "All pages fetchable", True
     s = header_slide("PAGE FETCHABILITY & LAST CRAWLED",
         "Confirms Google can successfully fetch each page and reports when Google last crawled it. "
-        "Pages not crawled in 90+ days may signal crawl budget or discovery issues.")
+        "Pages not crawled in 90+ days may signal crawl budget or discovery issues.", status_text=_fv, status_ok=_fok)
     fetch_rows = []
     for ins in insp_valid:
         isr = ins.get("indexStatusResult", {})
@@ -1088,9 +1146,17 @@ def build_james_full(data, out_path, log_fn=None):
               [7.5, 2.5, 2.3])
 
     # Slide 9: Crawl Type
+    _desktop = sum(1 for ins in insp_valid
+                   if "DESKTOP" in (ins.get("indexStatusResult", {}).get("crawledAs", "") or "").upper())
+    if not insp_valid:
+        _dv, _dok = "No inspection data available", False
+    elif _desktop:
+        _dv, _dok = f"Issue found — {_desktop} page(s) crawled as desktop", False
+    else:
+        _dv, _dok = "Mobile-first (all pages)", True
     s = header_slide("CRAWL TYPE - MOBILE-FIRST CHECK",
         "Google uses mobile-first indexing. All inspected pages should show MOBILE as the crawl type. "
-        "DESKTOP crawl is a flag that the page may not be mobile-optimised.")
+        "DESKTOP crawl is a flag that the page may not be mobile-optimised.", status_text=_dv, status_ok=_dok)
     crawl_rows = []
     for ins in insp_valid:
         isr = ins.get("indexStatusResult", {})
@@ -1100,9 +1166,16 @@ def build_james_full(data, out_path, log_fn=None):
               [9.3, 3.0])
 
     # Slide 10: Rich Results
+    _rich = sum(1 for ins in insp_valid if ins.get("richResultsResult", {}).get("detectedItems"))
+    if not insp_valid:
+        _rrv, _rrok = "No inspection data available", False
+    elif _rich:
+        _rrv, _rrok = f"{_rich} page(s) with rich results detected", True
+    else:
+        _rrv, _rrok = "No rich results detected", True
     s = header_slide("ACTIVE RICH RESULTS & SEARCH APPEARANCE",
         "Identifies rich result types detected in page markup via URL inspection. "
-        "Rich results improve SERP visibility and CTR.")
+        "Rich results improve SERP visibility and CTR.", status_text=_rrv, status_ok=_rrok)
     rich_rows = []
     for ins in insp_valid:
         rr = ins.get("richResultsResult", {})
