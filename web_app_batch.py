@@ -1471,6 +1471,29 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
         with state_lock:
             initial_ip = state.get("vpn_location", "")
 
+        # Keywords whose search was cut short by a CAPTCHA/block — retried at the end.
+        incomplete = []   # list of (kw, kw_domain, kw_target, result_row_index)
+
+        def _make_row(kw, kw_target, result):
+            matches = result.get("matches", [])
+            if matches:
+                row = {"keyword": kw, "status": "found"}
+                if kw_target:
+                    row["target_page"] = kw_target
+                for idx, m in enumerate(matches):
+                    suffix = "" if idx == 0 else f"_{idx+1}"
+                    row[f"position{suffix}"] = m["position"]
+                    row[f"serp_url{suffix}"] = m["serp_url"]
+                    row[f"loaded_url{suffix}"] = m.get("loaded_url", "")
+                if matches[0].get("screenshot"):
+                    row["screenshot"] = matches[0]["screenshot"]
+                return row
+            row = {"keyword": kw, "position": "-", "serp_url": "", "loaded_url": "",
+                   "status": result.get("status", "not_found")}
+            if kw_target:
+                row["target_page"] = kw_target
+            return row
+
         for i, kw in enumerate(keywords):
             if stop_event.is_set():
                 break
@@ -1519,26 +1542,10 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
             result = rank_one(sess, kw, kw_domain, country, max_pages, search_mode, city=city, lang=lang)
 
             with state_lock:
-                matches = result.get("matches", [])
-                if matches:
-                    row = {"keyword": kw, "status": "found"}
-                    if kw_target:
-                        row["target_page"] = kw_target
-                    for idx, m in enumerate(matches):
-                        suffix = "" if idx == 0 else f"_{idx+1}"
-                        row[f"position{suffix}"] = m["position"]
-                        row[f"serp_url{suffix}"] = m["serp_url"]
-                        row[f"loaded_url{suffix}"] = m.get("loaded_url", "")
-                    if matches[0].get("screenshot"):
-                        row["screenshot"] = matches[0]["screenshot"]
-                    state["results"].append(row)
-                else:
-                    row = {"keyword": kw, "position": "-",
-                           "serp_url": "", "loaded_url": "",
-                           "status": result.get("status", "not_found")}
-                    if kw_target:
-                        row["target_page"] = kw_target
-                    state["results"].append(row)
+                row = _make_row(kw, kw_target, result)
+                state["results"].append(row)
+                if result.get("incomplete"):
+                    incomplete.append((kw, kw_domain, kw_target, len(state["results"]) - 1))
             autosave()
 
             if i < len(keywords) - 1 and not stop_event.is_set():
@@ -1554,6 +1561,49 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
                         t = 0
                         while t < wait and not stop_event.is_set():
                             time.sleep(1); t += 1
+
+        # Retry pass: re-check keywords whose search was cut short by a CAPTCHA/block.
+        # A fresh session (new profile, rotated proxy if a pool is set) resets the IP /
+        # challenge state, giving the best chance to complete them — so a site that DOES
+        # rank isn't left as a false "not found (incomplete)".
+        if incomplete and not stop_event.is_set():
+            add_log(f"Re-checking {len(incomplete)} keyword(s) that a block cut short...",
+                    to_activity=True)
+            for kw, kw_domain, kw_target, ridx in incomplete:
+                if stop_event.is_set():
+                    break
+                pause_event.wait()
+                if stop_event.is_set():
+                    break
+                try:
+                    sess.start(rotate=True)   # fresh profile + rotate proxy for a clean IP
+                except BrowserClosedError:
+                    raise
+                except Exception as re_err:
+                    add_log(f"Could not restart browser for retry: {re_err}")
+                    break
+                cool = random.uniform(6, 12)
+                t = 0
+                while t < cool and not stop_event.is_set():
+                    time.sleep(1); t += 1
+                with state_lock:
+                    state["current_keyword"] = f"{kw} (retry)"
+                    state["status"] = "running"
+                add_log(f"Re-checking '{kw}' (was cut short by a block)...")
+                result = rank_one(sess, kw, kw_domain, country, max_pages, search_mode,
+                                  city=city, lang=lang)
+                with state_lock:
+                    new_row = _make_row(kw, kw_target, result)
+                    if 0 <= ridx < len(state["results"]):
+                        state["results"][ridx] = new_row   # replace the incomplete row
+                    else:
+                        state["results"].append(new_row)
+                if result.get("matches"):
+                    add_log(f"'{kw}': retry found at #{result['matches'][0]['position']}",
+                            to_activity=True)
+                else:
+                    add_log(f"'{kw}': retry -> {result.get('status', 'not_found')}")
+                autosave()
 
         with state_lock:
             state["status"] = "stopped" if stop_event.is_set() else "completed"
