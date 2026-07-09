@@ -7,11 +7,13 @@ import re
 import time
 import random
 import logging
+import requests
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
 _da_cache = {}
+_dr_cache = {}
 
 
 def _extract_domain(url_or_domain):
@@ -23,7 +25,7 @@ def _extract_domain(url_or_domain):
 
 
 def _try_rhinorank(driver, domain):
-    """rhinorank.io DA/DR checker"""
+    """rhinorank.io DA checker"""
     try:
         from selenium.webdriver.common.by import By
         from selenium.webdriver.common.keys import Keys
@@ -48,13 +50,11 @@ def _try_rhinorank(driver, domain):
 
         src = driver.page_source
         da = _find_metric(src, ["domain authority", "DA"], limit=100)
-        dr = _find_metric(src, ["domain rating", "DR"], limit=100)
         pa = _find_metric(src, ["page authority", "PA"], limit=100)
 
-        if da is not None or dr is not None:
-            return {"da": da if da is not None else "—",
+        if da is not None:
+            return {"da": da,
                     "pa": pa if pa is not None else "—",
-                    "dr": dr if dr is not None else "—",
                     "source": "rhinorank.io"}
     except Exception as e:
         logger.debug(f"rhinorank failed: {e}")
@@ -241,74 +241,35 @@ def _find_metric(html, labels, limit=100):
     return None
 
 
-def _find_metric_in_text(text, labels, limit=100):
-    """Find a numeric metric in rendered page text.
-
-    This is best for browser extensions or toolbars that inject metrics into the
-    page DOM instead of a dedicated checker page.
+def check_domain_rating(domain, log_fn=None):
     """
-    if not text:
-        return None
-    low = re.sub(r"\s+", " ", text)
-    for label in labels:
-        for m in re.finditer(re.escape(label), low, re.IGNORECASE):
-            window = low[m.end(): m.end() + 90]
-            m2 = re.search(r"[:=\-]?\s*(\d{1,3})\b", window)
-            if not m2:
-                # Also allow the number to appear just before the label on the same line.
-                prefix = low[max(0, m.start() - 30): m.start()]
-                m2 = re.search(r"(\d{1,3})\s*[:=\-]?\s*$", prefix)
-            if m2:
-                val = int(m2.group(1))
-                if 1 <= val <= limit:
-                    return val
-    return None
-
-
-def _try_rendered_page_metrics(driver, domain):
-    """Best-effort scan of the current rendered page for DA/DR/PA values.
-
-    This is intended for SEO toolbars/extensions that inject the metrics into
-    the page DOM while the backlink page is open.
+    Fetch Ahrefs Domain Rating (DR) via Ahrefs' free public API — no browser needed.
+    Cached per domain. Returns int (0-100) or "—" if unavailable.
     """
+    domain = domain.strip().lower()
+    if domain in _dr_cache:
+        return _dr_cache[domain]
+
+    result = "—"
     try:
-        from selenium.webdriver.common.by import By
-
-        body_text = ""
-        try:
-            body_text = driver.execute_script(
-                "return document.body ? document.body.innerText : ''"
-            ) or ""
-        except Exception:
-            pass
-
-        try:
-            body = driver.find_element(By.TAG_NAME, "body")
-            body_text = (body_text or "") + "\n" + (body.text or "")
-        except Exception:
-            pass
-
-        src = ""
-        try:
-            src = driver.page_source or ""
-        except Exception:
-            pass
-
-        combined = f"{body_text}\n{src}"
-        da = _find_metric_in_text(combined, ["domain authority", "da"], limit=100)
-        dr = _find_metric_in_text(combined, ["domain rating", "dr"], limit=100)
-        pa = _find_metric_in_text(combined, ["page authority", "pa"], limit=100)
-
-        if da is not None or dr is not None or pa is not None:
-            return {
-                "da": da if da is not None else "—",
-                "dr": dr if dr is not None else "—",
-                "pa": pa if pa is not None else "—",
-                "source": "browser-extension",
-            }
+        resp = requests.get(
+            "https://api.ahrefs.com/v3/public/domain-rating-free",
+            params={"target": domain, "output": "json"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        dr = data.get("domain_rating", {}).get("domain_rating")
+        if dr is not None:
+            result = round(dr)
     except Exception as e:
-        logger.debug(f"rendered-page metrics failed: {e}")
-    return None
+        if log_fn:
+            log_fn(f"  DR fetch failed for {domain}: {e}")
+        logger.debug(f"DR fetch failed for {domain}: {e}")
+
+    _dr_cache[domain] = result
+    return result
 
 
 _CHECKERS = [
@@ -331,18 +292,21 @@ def check_da_pa(driver, url_or_domain, log_fn=None):
         url_or_domain: URL or domain to check
         log_fn: optional logging function
 
-    Returns: {"da": int|str, "pa": int|str, "source": str}
+    Returns: {"da": int|str, "dr": int|str, "pa": int|str, "source": str}
     """
     domain = _extract_domain(url_or_domain)
 
     if domain in _da_cache:
         cached = _da_cache[domain]
         if log_fn:
-            log_fn(f"  DA/PA for {domain}: cached — DA={cached.get('da','—')}, PA={cached.get('pa','—')}")
+            log_fn(f"  DA/PA for {domain}: cached — DA={cached.get('da','—')}, DR={cached.get('dr','—')}, PA={cached.get('pa','—')}")
         return cached
 
     if log_fn:
         log_fn(f"  Checking DA/PA for {domain}...")
+
+    # DR comes straight from Ahrefs' free public API — no browser needed.
+    dr_val = check_domain_rating(domain, log_fn=log_fn)
 
     # Save current URL to go back after
     try:
@@ -350,38 +314,16 @@ def check_da_pa(driver, url_or_domain, log_fn=None):
     except Exception:
         original_url = None
 
-    if False:
-        # First try the current page itself. This is the path used when a loaded
-        # browser extension injects DA/DR metrics into the rendered page.
-        try:
-            result = _try_rendered_page_metrics(driver, domain)
-            if result and (isinstance(result.get("da"), int) and result["da"] > 0):
-                _da_cache[domain] = result
-                if log_fn:
-                    log_fn(
-                        f"  DA={result['da']}, DR={result.get('dr','—')}, "
-                        f"PA={result.get('pa','—')} (from {result['source']})"
-                    )
-                if original_url and original_url.startswith("http"):
-                    try:
-                        driver.get(original_url)
-                        time.sleep(1)
-                    except Exception:
-                        pass
-                return result
-        except Exception as e:
-            if log_fn:
-                log_fn(f"  rendered page scan failed: {e}")
-
     for name, checker in _CHECKERS:
         try:
             if log_fn:
                 log_fn(f"  Trying {name}...")
             result = checker(driver, domain)
             if result and (isinstance(result.get("da"), int) and result["da"] > 0):
+                result["dr"] = dr_val
                 _da_cache[domain] = result
                 if log_fn:
-                    log_fn(f"  DA={result['da']}, PA={result.get('pa','—')} (from {result['source']})")
+                    log_fn(f"  DA={result['da']}, DR={dr_val}, PA={result.get('pa','—')} (from {result['source']})")
                 # Navigate back to avoid interference
                 if original_url and original_url.startswith("http"):
                     try:
@@ -395,7 +337,7 @@ def check_da_pa(driver, url_or_domain, log_fn=None):
                 log_fn(f"  {name} failed: {e}")
         time.sleep(random.uniform(1, 2))
 
-    fallback = {"da": "—", "pa": "—", "source": "—"}
+    fallback = {"da": "—", "pa": "—", "dr": dr_val, "source": "—"}
     _da_cache[domain] = fallback
     if log_fn:
         log_fn(f"  DA/PA: could not retrieve from any tool")
@@ -410,5 +352,6 @@ def check_da_pa(driver, url_or_domain, log_fn=None):
 
 
 def clear_cache():
-    """Clear the DA/PA cache."""
+    """Clear the DA/PA/DR cache."""
     _da_cache.clear()
+    _dr_cache.clear()

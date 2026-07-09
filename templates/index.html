@@ -1985,13 +1985,15 @@ function appendRow(row,num,m){
     const daSrc=row.da_source||'—';
     const daNum=typeof da==='number'?da:parseInt(da)||0;
     const daCls=daNum>=50?'r-gold':daNum>=30?'r-green':daNum>=10?'r-blue':daNum>0?'r-gray':'';
+    const drNum=typeof dr==='number'?dr:parseInt(dr)||0;
+    const drCls=drNum>=50?'r-gold':drNum>=30?'r-green':drNum>=10?'r-blue':drNum>0?'r-gray':'';
     tr.innerHTML='<td style="color:var(--text-3)">'+num+'</td>'+
       '<td class="cell-url" style="font-weight:600">'+esc(row.url||'')+'</td>'+
       '<td style="text-align:center"><span class="tag '+dfCls+'">'+esc(df)+'</span></td>'+
       '<td style="text-align:center"><span class="tag '+mrCls+'">'+esc(mr)+'</span></td>'+
       '<td style="text-align:center"><span class="tag '+ltCls+'">'+esc(lt)+'</span></td>'+
       '<td style="text-align:center"><span class="rank-pill '+daCls+'">'+esc(String(da))+'</span></td>'+
-      '<td style="text-align:center"><span class="rank-pill '+daCls+'">'+esc(String(dr))+'</span></td>'+
+      '<td style="text-align:center"><span class="rank-pill '+drCls+'">'+esc(String(dr))+'</span></td>'+
       '<td style="text-align:center"><span class="rank-pill '+daCls+'">'+esc(String(pa))+'</span></td>'+
       '<td style="font-size:11px;color:var(--text-3)">'+esc(daSrc)+'</td>'+
       '<td class="cell-url">'+linkCell+'</td>'+
@@ -2316,11 +2318,7 @@ async function gscSessionRemove(sid){
 /* ===================== settings sheet ===================== */
 let proxyPool=[];
 async function openSettings(){
-  try{
-    const c=await(await fetch('/api/config')).json();
-    proxyPool=Array.isArray(c.proxies)?c.proxies.filter(p=>p&&p.host&&p.port):[];
-    $('s-downloads-folder').value=c.downloads_folder||'';
-  }
+  try{const c=await(await fetch('/api/config')).json();proxyPool=Array.isArray(c.proxies)?c.proxies.filter(p=>p&&p.host&&p.port):[];$('s-downloads-folder').value=c.downloads_folder||'';}
   catch(e){proxyPool=[];}
   renderProxies();
   $('sheet-overlay').classList.add('open');$('sheet').classList.add('open');
