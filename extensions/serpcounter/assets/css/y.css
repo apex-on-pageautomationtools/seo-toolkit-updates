@@ -1,0 +1,9 @@
+   .mst-serp-counter{
+    position: absolute;
+    top: 28px;
+    left: -34px;
+    color: red;
+   }
+   .searchCenterMiddle li{
+    position: relative;
+   }

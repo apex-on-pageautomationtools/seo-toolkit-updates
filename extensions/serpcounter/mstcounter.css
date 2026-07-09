@@ -1,0 +1,44 @@
+.mst-serp-counter{
+   position: absolute;
+    left: -46px;
+    top: 24px;
+    color: #ff4700bf;
+    font-weight: 700;
+    font-family: 'Google Sans';
+    font-size: 20px;
+}
+.mst-serp-counter span{
+    color: #ffc107;
+}
+/*.yuRUbf {
+    margin-left: 20px;
+}*/
+.g{
+    position: relative;
+}
+.XN9cAe {
+    position: relative;
+}
+.MjjYud {
+    position: relative;
+}
+/* Featured snippet box */
+.c2xzTb {
+    overflow: visible !important;
+}
+
+/* Fix indented results not showing numbers */
+.jtfYYd,
+.kWxLod {
+    overflow: inherit !important;
+    contain: inherit!important;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}

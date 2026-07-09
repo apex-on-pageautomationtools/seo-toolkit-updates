@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3391ff"/>
+      <stop offset="100%" style="stop-color:#4a56e2"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square background -->
+  <rect width="512" height="512" rx="100" ry="100" fill="url(#bg)"/>
+  <!-- Magnifying glass -->
+  <circle cx="230" cy="220" r="100" fill="none" stroke="white" stroke-width="36" opacity="0.95"/>
+  <line x1="305" y1="295" x2="400" y2="390" stroke="white" stroke-width="40" stroke-linecap="round" opacity="0.95"/>
+  <!-- Bar chart inside glass -->
+  <rect x="175" y="230" width="30" height="50" rx="4" fill="white" opacity="0.85"/>
+  <rect x="215" y="190" width="30" height="90" rx="4" fill="white" opacity="0.85"/>
+  <rect x="255" y="210" width="30" height="70" rx="4" fill="white" opacity="0.85"/>
+  <!-- Up arrow -->
+  <polygon points="340,140 370,180 355,180 355,210 325,210 325,180 310,180" fill="#1ea672" opacity="0.9"/>
+</svg>

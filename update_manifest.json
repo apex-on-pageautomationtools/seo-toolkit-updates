@@ -1,0 +1,170 @@
+{
+  "version": "3.9",
+  "files": [
+    {
+      "path": "da_checker.py",
+      "hash": "08d5f3dc58815f2d1345c4669e15d656f402244f34a92a8f7db2e530c9c19ea6",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/da_checker.py"
+    },
+    {
+      "path": "auth.py",
+      "hash": "22f68e845bf8f479aa5bcad8443e1174b6dd199cb34d3d8e2e576cc0df3533f5",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/auth.py"
+    },
+    {
+      "path": "engine.py",
+      "hash": "e80b4cca5df57b8392d693a5c26203abcc7f65960341af4a1fca6f498b0c3241",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/engine.py"
+    },
+    {
+      "path": "gsc_audit.py",
+      "hash": "f4da92c24145f5f8543897e6bb1d22686440d4043cdbe73d6f206c7b10f51854",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/gsc_audit.py"
+    },
+    {
+      "path": "health_audit.py",
+      "hash": "84c62cef50ec19b58c232f04157ad1f48e774eb281cc74700d0357717d552bf6",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/health_audit.py"
+    },
+    {
+      "path": "web_app_batch.py",
+      "hash": "adbe48b208ace1e20c8e5f24704e737dc759930eaac6421649fa392ebfeac7d8",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
+    },
+    {
+      "path": "updater.py",
+      "hash": "a47a34902baf1f1242edce81b84efee1c922dcf062b8ab785b2dc21f89f71277",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/updater.py"
+    },
+    {
+      "path": "static/manifest.webmanifest",
+      "hash": "d174076687c1f7b070782eb6c66bb4b563e94a0a95943d7513771647c9fb92fd",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/manifest.webmanifest"
+    },
+    {
+      "path": "static/offline.html",
+      "hash": "4a98c69df543832336b284cbcb23a4dda96f783941a36e447f4ee8feb8bdb416",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/offline.html"
+    },
+    {
+      "path": "static/sw.js",
+      "hash": "9442a1fe988fc166c064bf8d5c895eeaf21939c2ddf3d6ee5d9eaf439fae8f2e",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/sw.js"
+    },
+    {
+      "path": "static/icons/apple-touch-icon.png",
+      "hash": "38336e418705c5204e64ab190e707041992383890c083f10aaec324afdd56d07",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/icons/apple-touch-icon.png"
+    },
+    {
+      "path": "static/icons/favicon-32.png",
+      "hash": "cc58f1f97336cfe166e711e95658c17525c589364d5616a4e7d95f90a7361283",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/icons/favicon-32.png"
+    },
+    {
+      "path": "static/icons/favicon.ico",
+      "hash": "029956c0d9c5badf7a97ee3ea40d54312278f08d43a9d9af76c6b9d0d43951de",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/icons/favicon.ico"
+    },
+    {
+      "path": "static/icons/icon-192.png",
+      "hash": "8249b2cd9aaf2204f70ea394ac47bce83975cacd20c846c0bfb9417ceac848ee",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/icons/icon-192.png"
+    },
+    {
+      "path": "static/icons/icon-512.png",
+      "hash": "1f8696713bfbd46dcad9935c2eaa3635412d95b8935568dbe65b59531799a15c",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/icons/icon-512.png"
+    },
+    {
+      "path": "static/icons/maskable-192.png",
+      "hash": "8249b2cd9aaf2204f70ea394ac47bce83975cacd20c846c0bfb9417ceac848ee",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/icons/maskable-192.png"
+    },
+    {
+      "path": "static/icons/maskable-512.png",
+      "hash": "1f8696713bfbd46dcad9935c2eaa3635412d95b8935568dbe65b59531799a15c",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/icons/maskable-512.png"
+    },
+    {
+      "path": "scripts/capture_gsc.py",
+      "hash": "2f0d540aeccbba5d9c105fe5ee33071b6a57f4845a3eac994feda8d9f8070586",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/capture_gsc.py"
+    },
+    {
+      "path": "scripts/generate_health_report.py",
+      "hash": "ee1ef7a654ca7d75e61d41202f9694dd6f790e994efc35bbb59441d567f47006",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_health_report.py"
+    },
+    {
+      "path": "scripts/generate_report.py",
+      "hash": "45705213950d90cf80f6d79501c5dab0f1d00c487e8612a9ed7903a78f6d52b9",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_report.py"
+    },
+    {
+      "path": "scripts/generate_seo_onpage_phase2.py",
+      "hash": "54f22628664b41e3764ee229f5d6724b235fea9193f92346097cf9a826ca965d",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seo_onpage_phase2.py"
+    },
+    {
+      "path": "scripts/onpage_cover.png",
+      "hash": "1da0a2cdda2622b9453802f90772ed36176003eb348984b8210fed0f6ebef04d",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/onpage_cover.png"
+    },
+    {
+      "path": "scripts/template_alt_suggestions.xlsx",
+      "hash": "55da5115bda26b1dda8fa26a177854688b8b50a9415df2e9aedf1df13e59fb0a",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/template_alt_suggestions.xlsx"
+    },
+    {
+      "path": "scripts/template_canonical_suggestions.xlsx",
+      "hash": "3609e6ce7a3a62d0c32eeae149ea3cd946714feb41d133a0c884178d950df66d",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/template_canonical_suggestions.xlsx"
+    },
+    {
+      "path": "scripts/template_meta_suggestions.xlsx",
+      "hash": "c963234e58470008b9f940370164a82b2294684842b2424664f318a2cc4e25b4",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/template_meta_suggestions.xlsx"
+    },
+    {
+      "path": "scripts/template_website_audit.xlsx",
+      "hash": "6337496bf1f65b7ed3a80e187fd0fbed9f3dafadbe20b8ba74fc7dc40365355c",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/template_website_audit.xlsx"
+    },
+    {
+      "path": "templates/index.html",
+      "hash": "0eee349697a0248423d7c66c9d7199c03ebd357c9e116633c4c5c70f565fce7a",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
+    },
+    {
+      "path": "brief_analysis.py",
+      "hash": "676d7a0ab64db2a927e695b618651b5f89a034efe9332ae4a5a766c9854eba46",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/brief_analysis.py"
+    },
+    {
+      "path": "python/Lib/site-packages/openpyxl_bundle.zip",
+      "hash": "4243fa5ecce1341639f416f963c771db4c09fbaa62a090f1edb7d79527808a32",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/python/Lib/site-packages/openpyxl_bundle.zip"
+    },
+    {
+      "path": "python/Lib/site-packages/zz_openpyxl_ota.pth",
+      "hash": "6bf09f2f091b38ad169e7db95893063dca5e0a559a76386a5b5b808b7a8f56cd",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/python/Lib/site-packages/zz_openpyxl_ota.pth"
+    },
+    {
+      "path": "Start Tool.vbs",
+      "hash": "1a05efd8af140112e124afb194aef3978587ce29c86c14163cfa9afda584ac9c",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/Start%20Tool.vbs"
+    },
+    {
+      "path": "app_launch.ps1",
+      "hash": "ae16b5d83b5254797912e340a654193cfe5f518c719533f6df40f6cb0a731905",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/app_launch.ps1"
+    },
+    {
+      "path": "splash.ps1",
+      "hash": "373a1e646837924e347d8987cbd751030d0d23ebcd8e3a005a3e612c1d7964a1",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/splash.ps1"
+    }
+  ]
+}

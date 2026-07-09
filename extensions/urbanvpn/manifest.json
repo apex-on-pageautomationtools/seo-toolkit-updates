@@ -1,0 +1,105 @@
+{
+  "name": "__MSG_appName__",
+  "description": "__MSG_appDesc__",
+  "default_locale": "en",
+  "homepage_url": "https://www.urban-vpn.com/",
+  "manifest_version": 3,
+  "action": {
+    "default_icon": "icons/icon-pink-16.png",
+    "default_title": "Urban VPN",
+    "default_popup": "popup/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*/*",
+        "http://*/*"
+      ],
+      "js": [
+        "ad-blocker/content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
+    },
+    {
+      "matches": [
+        "https://*/*",
+        "http://*/*"
+      ],
+      "js": [
+        "content/content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon-pink-16.png",
+    "48": "icons/icon-pink-48.png",
+    "128": "icons/icon-pink-128.png"
+  },
+  "permissions": [
+    "webRequestAuthProvider",
+    "offscreen",
+    "alarms",
+    "management",
+    "proxy",
+    "scripting",
+    "storage",
+    "tabs",
+    "webNavigation",
+    "webRequest"
+  ],
+  "optional_permissions": [
+    "privacy"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "/content/anti-male-ware-notification/index.html",
+        "/content/safe-price-check-notification/index.html",
+        "/content/vpn-notification/index.html",
+        "/content/terminated-connection-notification/index.html",
+        "/content/consent-reminder-notification/index.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    },
+    {
+      "resources": [
+        "/content/location/location.js"
+      ],
+      "matches": [
+        "https://*/*",
+        "http://*/*"
+      ]
+    },
+    {
+      "resources": [
+        "/libs/extend-native-history-api.js",
+        "/libs/requests.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    },
+    {
+      "resources": [
+        "executors/*"
+      ],
+      "matches": [
+        "*://*/*"
+      ]
+    }
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "https://*.bugsnag.com/*"
+  ],
+  "background": {
+    "service_worker": "service-worker/index.js"
+  },
+  "minimum_chrome_version": "110.0",
+  "version": "5.12.6"
+}

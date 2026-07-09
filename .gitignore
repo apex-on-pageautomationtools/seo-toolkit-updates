@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+chrome_profile*/
+*.log
+*.csv
+*.zip
+.env
+python/
+.auth_token
+.grc_port
+.update_log
+autosave_results.json
+gsc_profile/
+extensions/**/secrets.txt
+extensions/**/.DS_Store
+
+# Sensitive data - API keys, secrets, credentials
+config.json
+.gsc_accounts
+*.token
+*.credentials
+profiles/

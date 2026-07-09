@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offline — Rank Checker</title>
+<style>
+  :root{color-scheme:light dark}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;
+    font-family:'Segoe UI',Roboto,system-ui,sans-serif;
+    background:#f4f6fb;color:#1a1c1e}
+  @media (prefers-color-scheme:dark){body{background:#0d0f12;color:#e6e8ec}}
+  .card{text-align:center;padding:40px;max-width:380px}
+  .ic{width:84px;height:84px;border-radius:28px;margin:0 auto 22px;
+    background:linear-gradient(160deg,#3391ff,#4a56e2);display:grid;place-items:center}
+  h1{font-size:22px;font-weight:800;margin:0 0 8px}
+  p{font-size:15px;line-height:1.6;opacity:.7;margin:0 0 22px}
+  button{padding:12px 26px;border:none;border-radius:18px;font-size:15px;font-weight:700;
+    background:#3391ff;color:#fff;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="ic">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2">
+        <path d="M1 1l22 22"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/>
+        <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/>
+        <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+        <line x1="12" y1="20" x2="12.01" y2="20"/>
+      </svg>
+    </div>
+    <h1>You're offline</h1>
+    <p>Rank Checker needs the local server running to talk to Google. Start the app, then reconnect.</p>
+    <button onclick="location.href='/'">Try again</button>
+  </div>
+</body>
+</html>

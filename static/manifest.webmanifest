@@ -1,0 +1,32 @@
+{
+  "name": "SEO Toolkit Pro",
+  "short_name": "SEO Toolkit",
+  "description": "All-in-one SEO tool — keyword ranking, index checker, backlink status, on-page reports.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#f4f6fb",
+  "theme_color": "#3391ff",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["productivity", "business", "utilities"],
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/static/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Keyword Ranking", "short_name": "Ranking", "url": "/?tab=ranking",
+      "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Google Indexing Checker", "short_name": "Index", "url": "/?tab=index",
+      "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Backlink Status", "short_name": "Backlink", "url": "/?tab=backlink",
+      "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "SEO On-Page Report", "short_name": "On-Page", "url": "/?tab=onpage",
+      "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
