@@ -2802,6 +2802,230 @@ def build_kappa(data, out_path, log_fn=None):
     log_fn(f"  Kappa report saved: {os.path.basename(out_path)}")
 
 
+def build_w3era_g(data, out_path, log_fn=None):
+    """W3era Quick FVR G — DOCX brief report, verified against the client
+    reference "W3era Quick - FVR G.docx" (toronto-roofer.com): same E1F2F1
+    banner / navy #2F5496 title / red #C00000 "Required Action" convention as
+    Beta, but a reduced table set (no Canonical Tags table) and a separate
+    "Domain Authority & Page Authority" table split out from the Semrush
+    overview table. Phrasing references "Screaming Frog" audits per the
+    reference wording."""
+    if log_fn is None:
+        log_fn = print
+    from docx.shared import Pt, RGBColor
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
+    import generate_health_report as hr
+
+    domain = data["domain"]
+    home = f"https://{domain}/"
+    from docx import Document
+    doc = Document()
+    for sname in ("Normal", "List Paragraph"):
+        try:
+            st = doc.styles[sname]
+            st.font.name = "Calibri"
+            st.font.size = Pt(11)
+        except KeyError:
+            pass
+
+    BLACK = RGBColor(0x00, 0x00, 0x00)
+    NAVY = RGBColor(0x2F, 0x54, 0x96)
+    RED = RGBColor(0xC0, 0x00, 0x00)
+
+    def _run(p, text, bold=False, color=BLACK, size=11):
+        r = p.add_run(text)
+        r.font.name = "Calibri"
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        if color is not None:
+            r.font.color.rgb = color
+        return r
+
+    def banner(text, fill="E1F2F1", color=NAVY):
+        table = doc.add_table(rows=1, cols=1)
+        cell = table.rows[0].cells[0]
+        p = cell.paragraphs[0]
+        _run(p, text, bold=True, color=color, size=13)
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:fill'), fill)
+        shd.set(qn('w:val'), 'clear')
+        cell._tc.get_or_add_tcPr().append(shd)
+        doc.add_paragraph()
+        return table
+
+    def body(text, bold=False):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=bold, color=BLACK, size=11)
+        return p
+
+    def labeled(label, text="", label_bold=True, label_color=BLACK):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, label, bold=label_bold, color=label_color, size=11)
+        if text:
+            _run(p, text, bold=False, color=BLACK, size=11)
+        return p
+
+    def required_action(text):
+        labeled("Required Action: ", text, label_color=RED)
+
+    def shot(key):
+        src = (data.get("screenshots") or {}).get(key)
+        if src and Path(src).exists():
+            try:
+                hr._add_bordered_image(doc, src)
+            except Exception:
+                pass
+
+    # ---- Title / intro ----
+    p = doc.add_paragraph()
+    _run(p, f"Brief Website Analysis Report — {domain}", bold=True, color=BLACK, size=18)
+    body(f"After examining the website ({home}) in great detail, we have identified some search "
+         "engine optimization (SEO) factors that are essential for improving its visibility and "
+         "performance.")
+    body("These factors could potentially boost the website's search engine ranking. We have "
+         "identified both technical and content-related issues that need attention.")
+    body("With our consistent and effective SEO practices, we believe that we can help your "
+         "website achieve a favourable position in search engine results.")
+
+    # ---- Meta Optimization ----
+    banner("Meta Optimization")
+    body("Metadata plays a crucial role in search engine optimization (SEO) as it provides a "
+         "concise summary of the content on a specific page.")
+    titles = data.get("titles", []) or []
+    body("During the audit, we reviewed the page title tags across the website and found that "
+         "title tags are implemented on all crawled pages.")
+    required_action(f"During the Screaming Frog Page Titles audit of {home}, we scanned "
+                     f"{len(titles)} indexed URL(s) and reviewed the title tag length and "
+                     "uniqueness across the crawl.")
+    p = doc.add_paragraph()
+    _run(p, "Meta Descriptions", bold=True, color=BLACK, size=11)
+    metas = data.get("metas", []) or []
+    body("We reviewed the website's meta descriptions and found that they are implemented "
+         "across all crawled pages, which is a positive sign for search visibility.")
+    required_action(f"During the Screaming Frog Meta Description audit for {home}, we scanned "
+                     f"{len(metas)} indexed URL(s) and reviewed description length and "
+                     "uniqueness across the crawl.")
+
+    # ---- Heading Tag Optimization ----
+    banner("Heading Tag Optimization")
+    body("Heading tags are an important part of on-page SEO, as they help search engines "
+         "understand the structure and relevance of the content on a page.")
+    headers = data.get("headers", []) or []
+    required_action(f"During the Screaming Frog H1 audit for {home}, we scanned "
+                     f"{len(headers)} URL(s) and reviewed heading tag implementation across the "
+                     "crawl.")
+
+    # ---- Robots.txt Optimization ----
+    banner("Robots.txt Optimization")
+    body("The robots.txt file in SEO is a file placed on a website's server to give instructions "
+         "to web crawlers (like Googlebot) about which pages or sections of the site should or "
+         "should not be crawled.")
+    labeled("Page URL - ", f"{home}robots.txt")
+    body("Screenshot")
+    shot("robots")
+    robots = data.get("robots", {}) or {}
+    if robots.get("found"):
+        required_action(f"We reviewed the robots.txt file for {home} and found it accessible "
+                         f"at {home}robots.txt.")
+    else:
+        required_action(f"We reviewed the robots.txt file for {home} and found it is not "
+                         "currently accessible. We recommend creating one to guide search "
+                         "engine crawlers.")
+
+    # ---- XML Sitemap Optimization ----
+    banner("XML Sitemap Optimization")
+    body("XML sitemaps are a crucial aspect of search engine optimization (SEO) because they help "
+         "search engines discover and crawl the pages of a website more efficiently.")
+    sitemap = data.get("sitemap", {}) or {}
+    sm_url = sitemap.get("url_checked", f"{home}wp-sitemap.xml")
+    labeled("Page URL - ", sm_url)
+    labeled("Screenshot:", "")
+    shot("sitemap")
+    if sitemap.get("found") or sitemap.get("ok"):
+        required_action(f"We found that the XML sitemap at {sm_url} is accessible and properly "
+                         "configured.")
+    else:
+        required_action(f"We found that the expected XML sitemap at {sm_url} is not "
+                         "accessible. We recommend creating and properly configuring one.")
+
+    # ---- Schema Optimization ----
+    banner("Schema Optimization")
+    body("Schema markup is a standardized structured data format that helps search engines better "
+         "understand website content and can enhance search results with rich snippets.")
+    required_action(f"During the Rich Results analysis for {home}, we found that the website "
+                     "would benefit from additional relevant schema types to help search "
+                     "engines better understand your business.")
+
+    # ---- Broken Links ----
+    banner("Broken Links")
+    body("Internal links are an essential component of search engine optimization (SEO) because "
+         "they help establish the structure of a website and distribute page authority.")
+    bl_checked = data.get("broken_links_checked", 0)
+    broken = data.get("broken_links", []) or []
+    if broken:
+        required_action(f"During the website crawl for {home}, we found that {bl_checked} "
+                         f"URL(s) were scanned, and {len(broken)} broken link(s) were "
+                         "identified. Kindly refer to the attached sheet for details.")
+    else:
+        required_action(f"During the website crawl for {home}, we found that {bl_checked} "
+                         "URL(s) were scanned, and no broken links were found.")
+
+    # ---- Backlinks Analysis ----
+    banner("Backlinks Analysis")
+    body("Backlinks are important in SEO. They are links from other websites to your website, "
+         "acting as a \"vote of confidence\" for search engines.")
+    body("I have provided score metrics from different SEO tools, which are as follows:")
+
+    # ---- Semrush overview ----
+    banner("Semrush overview")
+    body("Note — Please refer to the attached Semrush overview screenshot for this domain's "
+         "Authority Score, organic traffic, organic keywords, referring domains and backlinks.")
+
+    # ---- Google Indexing ----
+    banner("Google Indexing")
+    body("Index pages are web pages that Google has discovered and added to their index for "
+         "search results. Being indexed doesn't guarantee ranking, but it's a prerequisite for "
+         "appearing in search results.")
+    idx = data.get("indexing", {}) or {}
+    labeled("Page URL: ", f"site:{home}")
+    body("Screenshot:")
+    shot("serp")
+    required_action(f"During the audit, we found that the Google search operator "
+                     f"site:{home} returned approximately {idx.get('count', 'N/A')} "
+                     f"indexed page(s). {idx.get('status', '')}")
+
+    # ---- Domain Authority & Page Authority ----
+    banner("Domain Authority & Page Authority")
+    da_pa = data.get("da_pa") or {}
+    da_val, dr_val = da_pa.get("da", "—"), da_pa.get("dr", "—")
+    if da_val != "—" or dr_val != "—":
+        body(f"During the domain overview audit for {home}, we found that the website has a "
+             f"Domain Authority (DA) of {da_val} and a Domain Rating (DR) of {dr_val}.")
+        required_action(f"During the audit, we found that {home} has a Domain Authority (DA) "
+                         f"of {da_val}. We recommend building high-quality backlinks from "
+                         "authoritative domains to strengthen the backlink profile.")
+    else:
+        body("Note — Domain Authority / Domain Rating could not be retrieved automatically for "
+             "this domain. Please check manually via a DA/DR checker tool.")
+        required_action(f"During the audit, we recommend building high-quality backlinks from "
+                         "authoritative domains to strengthen the backlink profile of "
+                         f"{home}.")
+
+    # ---- Conclusion ----
+    banner("Conclusion -", color=RED)
+    body("After reviewing the points mentioned above, we are confident that addressing them will "
+         "cover the major aspects of SEO for the website and help improve its overall search "
+         "engine visibility and performance.")
+
+    doc.save(out_path)
+    log_fn(f"  W3era Quick FVR G report saved: {os.path.basename(out_path)}")
+
+
 # ---------------------------------------------------------------------------
 # Format registry & main entry
 # ---------------------------------------------------------------------------
@@ -3244,6 +3468,7 @@ BRIEF_FORMATS = {
     "camila": {"label": "Camila (16 slides, gold titles)", "builder": build_camila, "ext": "pptx"},
     "eta": {"label": "ETA (DOCX, plain lettered sections)", "builder": build_eta, "ext": "docx"},
     "kappa": {"label": "Kappa (DOCX, black paragraph banners)", "builder": build_kappa, "ext": "docx"},
+    "w3era_g": {"label": "W3era Quick FVR G (DOCX, teal banners)", "builder": build_w3era_g, "ext": "docx"},
 }
 
 
