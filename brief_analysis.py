@@ -3309,6 +3309,283 @@ def build_beta_bhargu_fvr(data, out_path, log_fn=None):
     return out_path
 
 
+def build_w3era_r(data, out_path, log_fn=None):
+    """W3era Quick FVR R — 17-slide PPTX, verified against the client
+    reference "W3era Quick FVR R.pptx" (infoqraf.com): navy (#002060)
+    title-case cover, red (#C00000)/green (#00B050) Index slide (same
+    red/green pair as Camila, but a distinct dark-red-brown #73330B
+    section-title color, title-case not ALL-CAPS), 14 topic slides plus a
+    closing "Semrush Overview" slide (Semrush isn't integrated so it stays a
+    manual-attach note, same convention as Beta/ETA)."""
+    if log_fn is None:
+        log_fn = print
+    Presentation, Inches, Pt, Emu, RGBColor, PP_ALIGN, MSO_ANCHOR = _init_pptx()
+
+    prs = Presentation()
+    prs.slide_width = Inches(13.33)
+    prs.slide_height = Inches(7.5)
+
+    NAVY = "#002060"
+    TITLE_CLR = "#73330B"
+    BLACK = "#000000"
+    RED = "#C00000"
+    GREEN = "#00B050"
+
+    domain = data["domain"]
+    date_str = data["date"]
+    home = f"https://{domain}/"
+
+    idx = data.get("indexing", {}) or {}
+    titles = data.get("titles", []) or []
+    metas = data.get("metas", []) or []
+    headers = data.get("headers", []) or []
+    sitemap = data.get("sitemap", {}) or {}
+    canonicals = data.get("canonicals", []) or []
+    robots = data.get("robots", {}) or {}
+    img_alts = data.get("img_alts", []) or []
+    broken_links = data.get("broken_links", []) or []
+    bl_checked = data.get("broken_links_checked", 0)
+    redirects = data.get("redirects", []) or []
+    da_pa = data.get("da_pa") or {}
+
+    title_ok = bool(titles) and all(t.get("status") == "Good" for t in titles)
+    meta_ok = bool(metas) and all(m.get("status") == "Good" for m in metas)
+    h1_ok = bool(headers) and all(h.get("h1") == 1 for h in headers)
+    h2_ok = bool(headers) and all(h.get("h2", 0) >= 1 for h in headers)
+    idx_ok = not _is_empty(idx.get("count"))
+    da_ok = (da_pa.get("da") not in (None, "—"))
+    canon_ok = bool(canonicals) and all(c.get("status") == "Good" for c in canonicals)
+    img_ok = bool(img_alts) and all(a.get("present") == "Yes" for a in img_alts)
+    sm_ok = bool(sitemap.get("found") or sitemap.get("ok"))
+    redirect_ok = bool(redirects)
+    robots_ok = bool(robots.get("found"))
+    bl_ok = bl_checked > 0 and not broken_links
+
+    # ---- Slide 1: Cover ----
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    _text(s, f"Website: {home}", 1.6, 3.4, 8.5, 0.5, 16, "Calibri", BLACK, bold=True)
+    _text(s, f"Date: {date_str}", 1.6, 3.9, 8.0, 0.5, 16, "Calibri", BLACK, bold=True)
+    _text(s, "Website Audit Report", 1.6, 1.8, 9.0, 0.9, 48, "Calibri", NAVY)
+
+    # ---- Slide 2: Index ----
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    _text(s, "Index:", 1.5, 0.6, 9.0, 0.9, 44, "Calibri", NAVY)
+    index_items = [
+        ("Meta title: ", title_ok),
+        ("Meta Description: ", meta_ok),
+        ("H1 Heading Tags: ", h1_ok),
+        ("H2 Heading Tags: ", h2_ok),
+        ("Website Indexing: ", idx_ok),
+        ("Domain Authority & Page Authority: ", da_ok),
+        ("Canonical Tag: ", canon_ok),
+        ("Image Alt Tags: ", img_ok),
+        ("Schema Markup: ", False),
+        ("XML Sitemap: ", sm_ok),
+        ("Redirection: ", redirect_ok),
+        ("Robots.txt: ", robots_ok),
+        ("Broken Link: ", bl_ok),
+        ("Backlink Status: ", da_ok),
+        ("Semrush overview: ", False),
+    ]
+    box = prs.slides[-1].shapes.add_textbox(Inches(1.2), Inches(1.5), Inches(10.1), Inches(5.0))
+    tf = box.text_frame
+    tf.word_wrap = True
+    for i, (label, ok) in enumerate(index_items):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        r1 = p.add_run(); r1.text = label
+        r1.font.size = Pt(17); r1.font.name = "Arial"; r1.font.bold = True
+        r1.font.color.rgb = _C(BLACK)
+        r2 = p.add_run(); r2.text = "Optimized" if ok else "Not Optimized"
+        r2.font.size = Pt(17); r2.font.name = "Arial"; r2.font.bold = True
+        r2.font.color.rgb = _C(GREEN if ok else RED)
+
+    # ---- Slides 3-17: topics ----
+    shots = data.get("screenshots", {}) or {}
+
+    def topic_slide(title, result_text, shot_key=None, label="Result", intro=None):
+        s = prs.slides.add_slide(prs.slide_layouts[6])
+        _text(s, title, 1.2, 0.35, 10.8, 0.9, 40, "Calibri", TITLE_CLR)
+        y = 1.55
+        if intro:
+            _text(s, intro, 1.2, y, 10.9, 1.0, 14, "Calibri", BLACK)
+            y += 1.05
+        if shot_key and shots.get(shot_key):
+            has_shot = _place_image(s, shots.get(shot_key), 1.2, y, 10.9, 2.4)
+            if has_shot:
+                y += 2.65
+        box = s.shapes.add_textbox(Inches(1.2), Inches(y), Inches(10.9), Inches(2.6))
+        tf = box.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        r1 = p.add_run(); r1.text = label
+        r1.font.size = Pt(18); r1.font.name = "Calibri"; r1.font.bold = True
+        r1.font.color.rgb = _C(BLACK)
+        r2 = p.add_run(); r2.text = " "
+        r2.font.size = Pt(18); r2.font.name = "Calibri"; r2.font.bold = True
+        r2.font.color.rgb = _C(BLACK)
+        r3 = p.add_run(); r3.text = result_text
+        r3.font.size = Pt(16); r3.font.name = "Calibri"; r3.font.bold = False
+        r3.font.color.rgb = _C(BLACK)
+        return s
+
+    # Meta Title
+    if titles:
+        t = titles[0]
+        topic_slide("Meta Title",
+                     f"The audit found that the homepage title tag is {t.get('chars', '?')} "
+                     f"character(s) — {t.get('status', 'N/A')}.",
+                     "viewsource", label="Result:")
+    else:
+        topic_slide("Meta Title", UNVERIFIED, "viewsource", label="Result:")
+
+    # Meta Description
+    if metas:
+        m = metas[0]
+        topic_slide("Meta Description",
+                     f"The homepage meta description is {m.get('chars', '?')} character(s) — "
+                     f"{m.get('status', 'N/A')}.",
+                     "viewsource", label="Result:")
+    else:
+        topic_slide("Meta Description", UNVERIFIED, "viewsource", label="Result:")
+
+    # H1 Tag
+    if headers:
+        h = headers[0]
+        topic_slide("H1 Tag",
+                     f"The homepage contains {h.get('h1', 0)} H1 tag(s). SEO best practices "
+                     "recommend exactly one H1 tag per page.",
+                     "homepage", label="Result:")
+    else:
+        topic_slide("H1 Tag", UNVERIFIED, "homepage", label="Result:")
+
+    # H2 Tag
+    if headers:
+        h = headers[0]
+        topic_slide("H2 Tag",
+                     f"The homepage contains {h.get('h2', 0)} H2 tag(s), which helps establish "
+                     "content hierarchy for search engines.",
+                     "homepage", label="Result:")
+    else:
+        topic_slide("H2 Tag", UNVERIFIED, "homepage", label="Result:")
+
+    # Website Indexing
+    topic_slide("Website Indexing",
+                 f"The audit shows that approximately {idx.get('count', 'N/A')} page(s) are "
+                 f"indexed by Google. {idx.get('status', '')}",
+                 "serp", label="Result:")
+
+    # Domain Authority & Page Authority
+    da_val, dr_val, pa_val = da_pa.get("da", "—"), da_pa.get("dr", "—"), da_pa.get("pa", "—")
+    if da_ok:
+        topic_slide("Domain Authority & Page Authority",
+                     f"The website has a Domain Authority (DA) of {da_val} and Page Authority "
+                     f"(PA) of {pa_val}.",
+                     label="Result:")
+    else:
+        topic_slide("Domain Authority & Page Authority", UNVERIFIED, label="Result:")
+
+    # Canonical Tag
+    canon_intro = ("A canonical tag tells search engines which URL should be treated as the "
+                   "master copy of a page, preventing duplicate content issues.")
+    if canon_ok:
+        topic_slide("Canonical Tag",
+                     "The website has a properly implemented self-referencing canonical tag.",
+                     label="Result:", intro=canon_intro)
+    else:
+        topic_slide("Canonical Tag",
+                     "The website's canonical tag implementation needs review to ensure each "
+                     "page correctly identifies its preferred URL version.",
+                     label="Result:", intro=canon_intro)
+
+    # Image Alt Tag
+    missing_alt = len([a for a in img_alts if a.get("present") != "Yes"])
+    if img_alts:
+        topic_slide("Image Alt Tag",
+                     f"The homepage contains {len(img_alts)} image(s), of which {missing_alt} "
+                     "are missing ALT text.",
+                     label="Result:")
+    else:
+        topic_slide("Image Alt Tag", UNVERIFIED, label="Result:")
+
+    # Schema Markup
+    schema_intro = ("Schema markup (structured data) helps search engines better understand "
+                     "website content and can enable rich results.")
+    topic_slide("Schema Markup",
+                 "We recommend implementing relevant schema types to help search engines "
+                 "better understand your business.",
+                 label="Result:", intro=schema_intro)
+
+    # Sitemap.xml
+    sm_url = sitemap.get("url_checked", f"{home}sitemap.xml")
+    sm_intro = ("Sitemap informs search engine about available for crawling. A Sitemap is an "
+                "XML file that lists URLs for a site along with additional metadata.")
+    if sm_ok:
+        topic_slide("Sitemap.xml",
+                     f"The website's XML sitemap ({sm_url}) is accessible and properly "
+                     "configured.",
+                     "sitemap", label="Result:", intro=sm_intro)
+    else:
+        topic_slide("Sitemap.xml",
+                     f"The website's XML sitemap ({sm_url}) is not accessible.",
+                     "sitemap", label="Result:", intro=sm_intro)
+
+    # Redirection
+    if redirects:
+        r = redirects[0]
+        topic_slide("Redirection",
+                     f"The audit indicates that the tested URL redirect status is "
+                     f"{r.get('status', 'N/A')} — {r.get('detail', '')}",
+                     label="Results :")
+    else:
+        topic_slide("Redirection", UNVERIFIED, label="Results :")
+
+    # Robots.txt
+    rb_intro = ("The robots.txt file is a text file that tells web robots (mainly search "
+                "engines) which pages to crawl and which to skip.")
+    if robots_ok:
+        topic_slide("Robots.txt",
+                     f"The website has a robots.txt file in place at {home}robots.txt.",
+                     "robots", label="Result:", intro=rb_intro)
+    else:
+        topic_slide("Robots.txt",
+                     f"The website does not have an accessible robots.txt file at "
+                     f"{home}robots.txt.",
+                     "robots", label="Result:", intro=rb_intro)
+
+    # Broken Link
+    if broken_links:
+        topic_slide("Broken Link",
+                     f"The audit identified broken links (404 errors) — {len(broken_links)} "
+                     f"out of {bl_checked} URL(s) scanned.",
+                     label="Results :")
+    else:
+        topic_slide("Broken Link",
+                     f"The audit scanned {bl_checked} URL(s) and found no broken links.",
+                     label="Results :")
+
+    # Backlinks Status
+    bl_intro = ("Backlink status refers to the overall condition of a website's backlinks, "
+                "including the number, quality, authority, and relevance of the links pointing "
+                "to it.")
+    if da_ok:
+        topic_slide("Backlinks Status",
+                     f"The website currently has a Domain Rating (DR) of {dr_val}.",
+                     label="Result:", intro=bl_intro)
+    else:
+        topic_slide("Backlinks Status", UNVERIFIED, label="Result:", intro=bl_intro)
+
+    # Semrush Overview
+    topic_slide("Semrush Overview",
+                 "Note — Please refer to the attached Semrush overview screenshot for this "
+                 "domain's Authority Score, organic traffic, organic keywords and referring "
+                 "domains.",
+                 label="Results:")
+
+    prs.save(out_path)
+    log_fn(f"  W3era Quick FVR R report saved: {os.path.basename(out_path)}")
+    return out_path
+
+
 # ---------------------------------------------------------------------------
 # Format registry & main entry
 # ---------------------------------------------------------------------------
@@ -3753,6 +4030,7 @@ BRIEF_FORMATS = {
     "kappa": {"label": "Kappa (DOCX, black paragraph banners)", "builder": build_kappa, "ext": "docx"},
     "w3era_g": {"label": "W3era Quick FVR G (DOCX, teal banners)", "builder": build_w3era_g, "ext": "docx"},
     "beta_bhargu": {"label": "Beta Bhargu FVR (16 slides, ALL-CAPS)", "builder": build_beta_bhargu_fvr, "ext": "pptx"},
+    "w3era_r": {"label": "W3era Quick FVR R (17 slides + Semrush)", "builder": build_w3era_r, "ext": "pptx"},
 }
 
 
