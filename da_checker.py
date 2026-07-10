@@ -49,6 +49,8 @@ def _try_rhinorank(driver, domain):
         time.sleep(8)
 
         src = driver.page_source
+        if _is_blocked(src):
+            return None
         da = _find_metric(src, ["domain authority", "DA"], limit=100)
         pa = _find_metric(src, ["page authority", "PA"], limit=100)
 
@@ -86,6 +88,8 @@ def _try_websiteseochecker(driver, domain):
         time.sleep(10)
 
         src = driver.page_source
+        if _is_blocked(src):
+            return None
         da = _find_metric(src, ["domain authority", "DA Score", "DA"], limit=100)
         pa = _find_metric(src, ["page authority", "PA Score", "PA"], limit=100)
 
@@ -122,6 +126,8 @@ def _try_dapa_checker(driver, domain):
         time.sleep(10)
 
         src = driver.page_source
+        if _is_blocked(src):
+            return None
         da = _find_metric(src, ["domain authority", "DA"], limit=100)
         pa = _find_metric(src, ["page authority", "PA"], limit=100)
 
@@ -158,6 +164,8 @@ def _try_da_checker_org(driver, domain):
         time.sleep(10)
 
         src = driver.page_source
+        if _is_blocked(src):
+            return None
         da = _find_metric(src, ["domain authority", "DA"], limit=100)
         pa = _find_metric(src, ["page authority", "PA"], limit=100)
 
@@ -194,6 +202,8 @@ def _try_teqtop(driver, domain):
         time.sleep(10)
 
         src = driver.page_source
+        if _is_blocked(src):
+            return None
         da = _find_metric(src, ["domain authority", "DA"], limit=100)
         pa = _find_metric(src, ["page authority", "PA"], limit=100)
 
@@ -203,6 +213,22 @@ def _try_teqtop(driver, domain):
     except Exception as e:
         logger.debug(f"teqtop failed: {e}")
     return None
+
+
+_BLOCK_MARKERS = (
+    "captcha", "recaptcha", "cf-turnstile", "cf-challenge", "verify you are human",
+    "verify you're human", "checking your browser", "attention required",
+    "unusual traffic", "security check", "access denied", "are you a robot",
+    "hcaptcha", "just a moment", "ddos protection",
+)
+
+
+def _is_blocked(html):
+    """True if this page is a CAPTCHA/bot-check/block wall rather than a real result.
+    A number scraped off a block page is not a real DA/PA value - returning "N/A" is
+    always better than silently returning wrong data."""
+    low = (html or "").lower()
+    return any(marker in low for marker in _BLOCK_MARKERS)
 
 
 def _find_metric(html, labels, limit=100):
