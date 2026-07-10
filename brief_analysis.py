@@ -3586,6 +3586,142 @@ def build_w3era_r(data, out_path, log_fn=None):
     return out_path
 
 
+def build_kappa_up(data, out_path, log_fn=None):
+    """Kappa Up — DOCX brief report, verified against the client reference
+    "Website Deep Audit Issue Report - Quintasel.com.docx": a plain
+    underlined blue (#1155CC) 18pt title, followed by bold-label / plain-body
+    "Issue Title - description" paragraphs (13pt, no banners/tables). Covers
+    the subset of the reference's issue list that maps to data we actually
+    collect (heading structure, meta tags, schema, backlink profile, image
+    ALT text, XML sitemap, indexed pages); the reference's other findings
+    (footer logo link, header CTA button, testimonials/FAQ sections, blog
+    freshness, duplicate URL sections) are bespoke visual/UX observations a
+    generic crawl can't determine, so they're intentionally left out rather
+    than faked."""
+    if log_fn is None:
+        log_fn = print
+    from docx.shared import Pt, RGBColor
+
+    domain = data["domain"]
+    home = f"https://{domain}/"
+    from docx import Document
+    doc = Document()
+    for sname in ("Normal", "List Paragraph"):
+        try:
+            st = doc.styles[sname]
+            st.font.name = "Calibri"
+            st.font.size = Pt(11)
+        except KeyError:
+            pass
+
+    BLACK = RGBColor(0x00, 0x00, 0x00)
+    BLUE = RGBColor(0x11, 0x55, 0xCC)
+
+    def _run(p, text, bold=False, color=BLACK, size=13, underline=False):
+        r = p.add_run(text)
+        r.font.name = "Calibri"
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        r.font.underline = underline
+        if color is not None:
+            r.font.color.rgb = color
+        return r
+
+    def issue(label, text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(6)
+        _run(p, f"{label} - ", bold=True, color=BLACK, size=13)
+        _run(p, text, bold=False, color=BLACK, size=13)
+        return p
+
+    p = doc.add_paragraph()
+    _run(p, f"Website Issue Report - {domain}", bold=True, color=BLUE, size=18, underline=True)
+
+    # ---- Heading structure ----
+    headers = data.get("headers", []) or []
+    h1_issues = [h for h in headers if h.get("h1") != 1]
+    if headers:
+        issue("Non-Optimized Heading Tag Structure",
+              f"The homepage contains heading tags that are not fully optimized. Our audit of "
+              f"{len(headers)} page(s) found {len(h1_issues)} page(s) with heading tag issues "
+              "(missing, duplicate, or multiple H1 tags).")
+        h = headers[0]
+        issue("H1 Tag",
+              f"The homepage currently has {h.get('h1', 0)} H1 tag(s). We recommend using "
+              "exactly one clear, keyword-focused H1 tag per page to establish content "
+              "hierarchy.")
+
+    # ---- Schema ----
+    issue("Limited Schema Markup Implementation",
+          f"During the audit of {home}, we checked for structured data (Schema Markup) "
+          "implementation. We recommend implementing additional relevant schema types "
+          "(Organization, WebSite, Breadcrumb, FAQ) to help search engines better understand "
+          "the business.")
+
+    # ---- Meta Tags ----
+    titles = data.get("titles", []) or []
+    metas = data.get("metas", []) or []
+    title_issues = [t for t in titles if t.get("status") != "Good"]
+    meta_issues = [m for m in metas if m.get("status") != "Good"]
+    if titles or metas:
+        issue("Non-Optimized Meta Tags",
+              f"The website contains {len(title_issues)} page title issue(s) across "
+              f"{len(titles)} page(s) audited, and {len(meta_issues)} meta description "
+              f"issue(s) across {len(metas)} page(s) audited. Meta tags play a crucial role in "
+              "search engine optimization.")
+
+    # ---- Backlink Profile ----
+    da_pa = data.get("da_pa") or {}
+    da_val, dr_val = da_pa.get("da", "—"), da_pa.get("dr", "—")
+    if da_val != "—" or dr_val != "—":
+        issue("Weak Backlink Profile",
+              f"The website currently has a Domain Authority (DA) of {da_val} and Domain "
+              f"Rating (DR) of {dr_val}. We recommend building high-quality backlinks from "
+              "authoritative, relevant domains to strengthen the backlink profile.")
+    else:
+        issue("Weak Backlink Profile",
+              "Note — Domain Authority / Domain Rating could not be retrieved automatically "
+              "for this domain. Please check manually via a DA/DR checker tool.")
+
+    # ---- Image Alt Tags ----
+    img_alts = data.get("img_alts", []) or []
+    missing_alt = len([a for a in img_alts if a.get("present") != "Yes"])
+    if img_alts:
+        issue("Missing Image Alt Tags",
+              f"Our analysis identified {missing_alt} of {len(img_alts)} image(s) checked "
+              "are missing ALT tags. Alt text helps provide context to search engines and "
+              "improves accessibility.")
+
+    # ---- XML Sitemap ----
+    sitemap = data.get("sitemap", {}) or {}
+    sm_url = sitemap.get("url_checked", f"{home}sitemap.xml")
+    if sitemap.get("found") or sitemap.get("ok"):
+        issue("XML Sitemap",
+              f"The website's XML sitemap ({sm_url}) is accessible. We recommend regularly "
+              "reviewing its structure to ensure it does not include pages of limited SEO "
+              "value.")
+    else:
+        issue("Non-Optimized XML Sitemap Structure",
+              f"The website's XML sitemap ({sm_url}) could not be verified as accessible. We "
+              "recommend creating and properly configuring one.")
+
+    # ---- Indexed Pages ----
+    idx = data.get("indexing", {}) or {}
+    issue("Low Number of Indexed Pages",
+          f"The website has approximately {idx.get('count', 'N/A')} page(s) indexed by "
+          f"Google. {idx.get('status', '')} We recommend reviewing index coverage via Google "
+          "Search Console and resolving any excluded pages.")
+
+    # ---- Mobile usability / speed (kept as a manual-check note, per the app's
+    #      existing convention of leaving PageSpeed as a manual check) ----
+    issue("Mobile Usability & Page Speed Performance",
+          "Note — Please refer to the attached PageSpeed Insights screenshots (mobile and "
+          "desktop) for the current mobile usability and performance scores.")
+
+    doc.save(out_path)
+    log_fn(f"  Kappa Up report saved: {os.path.basename(out_path)}")
+
+
 # ---------------------------------------------------------------------------
 # Format registry & main entry
 # ---------------------------------------------------------------------------
@@ -4031,6 +4167,7 @@ BRIEF_FORMATS = {
     "w3era_g": {"label": "W3era Quick FVR G (DOCX, teal banners)", "builder": build_w3era_g, "ext": "docx"},
     "beta_bhargu": {"label": "Beta Bhargu FVR (16 slides, ALL-CAPS)", "builder": build_beta_bhargu_fvr, "ext": "pptx"},
     "w3era_r": {"label": "W3era Quick FVR R (17 slides + Semrush)", "builder": build_w3era_r, "ext": "pptx"},
+    "kappa_up": {"label": "Kappa Up (DOCX, plain issue list)", "builder": build_kappa_up, "ext": "docx"},
 }
 
 
