@@ -2693,16 +2693,41 @@ def _looks_like_url(tok):
     return bool(_re.match(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$", t))   # bare domain
 
 
+def _split_keyword_rank(tok):
+    """'keyword:12' -> ('keyword', '12'); 'keyword' -> ('keyword', None). Only splits
+    on the LAST ':' when what follows looks like a ranking value (a number, or a
+    not-ranked marker like 'NR'/'Not Found'), so a keyword that happens to contain a
+    colon isn't misparsed."""
+    t = (tok or "").strip()
+    if ":" not in t:
+        return t, None
+    kw, _, rank = t.rpartition(":")
+    kw, rank = kw.strip(), rank.strip()
+    if not kw:
+        return t, None
+    if _re.match(r"^\d+(\.\d+)?$", rank) or rank.lower() in ("nr", "not found", "n/a"):
+        return kw, (rank or None)
+    return t, None
+
+
+def _looks_like_rank(tok):
+    """True if this token, on its own, looks like a ranking value rather than a
+    keyword (used when a Ranking column lands in its own field, e.g. from Excel)."""
+    t = (tok or "").strip().lower()
+    return bool(t) and (bool(_re.match(r"^\d+(\.\d+)?$", t)) or t in ("nr", "not found", "n/a"))
+
+
 def _parse_target_line(line):
-    """Parse one row into (page, [keywords]).
+    """Parse one row into (page, [keywords], {keyword: rank}).
 
     URL and keyword(s) may appear in EITHER column order, separated by a tab
-    (Excel paste), a '|' (documented manual format), or 2+ spaces. Keywords may
-    be comma-separated. Relative paths are kept as-is (the phase-2 script
-    resolves them against the domain via normalize_url)."""
+    (Excel paste), a '|' (documented manual format), or 2+ spaces. Keywords may be
+    comma-separated, each optionally suffixed 'keyword:12' with its ranking (from an
+    optional Ranking column in the team's sheet). Relative paths are kept as-is (the
+    phase-2 script resolves them against the domain via normalize_url)."""
     s = (line or "").strip()
     if not s:
-        return None, []
+        return None, [], {}
     if "\t" in s:
         parts = s.split("\t")
     elif "|" in s:
@@ -2713,7 +2738,7 @@ def _parse_target_line(line):
         parts = [s]
     parts = [p.strip() for p in parts if p.strip()]
     if not parts:
-        return None, []
+        return None, [], {}
 
     page = None
     kw_fields = []
@@ -2722,51 +2747,63 @@ def _parse_target_line(line):
             page = tok
         else:
             kw_fields.append(tok)
-    if page is None:                              # nothing url-like → first field is the page
+    if page is None:                              # nothing url-like -> first field is the page
         page, kw_fields = parts[0], parts[1:]
 
-    keywords = []
+    # A trailing lone field that's purely a ranking value (e.g. a separate Ranking
+    # column, not a "keyword:12" suffix) applies to the single preceding keyword field.
+    if len(kw_fields) >= 2 and _looks_like_rank(kw_fields[-1]) and "," not in kw_fields[-2]:
+        rank_tok = kw_fields.pop()
+        kw_fields[-1] = f"{kw_fields[-1]}:{rank_tok}"
+
+    keywords, ranks = [], {}
     for kf in kw_fields:
         for k in kf.split(","):
-            k = k.strip()
-            if k and k not in keywords:
-                keywords.append(k)
-    return page, keywords
+            kw, rank = _split_keyword_rank(k)
+            if kw and kw not in keywords:
+                keywords.append(kw)
+                if rank is not None:
+                    ranks[kw] = rank
+    return page, keywords, ranks
 
 
 def _parse_onpage_targets(raw_text):
-    """Pasted text -> flat [{"keyword":k, "page":url}] rows. This is the phase-2
-    loader's native form, which (unlike the grouped form) correctly keeps
+    """Pasted text -> flat [{"keyword":k, "page":url, "rank":r}] rows. This is the
+    phase-2 loader's native form, which (unlike the grouped form) correctly keeps
     URL-only pages that have no keyword. De-duplicated, first-seen order."""
     rows, seen = [], set()
     for line in (raw_text or "").splitlines():
-        page, kws = _parse_target_line(line)
+        page, kws, ranks = _parse_target_line(line)
         if not page:
             continue
         for k in (kws or [""]):
             key = (page, k)
             if key not in seen:
                 seen.add(key)
-                rows.append({"keyword": k, "page": page})
+                rows.append({"keyword": k, "page": page, "rank": ranks.get(k)})
     return rows
 
 
 def _targets_to_lines(rows):
-    """Flat rows -> 'URL | kw1, kw2' textarea lines (grouped by page)."""
+    """Flat rows -> 'URL | kw1, kw2:12' textarea lines (grouped by page), carrying
+    each keyword's ranking (if any) as a 'keyword:rank' suffix."""
     grouped, order = {}, []
     for r in rows:
         p = r["page"]
         if p not in grouped:
             grouped[p] = []
             order.append(p)
-        if r["keyword"] and r["keyword"] not in grouped[p]:
-            grouped[p].append(r["keyword"])
+        kw = r["keyword"]
+        disp = f"{kw}:{r['rank']}" if kw and r.get("rank") not in (None, "") else kw
+        if kw and disp not in grouped[p]:
+            grouped[p].append(disp)
     return [f"{p} | {', '.join(grouped[p])}" if grouped[p] else p for p in order]
 
 
 def _lines_from_excel(file_storage):
-    """Read an uploaded .xlsx into 'URL | kw1, kw2' lines, reusing the same
-    order-agnostic parsing as pasted text (header row / either column order)."""
+    """Read an uploaded .xlsx into 'URL | kw1, kw2:rank' lines, reusing the same
+    order-agnostic parsing as pasted text (header row / either column order; an
+    optional Ranking column is matched by header name, not fixed position)."""
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(file_storage.read()), data_only=True, read_only=True)
     raw_lines = []
@@ -2842,10 +2879,17 @@ def _run_onpage_report(domain, targets_json, fmt, no_capture):
     _log(f"Output dir: {out_dir}")
 
     try:
+        # GEMINI_API_KEY is synced centrally (Admin -> Sync API Keys, same as the PSI
+        # key) into CONFIG, not a machine env var - pass it through to the subprocess so
+        # suggest_meta()'s Gemini call works team-wide without per-machine setup.
+        proc_env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        gemini_key = CONFIG.get("gemini_api_key", "").strip()
+        if gemini_key:
+            proc_env["GEMINI_API_KEY"] = gemini_key
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1, cwd=SCRIPTS_DIR,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+            env=proc_env
         )
 
         for line in proc.stdout:
@@ -3478,7 +3522,7 @@ def api_auth_is_admin():
 # --------------------------------------------------------------------------- #
 # Admin config (Apps Script URL, admin key, API key sync)
 # --------------------------------------------------------------------------- #
-SENSITIVE_KEYS = {"psi_api_key", "gsc_client_id", "gsc_client_secret",
+SENSITIVE_KEYS = {"psi_api_key", "gemini_api_key", "gsc_client_id", "gsc_client_secret",
                   "admin_key", "auth_api_url", "user_auth_url", "gsc_projects"}
 
 @app.route("/api/admin/save_config", methods=["POST"])
@@ -3522,7 +3566,7 @@ def api_admin_sync_keys():
 
 @app.route("/api/admin/keys_status")
 def api_admin_keys_status():
-    key_names = {"psi_api_key": "PageSpeed API Key"}
+    key_names = {"psi_api_key": "PageSpeed API Key", "gemini_api_key": "Gemini API Key"}
     status = {}
     for k, label in key_names.items():
         val = CONFIG.get(k, "")

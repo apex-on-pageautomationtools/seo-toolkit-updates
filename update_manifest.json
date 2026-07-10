@@ -3,7 +3,7 @@
   "files": [
     {
       "path": "da_checker.py",
-      "hash": "d98bb1423a6b61045f56a557113da2f289cbae28e28f7caa04c1ccf11cde4e46",
+      "hash": "fd0a0a1b4452118ea856690f83efefe0845c92bb9585048238d7f7a85acaa287",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/da_checker.py"
     },
     {
@@ -28,7 +28,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "4ce24a8dcbe1d8e79a16a622ebcad33b9be7256c39bdc53361321b9c305459ad",
+      "hash": "bb2c741d803bcaf8676957c54a8457b42cbdef867ffa07d0081e699d86e5c672",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -103,7 +103,7 @@
     },
     {
       "path": "scripts/generate_seo_onpage_phase2.py",
-      "hash": "1bc655ae011b0745056f468c9dcd2ed7b12df88c9052f16d8ad261213a5e5481",
+      "hash": "b5b969dc336865b8b0a6a89ce8514c5b77b6948b682ca53a5a31c9834531f64d",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seo_onpage_phase2.py"
     },
     {
@@ -123,7 +123,7 @@
     },
     {
       "path": "scripts/template_meta_suggestions.xlsx",
-      "hash": "c963234e58470008b9f940370164a82b2294684842b2424664f318a2cc4e25b4",
+      "hash": "b57e2bf5fe2aebaa8dfabd71357cec1050a15c199fe8260e47dba47c0886c07c",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/template_meta_suggestions.xlsx"
     },
     {
@@ -133,7 +133,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "d274b4ed416661121d7191a6fe396e7920f1291acce2b3c99b072949b1e49d49",
+      "hash": "1392089a8a577f895587ba7ce5ea07fe3582e5d599bcf06210563d8d9d3e5e11",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {

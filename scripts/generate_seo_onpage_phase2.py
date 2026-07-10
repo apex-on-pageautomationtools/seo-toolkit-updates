@@ -96,14 +96,18 @@ def brand_from(domain, homepage_title=None, homepage_h1=None, og_site=None):
 
 
 def load_targets(targets_path, domain):
-    """Return ordered list of {page, keywords:[...]} grouped by page (primary first)."""
+    """Return ordered list of {page, keywords:[...], keyword_ranks:{kw:rank}} grouped by
+    page (primary first). The sheet's Keyword/Target Page/Ranking columns are matched by
+    HEADER NAME, not fixed position - the team's sheet can list them in any order/
+    sequence, and Ranking is optional. When a keyword already ranks in the top 20 (per
+    that Ranking column), suggest_meta() skips suggesting a new title for its page."""
     rows = []
     p = Path(targets_path)
     if p.suffix.lower() in (".xlsx", ".xlsm"):
         import openpyxl
         wb = openpyxl.load_workbook(p, data_only=True)
         ws = wb.active
-        # find the header row that has "Keyword" + "Target Page"
+        # find the header row that has "Keyword" + "Target Page" (Ranking optional)
         header_row = None
         for r in range(1, min(ws.max_row, 30) + 1):
             vals = [str(ws.cell(r, c).value or "").lower() for c in range(1, ws.max_column + 1)]
@@ -111,32 +115,44 @@ def load_targets(targets_path, domain):
                 header_row = r
                 kw_col = next(c for c, v in enumerate(vals, 1) if "keyword" in v)
                 pg_col = next(c for c, v in enumerate(vals, 1) if "page" in v)
+                rank_col = next((c for c, v in enumerate(vals, 1) if "rank" in v), None)
                 break
         if header_row:
             for r in range(header_row + 1, ws.max_row + 1):
                 kw = ws.cell(r, kw_col).value
                 pg = ws.cell(r, pg_col).value
+                rank = ws.cell(r, rank_col).value if rank_col else None
                 if kw and pg:
-                    rows.append({"keyword": str(kw).strip(), "page": str(pg).strip()})
+                    rows.append({"keyword": str(kw).strip(), "page": str(pg).strip(),
+                                 "rank": rank})
     else:
         data = json.loads(p.read_text(encoding="utf-8"))
         if data and isinstance(data[0], dict) and "keywords" in data[0]:
             # already grouped
             for item in data:
-                rows.extend({"keyword": k, "page": item["page"]} for k in item["keywords"])
+                ranks = item.get("keyword_ranks") or {}
+                rows.extend({"keyword": k, "page": item["page"], "rank": ranks.get(k)}
+                            for k in item["keywords"])
         else:
-            rows = [{"keyword": str(d.get("keyword", "")).strip(), "page": str(d.get("page", "")).strip()} for d in data]
+            rows = [{"keyword": str(d.get("keyword", "")).strip(),
+                     "page": str(d.get("page", "")).strip(),
+                     "rank": d.get("rank")} for d in data]
 
     # group, preserving first-seen page order and keyword order
     grouped = {}
+    ranks_by_page = {}
     for row in rows:
         page = normalize_url(row["page"], domain)
         if not page:
             continue
         grouped.setdefault(page, [])
+        ranks_by_page.setdefault(page, {})
         if row["keyword"]:
             grouped[page].append(row["keyword"])
-    return [{"page": pg, "keywords": kws} for pg, kws in grouped.items()]
+            if row.get("rank") not in (None, ""):
+                ranks_by_page[page][row["keyword"]] = row["rank"]
+    return [{"page": pg, "keywords": kws, "keyword_ranks": ranks_by_page.get(pg, {})}
+            for pg, kws in grouped.items()]
 
 
 def discover_targets(domain, dry_run=False, limit=12):
@@ -213,6 +229,7 @@ def _mock_page(url, keywords):
         "internal_links": [],
         "external_links": [],
         "status": 200,
+        "body_text": "",
     }
 
 
@@ -416,11 +433,22 @@ def _parse_html(html, url, status):
             internal.append(full)        # www / non-www both count as internal
         else:
             external.append(full)
+    # Visible body text (for content-keyword checks + smarter meta suggestions) - built
+    # from a fresh soup so removing script/style/nav/footer/header here can't affect the
+    # link extraction above, which deliberately keeps nav/footer links (e.g. footer logo).
+    try:
+        text_soup = BeautifulSoup(html, "html.parser")
+        for tag in text_soup(["script", "style", "noscript"]):
+            tag.decompose()
+        body_text = re.sub(r"\s+", " ", text_soup.get_text(" ", strip=True))[:4000]
+    except Exception:
+        body_text = ""
+
     return {
         "url": url, "title": title, "description": desc, "h1": h1, "h1s": h1s,
         "og_site_name": og_site, "canonical": canonical, "lang": lang, "viewport": viewport,
         "images": images, "headings": headings, "internal_links": list(dict.fromkeys(internal)),
-        "external_links": list(dict.fromkeys(external)), "status": status,
+        "external_links": list(dict.fromkeys(external)), "status": status, "body_text": body_text,
     }
 
 
@@ -434,10 +462,11 @@ def _regex_parse(html, url, status):
     canon = find(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\'](.*?)["\']')
     canonical = f'<link rel="canonical" href="{canon}" />' if canon else ""
     lang = find(r'<html[^>]+lang=["\'](.*?)["\']')
+    body_text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))[:4000]
     return {"url": url, "title": re.sub("<[^>]+>", "", title), "description": desc,
             "h1": re.sub("<[^>]+>", "", h1), "h1s": [], "canonical": canonical, "lang": lang,
             "viewport": "viewport" in html.lower(), "images": [], "headings": [],
-            "internal_links": [], "external_links": [], "status": status}
+            "internal_links": [], "external_links": [], "status": status, "body_text": body_text}
 
 
 # ----------------------------------------------------------------- deliverables
@@ -467,23 +496,168 @@ def _ai_suggest(prompt):
         return None
 
 
-def suggest_meta(page_data, keywords, brand):
-    """Existing title/desc/H1 from the crawl. Suggested columns are left empty —
-    the user checks ranking/traffic manually and fills them in as needed."""
+_GENERIC_TITLES = {
+    "home", "home page", "about", "about us", "service", "services", "contact",
+    "contact us", "blog", "shop", "products", "product", "page", "welcome", "index",
+    "untitled", "portfolio", "team", "faq", "gallery", "our services", "our team",
+}
+
+
+def _title_needs_suggestion(title):
+    """Missing, or a short generic nav-label title like 'Home' / 'About' / 'Service'
+    that carries no real SEO signal."""
+    if not title or title == MISSING:
+        return True
+    t = title.strip().lower()
+    if t in _GENERIC_TITLES:
+        return True
+    return len(title.strip()) < 15
+
+
+def _best_rank_for_page(keywords, keyword_ranks):
+    """Lowest (best) numeric ranking among this page's keywords, or None if none of
+    them have a ranking value in the sheet."""
+    if not keyword_ranks:
+        return None
+    ranks = []
+    for k in keywords:
+        r = keyword_ranks.get(k)
+        if r is None or r == "":
+            continue
+        try:
+            ranks.append(float(r))
+        except (TypeError, ValueError):
+            continue
+    return min(ranks) if ranks else None
+
+
+def suggest_meta(page_data, keywords, brand, keyword_ranks=None):
+    """Existing title/desc/H1 from the crawl, plus a SUGGESTED title/description built
+    from the page's own content + its target keyword(s) - via free Gemini
+    (GEMINI_API_KEY) when available, else a content-aware heuristic (never a bare
+    "keyword | brand" slam-together).
+
+    A title is only suggested when it's missing or a short generic nav-label (e.g.
+    "Home", "About", "Service"). If the page already ranks in the top 20 for one of
+    its keywords (per an optional ranking column in the keyword sheet), the title
+    suggestion is skipped - a working title should not get overwritten - and the
+    sheet instead says to check it against the ranking. A description is suggested
+    whenever the existing one is missing."""
     existing_title = page_data["title"]
     existing_desc = page_data["description"]
     existing_h1 = page_data["h1"]
+    body_text = (page_data.get("body_text") or "")[:1500]
+    primary_kw = keywords[0] if keywords else ""
 
-    check_msg = "Check manually as per ranking and traffic"
+    best_rank = _best_rank_for_page(keywords, keyword_ranks)
+    ranked_well = best_rank is not None and best_rank <= 20
+    title_flagged = _title_needs_suggestion(existing_title)
+    need_title = title_flagged and not ranked_well
+    need_desc = (not existing_desc) or existing_desc == MISSING
+
+    suggested_title = None
+    suggested_desc = None
+
+    if title_flagged and ranked_well:
+        suggested_title = "Please check it as per the ranking"
+
+    if need_title or need_desc:
+        ai = None
+        if primary_kw:
+            prompt = (
+                "You are an SEO copywriter. For this webpage, write an SEO meta title "
+                "(50-60 characters) and meta description (140-160 characters).\n"
+                f"Page URL: {page_data['url']}\n"
+                f"Brand: {brand}\n"
+                f"Primary target keyword: {primary_kw}\n"
+                f"Other keywords for this page: {', '.join(keywords[1:5])}\n"
+                f"Existing H1: {existing_h1 if existing_h1 != MISSING else '(none)'}\n"
+                f"Page content excerpt: {body_text or '(not available)'}\n"
+                'Return ONLY JSON: {"title": "...", "description": "..."}. '
+                "The title and description must read naturally, reflect what THIS page "
+                "is actually about (use the content excerpt, not just the keyword), "
+                "include the primary keyword naturally, and end the title with the "
+                "brand name if it fits within the length.")
+            ai = _ai_suggest(prompt)
+        if isinstance(ai, dict) and ai.get("title") and ai.get("description"):
+            if need_title:
+                suggested_title = str(ai["title"]).strip()
+            if need_desc:
+                suggested_desc = str(ai["description"]).strip()
+        else:
+            # Heuristic fallback (no Gemini key, or the call failed) - still built from
+            # the page's own H1/content rather than a formulaic "keyword | brand".
+            topic = existing_h1 if existing_h1 and existing_h1 != MISSING else (primary_kw.title() or "Page")
+
+            def _trim(text, limit):
+                """Trim to a word boundary at or before `limit` chars (never mid-word)."""
+                text = text.strip()
+                if len(text) <= limit:
+                    return text
+                cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,-")
+                return cut or text[:limit]
+
+            if need_title:
+                if primary_kw and primary_kw.lower() not in topic.lower():
+                    suggested_title = f"{topic} - {primary_kw.title()} | {brand}"
+                else:
+                    suggested_title = f"{topic} | {brand}"
+                suggested_title = _trim(suggested_title, 60)
+            if need_desc:
+                snippet = _trim(body_text.strip(), 100).rstrip(" .!?")
+                if primary_kw and snippet:
+                    suggested_desc = _trim(f"{topic} - {snippet}.", 130) + \
+                        f" Explore {primary_kw} with {brand}."
+                elif primary_kw:
+                    suggested_desc = f"Discover {primary_kw} at {brand}. {topic}."
+                else:
+                    suggested_desc = f"{topic} - learn more at {brand}."
+                suggested_desc = _trim(suggested_desc, 160)
+
+    no_change_msg = "No changes needed - existing tag is already optimized"
     return {
         "page": page_data["url"],
         "existing_title": existing_title,
-        "suggested_title": check_msg,
+        "suggested_title": suggested_title or no_change_msg,
         "existing_description": existing_desc,
-        "suggested_description": check_msg,
+        "suggested_description": suggested_desc or no_change_msg,
         "existing_h1": existing_h1,
-        "suggested_h1": check_msg,
+        "suggested_h1": "Check manually as per ranking and traffic",
+        "content_match": check_content_keyword_match(page_data, keywords),
     }
+
+
+def check_content_keyword_match(page_data, keywords):
+    """Content-vs-keyword check, the same signal a dedicated content-checker tool
+    verifies: does this page's actual content - title, H1, and visible body text -
+    cover its target keyword(s)? Flags keywords missing from the content outright,
+    keywords that only appear in the title/H1 but never in the body copy, and a rough
+    body-text occurrence count for keywords that are present."""
+    if not keywords:
+        return "No target keyword(s) assigned"
+    title = (page_data.get("title") or "").lower()
+    h1 = (page_data.get("h1") or "").lower()
+    body = (page_data.get("body_text") or "").lower()
+    parts = []
+    for kw in keywords:
+        k = kw.strip().lower()
+        if not k:
+            continue
+        in_title, in_h1, count = k in title, k in h1, body.count(k)
+        if not in_title and not in_h1 and count == 0:
+            parts.append(f'"{kw}" - not found in title, H1, or body content')
+        elif count == 0:
+            where = "title" if in_title else "H1"
+            parts.append(f'"{kw}" - only in {where}, not found in body content')
+        else:
+            extra = []
+            if in_title:
+                extra.append("title")
+            if in_h1:
+                extra.append("H1")
+            suffix = f", also in {'/'.join(extra)}" if extra else ""
+            parts.append(f'"{kw}" - found {count}x in body content{suffix}')
+    return "; ".join(parts) if parts else "No target keyword(s) assigned"
 
 
 # Tracking pixels, font icons, analytics - skip entirely (not real images)
@@ -595,7 +769,8 @@ def write_meta_xlsx(metas, out_path):
     from openpyxl.styles import Alignment, Font
     wb, ws, proto = _clone_and_clear(TPL_META)
     rows = [[m["page"], m["existing_title"], m["suggested_title"], m["existing_description"],
-             m["suggested_description"], m["existing_h1"], m["suggested_h1"]] for m in metas]
+             m["suggested_description"], m["existing_h1"], m["suggested_h1"],
+             m.get("content_match", "")] for m in metas]
     _write_rows(ws, proto, rows)
     left = Alignment(horizontal="left", vertical="center", wrap_text=True)
     # The cloned template row styles the "existing" columns in red. Real existing
@@ -5844,6 +6019,7 @@ def main():
         log(f"   -> [crawl {i}/{total}] {t['page']}")
         pd = crawl_page(t["page"], t["keywords"], dry_run=args.dry_run)
         pd["keywords"] = t["keywords"]
+        pd["keyword_ranks"] = t.get("keyword_ranks") or {}
         pages_data.append(pd)
         if homepage is None or urllib.parse.urlparse(pd["url"]).path in ("", "/"):
             homepage = pd
@@ -5856,7 +6032,7 @@ def main():
 
     # deliverable data - Meta = existing + suggested (free Gemini if GEMINI_API_KEY,
     # else heuristic); plus alt suggestions + canonical recommendations.
-    metas = [suggest_meta(pd, pd["keywords"], brand) for pd in pages_data]
+    metas = [suggest_meta(pd, pd["keywords"], brand, pd.get("keyword_ranks")) for pd in pages_data]
     all_self_hosted, all_external_cdn = [], []
     for pd in pages_data:
         sh, ec = suggest_alt(pd, pd["keywords"], brand, domain=domain)
