@@ -2171,6 +2171,262 @@ def build_neon(data, out_path, log_fn=None):
     return out_path
 
 
+def build_camila(data, out_path, log_fn=None):
+    """Camila — 16-slide PPTX, verified against the client reference
+    "Camila.pptx" (ltn-stahlhallenbau.de): navy (#002060) cover title, an
+    "Index:" status slide with each checked item marked red (#C00000, needs
+    attention) or green (#00B050, optimized), then 14 topic slides — gold
+    (#7C5F1D) section title + bold black "Result:"/"Results:" label followed
+    by the finding."""
+    if log_fn is None:
+        log_fn = print
+    Presentation, Inches, Pt, Emu, RGBColor, PP_ALIGN, MSO_ANCHOR = _init_pptx()
+
+    prs = Presentation()
+    prs.slide_width = Inches(13.33)
+    prs.slide_height = Inches(7.5)
+
+    NAVY = "#002060"
+    GOLD = "#7C5F1D"
+    BLACK = "#000000"
+    RED = "#C00000"
+    GREEN = "#00B050"
+
+    domain = data["domain"]
+    date_str = data["date"]
+    home = f"https://{domain}/"
+
+    idx = data.get("indexing", {}) or {}
+    titles = data.get("titles", []) or []
+    metas = data.get("metas", []) or []
+    headers = data.get("headers", []) or []
+    sitemap = data.get("sitemap", {}) or {}
+    canonicals = data.get("canonicals", []) or []
+    robots = data.get("robots", {}) or {}
+    img_alts = data.get("img_alts", []) or []
+    broken_links = data.get("broken_links", []) or []
+    bl_checked = data.get("broken_links_checked", 0)
+    da_pa = data.get("da_pa") or {}
+
+    title_ok = bool(titles) and all(t.get("status") == "Good" for t in titles)
+    meta_ok = bool(metas) and all(m.get("status") == "Good" for m in metas)
+    h1_ok = bool(headers) and all(h.get("h1") == 1 for h in headers)
+    h2_ok = bool(headers) and all(h.get("h2", 0) >= 1 for h in headers)
+    idx_ok = not _is_empty(idx.get("count"))
+    da_ok = (da_pa.get("da") not in (None, "—"))
+    canon_ok = bool(canonicals) and all(c.get("status") == "Good" for c in canonicals)
+    img_ok = bool(img_alts) and all(a.get("present") == "Yes" for a in img_alts)
+    sm_ok = bool(sitemap.get("found") or sitemap.get("ok"))
+    robots_ok = bool(robots.get("found"))
+    bl_ok = bl_checked > 0 and not broken_links
+
+    # ---- Slide 1: Cover ----
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    _text(s, home, 1.6, 3.4, 8.0, 0.5, 16, "Cambria", BLACK, bold=True)
+    _text(s, f"Date: {date_str}", 1.6, 3.9, 8.0, 0.5, 16, "Cambria", BLACK, bold=True)
+    _text(s, "Website Audit Report", 1.6, 1.8, 9.0, 0.9, 48, "Calibri", NAVY, bold=True)
+
+    # ---- Slide 2: Index ----
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    _text(s, "Index:", 1.5, 0.6, 9.0, 0.9, 44, "Calibri", NAVY, bold=True)
+    index_items = [
+        ("Meta title: ", title_ok),
+        ("Meta Description: ", meta_ok),
+        ("H1 Heading Tags: ", h1_ok),
+        ("H2 Heading Tags: ", h2_ok),
+        ("Website Indexing: ", idx_ok),
+        ("Domain Authority & Page Authority: ", da_ok),
+        ("Canonical Tag: ", canon_ok),
+        ("Image Optimization: ", img_ok),
+        ("Schema Markup: ", False),
+        ("XML Sitemap: ", sm_ok),
+        ("Redirection: ", False),
+        ("Robots.txt: ", robots_ok),
+        ("Broken Link: ", bl_ok),
+        ("Backlink Status: ", da_ok),
+    ]
+    box = prs.slides[-1].shapes.add_textbox(Inches(1.2), Inches(1.7), Inches(10.1), Inches(4.65))
+    tf = box.text_frame
+    tf.word_wrap = True
+    for i, (label, ok) in enumerate(index_items):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        r1 = p.add_run(); r1.text = label
+        r1.font.size = Pt(18); r1.font.name = "Arial"; r1.font.bold = True
+        r1.font.color.rgb = _C(BLACK)
+        r2 = p.add_run(); r2.text = "Optimized" if ok else "Not Optimized"
+        r2.font.size = Pt(18); r2.font.name = "Arial"; r2.font.bold = True
+        r2.font.color.rgb = _C(GREEN if ok else RED)
+
+    # ---- Slides 3-16: topics ----
+    shots = data.get("screenshots", {}) or {}
+
+    def topic_slide(title, result_text, shot_key=None, results_label="Result"):
+        s = prs.slides.add_slide(prs.slide_layouts[6])
+        _text(s, title, 1.2, 0.35, 10.8, 0.9, 44, "Calibri", GOLD)
+        y = 1.65
+        if shot_key and shots.get(shot_key):
+            has_shot = _place_image(s, shots.get(shot_key), 1.2, y, 10.9, 2.6)
+            if has_shot:
+                y += 2.85
+        box = s.shapes.add_textbox(Inches(1.2), Inches(y), Inches(10.9), Inches(2.6))
+        tf = box.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        r1 = p.add_run(); r1.text = results_label
+        r1.font.size = Pt(18); r1.font.name = "Calibri"; r1.font.bold = True
+        r1.font.color.rgb = _C(BLACK)
+        r2 = p.add_run(); r2.text = ": "
+        r2.font.size = Pt(18); r2.font.name = "Calibri"; r2.font.bold = True
+        r2.font.color.rgb = _C(BLACK)
+        r3 = p.add_run(); r3.text = result_text
+        r3.font.size = Pt(16); r3.font.name = "Calibri"; r3.font.bold = False
+        r3.font.color.rgb = _C(BLACK)
+        return s
+
+    # Meta Title
+    if titles:
+        t = titles[0]
+        topic_slide("Meta Title",
+                     f"The homepage title is {t.get('chars', '?')} characters — {t.get('status', 'N/A')}. "
+                     "Keeping it within 50-60 characters with the primary keyword near the start "
+                     "improves search engine relevance and click-through rate.",
+                     "viewsource")
+    else:
+        topic_slide("Meta Title", UNVERIFIED, "viewsource")
+
+    # Meta Description
+    if metas:
+        m = metas[0]
+        topic_slide("Meta Description",
+                     f"The homepage meta description is approximately {m.get('chars', '?')} "
+                     f"characters — {m.get('status', 'N/A')}. It should be unique, keyword-relevant "
+                     "and within the recommended length to improve the search snippet.",
+                     "viewsource")
+    else:
+        topic_slide("Meta Description", UNVERIFIED, "viewsource")
+
+    # H1 Tag
+    if headers:
+        h = headers[0]
+        topic_slide("H1 Tag",
+                     f"The homepage contains {h.get('h1', 0)} H1 tag(s). Having exactly one clear, "
+                     "keyword-focused H1 tag per page is recommended for SEO.",
+                     "homepage")
+    else:
+        topic_slide("H1 Tag", UNVERIFIED, "homepage")
+
+    # H2 Tag
+    if headers:
+        h = headers[0]
+        topic_slide("H2 Tag",
+                     f"The homepage contains {h.get('h2', 0)} H2 heading(s). A clear H2 structure "
+                     "helps establish content hierarchy and organize page topics for search engines.",
+                     "homepage")
+    else:
+        topic_slide("H2 Tag", UNVERIFIED, "homepage")
+
+    # Website Indexing
+    topic_slide("Website Indexing",
+                 f"Google has indexed approximately {idx.get('count', 'N/A')} page(s) for the "
+                 f"website. {idx.get('status', '')} We recommend reviewing canonical, noindex, or "
+                 "robots.txt directives where necessary so search engines prioritize important "
+                 "content.",
+                 "serp")
+
+    # Domain Authority & Page Authority
+    da_val, dr_val, pa_val = da_pa.get("da", "—"), da_pa.get("dr", "—"), da_pa.get("pa", "—")
+    if da_ok:
+        topic_slide("Domain Authority & Page Authority",
+                     f"The website has a Domain Authority (DA) of {da_val}, Page Authority (PA) of "
+                     f"{pa_val}, and Domain Rating (DR) of {dr_val}. We recommend building "
+                     "high-quality backlinks to strengthen overall domain authority.")
+    else:
+        topic_slide("Domain Authority & Page Authority", UNVERIFIED)
+
+    # Canonical Tag
+    canon_note = ("properly implemented self-referencing canonical tags, which helps search "
+                  "engines identify the preferred version of each page."
+                  if canon_ok else
+                  "canonical tag implementation that needs review to ensure each page correctly "
+                  "identifies its preferred URL version.")
+    topic_slide("Canonical Tag", f"The website has {canon_note}", results_label="Result")
+
+    # Image Optimisation
+    missing_alt = len([a for a in img_alts if a.get("present") != "Yes"])
+    if img_alts:
+        topic_slide("Image Optimisation",
+                     f"The website has {len(img_alts)} image(s) checked, with {missing_alt} "
+                     "missing ALT text. Alt tags help provide context to search engines and "
+                     "improve accessibility and image search visibility.",
+                     results_label="Results")
+    else:
+        topic_slide("Image Optimisation", UNVERIFIED, results_label="Results")
+
+    # Schema Markup
+    topic_slide("Schema Markup",
+                 "Structured data (Schema) helps search engines understand website content "
+                 "better and can enable rich results. We recommend implementing relevant "
+                 "schema types (Organization, WebSite, Breadcrumb) for this domain.",
+                 results_label="Results")
+
+    # Sitemap.xml
+    sm_url = sitemap.get("url_checked", f"{home}sitemap.xml")
+    if sm_ok:
+        topic_slide("Sitemap.xml",
+                     f"The website's XML sitemap ({sm_url}) is available and accessible to search "
+                     "engines. We recommend keeping it up to date and submitted via Google Search "
+                     "Console and Bing Webmaster Tools.",
+                     "sitemap", results_label="Results")
+    else:
+        topic_slide("Sitemap.xml",
+                     f"The website's XML sitemap ({sm_url}) could not be verified as accessible. "
+                     "We recommend creating and submitting one via Google Search Console.",
+                     "sitemap", results_label="Results")
+
+    # Redirection
+    topic_slide("Redirection", UNVERIFIED, results_label="Results")
+
+    # Robots.txt
+    if robots_ok:
+        topic_slide("Robots.txt",
+                     f"The website has a robots.txt file in place at {home}robots.txt. We "
+                     "recommend regularly reviewing it to ensure important pages remain "
+                     "crawlable.",
+                     "robots", results_label="Results")
+    else:
+        topic_slide("Robots.txt",
+                     f"The website does not currently have an accessible robots.txt file at "
+                     f"{home}robots.txt. We recommend creating one to guide search engine "
+                     "crawlers.",
+                     "robots", results_label="Results")
+
+    # Broken Link
+    if broken_links:
+        topic_slide("Broken Link",
+                     f"The website contains {len(broken_links)} broken link(s) across "
+                     f"{bl_checked} scanned page(s). We recommend removing or replacing "
+                     "obsolete URLs and implementing 301 redirects where appropriate.",
+                     results_label="Results")
+    else:
+        topic_slide("Broken Link",
+                     f"No broken links were found across {bl_checked} scanned page(s).",
+                     results_label="Results")
+
+    # Backlinks Status
+    if da_ok:
+        topic_slide("Backlinks Status",
+                     f"The website's backlink profile shows a Domain Rating (DR) of {dr_val}. "
+                     "We recommend acquiring more high-quality, dofollow backlinks from "
+                     "authoritative domains to strengthen link equity.",
+                     results_label="Results")
+    else:
+        topic_slide("Backlinks Status", UNVERIFIED, results_label="Results")
+
+    prs.save(out_path)
+    log_fn(f"  Camila brief report saved: {os.path.basename(out_path)}")
+    return out_path
+
+
 # ---------------------------------------------------------------------------
 # Format registry & main entry
 # ---------------------------------------------------------------------------
@@ -2610,6 +2866,7 @@ BRIEF_FORMATS = {
     "neon": {"label": "Neon (19 slides, clean white)", "builder": build_neon, "ext": "pptx"},
     "alpha": {"label": "Alpha (DOCX, flowing document)", "builder": build_alpha, "ext": "docx"},
     "beta": {"label": "Beta (DOCX, teal banners + screenshots)", "builder": build_beta, "ext": "docx"},
+    "camila": {"label": "Camila (16 slides, gold titles)", "builder": build_camila, "ext": "pptx"},
 }
 
 
