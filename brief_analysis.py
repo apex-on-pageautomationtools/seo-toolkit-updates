@@ -1166,6 +1166,11 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
     screenshots = _safe("Screenshots", {}, capture_brief_screenshots,
                         domain, sitemap_url, log_fn)
 
+    log_fn("  Checking Domain Authority / Domain Rating / Page Authority...")
+    from da_checker import check_da_pa
+    da_pa = _safe("DA/PA check", {"da": "—", "dr": "—", "pa": "—", "source": "—"},
+                  check_da_pa, _get_brief_driver(), domain, log_fn)
+
     _close_brief_driver()
     log_fn("  All checks complete.")
 
@@ -1219,6 +1224,7 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
         "broken_links_checked": bl_checked,
         "broken_links": bl_broken,
         "screenshots": screenshots if isinstance(screenshots, dict) else {},
+        "da_pa": da_pa if isinstance(da_pa, dict) else {"da": "—", "dr": "—", "pa": "—", "source": "—"},
     }
 
 
@@ -2283,10 +2289,16 @@ def build_alpha(data, out_path, log_fn=None):
     body("Note — Please refer to the attached backlink profile sheet (Ahrefs export) for full "
          "details on referring domains and anchor text distribution.")
 
-    # ---- DA/PA/Spam Score ----
-    section("Domain authority, page authority & Spam Score:")
-    body("Note — Please refer to the attached sheet for the current Domain Authority (DA), Page "
-         "Authority (PA), and Spam Score for this domain.")
+    # ---- DA/PA/DR ----
+    section("Domain authority, page authority & Domain Rating:")
+    da_pa = data.get("da_pa") or {}
+    da_val, dr_val, pa_val = da_pa.get("da", "—"), da_pa.get("dr", "—"), da_pa.get("pa", "—")
+    if da_val != "—" or dr_val != "—":
+        body(f"During the audit, we found that the website currently has a Domain Authority (DA) "
+             f"of {da_val}, Domain Rating (DR) of {dr_val}, and Page Authority (PA) of {pa_val}.")
+    else:
+        body("Note — Domain Authority / Domain Rating could not be retrieved automatically for "
+             "this domain. Please check manually via a DA/DR checker tool.")
 
     # ---- Broken Links ----
     section("Broken Link")
