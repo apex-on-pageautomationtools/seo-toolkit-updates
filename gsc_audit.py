@@ -1,5 +1,5 @@
 """
-SEO Toolkit Pro — GSC Audit Module
+SEO Toolkit Pro - GSC Audit Module
 Handles Google OAuth, GSC API data, screenshots, and 5 PPTX report formats.
 """
 
@@ -14,7 +14,7 @@ import threading
 import urllib.request
 
 # One lock per browser-session profile directory. Chrome locks a --user-data-dir, so two
-# GSC screenshot captures on the SAME account/session must serialize — but captures on
+# GSC screenshot captures on the SAME account/session must serialize - but captures on
 # DIFFERENT accounts run fully in parallel (different profile dirs -> different locks).
 _PROFILE_LOCKS = {}
 _PROFILE_LOCKS_GUARD = threading.Lock()
@@ -170,7 +170,7 @@ def oauth_login_selenium(driver, client_id, client_secret, log_fn=None):
         pass
 
     if not code:
-        raise Exception("OAuth authorization failed — no code received. Please try again.")
+        raise Exception("OAuth authorization failed - no code received. Please try again.")
 
     # Exchange code for tokens
     tokens = _exchange_code(code, client_id, client_secret, redirect_uri)
@@ -272,7 +272,7 @@ def _load_gsc_config():
 
 
 # ---------------------------------------------------------------------------
-# GSC Browser Sessions — persistent Chrome user-data-dirs per Google account
+# GSC Browser Sessions - persistent Chrome user-data-dirs per Google account
 # ---------------------------------------------------------------------------
 
 def _sessions_dir():
@@ -438,7 +438,7 @@ def find_session_for_email(email):
 
 def _trim_session_cache(profile_dir):
     """Delete a session profile's browser CACHE (not cookies/login), so each
-    per-account session stays small on disk — the login (cookies) is only a few MB;
+    per-account session stays small on disk - the login (cookies) is only a few MB;
     the bulk is cache we don't need to keep."""
     import shutil
     cache_dirs = ["Cache", "Code Cache", "GPUCache", "DawnCache", "DawnGraphiteCache",
@@ -460,7 +460,7 @@ def capture_gsc_with_session(session_id, property_url, email, out_dir,
     Uses the exact profile where the user logged into Google Search Console. Google
     often bounces a HEADLESS relaunch of a logged-in profile to the sign-in page, so
     if the headless attempt is bounced we retry once in a VISIBLE window (matching how
-    the session was created) — that keeps the login alive and the screenshots real."""
+    the session was created) - that keeps the login alive and the screenshots real."""
     if log_fn is None:
         log_fn = print
     import engine
@@ -496,12 +496,12 @@ def capture_gsc_with_session(session_id, property_url, email, out_dir,
     lock = _profile_lock(profile_dir)
     acquired = lock.acquire(timeout=180)
     if not acquired:
-        log_fn("  Another capture is using this Google session — timed out waiting.")
+        log_fn("  Another capture is using this Google session - timed out waiting.")
         return {"error": "session_busy", "session_id": session_id}
     try:
         result = _attempt(headless=True)
         if isinstance(result, dict) and result.get("error") == "session_expired":
-            log_fn("  Headless GSC session bounced to login — retrying in a visible window...")
+            log_fn("  Headless GSC session bounced to login - retrying in a visible window...")
             result = _attempt(headless=False)
         _trim_session_cache(profile_dir)  # keep the session small: drop cache, keep the login
         return result
@@ -533,7 +533,7 @@ def _fmt_date(val):
 
 
 def _detect_sitemap_type(sm):
-    """Detect sitemap type — 'Index' for sitemap indexes, otherwise the API type."""
+    """Detect sitemap type - 'Index' for sitemap indexes, otherwise the API type."""
     api_type = sm.get("type", "")
     path = sm.get("path", "").lower()
     if api_type and api_type.lower() not in ("", "sitemap"):
@@ -733,7 +733,7 @@ def _looks_like_signin(driver):
     """True if the current page is a Google sign-in / account-chooser screen
     rather than real GSC content. The browser can pass the ONE upfront login
     check (in capture_gsc_with_session) and still bounce to sign-in on a
-    LATER page — e.g. when the active Google account in a multi-login
+    LATER page - e.g. when the active Google account in a multi-login
     profile isn't the one with access to this specific property. Without
     this check that sign-in screenshot gets saved and reported as a normal
     capture, which is exactly the "screenshots not captured correctly" bug."""
@@ -776,7 +776,7 @@ def capture_gsc_screenshots(driver, property_url, email, out_dir, pages=None, lo
             driver.get(url)
             time.sleep(p["wait"])
             if _looks_like_signin(driver):
-                log_fn(f"  [warn] {p['key']} bounced to sign-in mid-capture — "
+                log_fn(f"  [warn] {p['key']} bounced to sign-in mid-capture - "
                        f"skipping (would be a misleading screenshot).")
                 continue
             # Normalise the health-audit key names ("manual_action"/"security_issues")
@@ -944,7 +944,7 @@ def build_james_full(data, out_path, log_fn=None):
         if desc:
             _text(slide, desc, 0.5, 0.62, 12.3, 0.3, 14, "Calibri", OFF_WHITE)
         if status_text:
-            # Green when the check passes, red when it flags an issue — turns each data
+            # Green when the check passes, red when it flags an issue - turns each data
             # slide from a raw table into an audit verdict the reader can scan.
             _text(slide, status_text, 0.5, 1.18, 12.3, 0.3, 14, "Calibri",
                   C("#2E7D32") if status_ok else C("#C62828"), bold=True)
@@ -1037,9 +1037,9 @@ def build_james_full(data, out_path, log_fn=None):
     _sm_err = sum(int(sm.get("errors", 0) or 0) for sm in sitemaps)
     _sm_warn = sum(int(sm.get("warnings", 0) or 0) for sm in sitemaps)
     if not sitemaps:
-        _sv, _sok = "Issue found — no sitemaps submitted", False
+        _sv, _sok = "Issue found - no sitemaps submitted", False
     elif _sm_err:
-        _sv, _sok = f"Issue found — {_sm_err} error(s) across sitemaps", False
+        _sv, _sok = f"Issue found - {_sm_err} error(s) across sitemaps", False
     elif _sm_warn:
         _sv, _sok = f"{_sm_warn} warning(s) found", False
     else:
@@ -1076,7 +1076,7 @@ def build_james_full(data, out_path, log_fn=None):
 
     # --- Slides 5-10: Inspection-based slides ---
     insp_valid = [i for i in inspections if not i.get("error")]
-    # URLs whose inspection FAILED — never hidden. They show as ERROR rows on each slide
+    # URLs whose inspection FAILED - never hidden. They show as ERROR rows on each slide
     # and are folded into the verdicts (a URL we couldn't check is not a pass).
     _err = len(inspections) - len(insp_valid)
 
@@ -1090,7 +1090,7 @@ def build_james_full(data, out_path, log_fn=None):
         _p = []
         if _not_idx: _p.append(f"{_not_idx} not indexed")
         if _err: _p.append(f"{_err} could not be inspected")
-        _iv, _iok = f"Issue found — {', '.join(_p)} of {len(inspections)} URL(s)", False
+        _iv, _iok = f"Issue found - {', '.join(_p)} of {len(inspections)} URL(s)", False
     else:
         _iv, _iok = f"All {_tot} URL(s) indexed", True
     s = header_slide("URL INDEXING CHECK",
@@ -1117,7 +1117,7 @@ def build_james_full(data, out_path, log_fn=None):
     if not insp_valid:
         _cv, _cok = "No inspection data available", False
     elif _mm:
-        _cv, _cok = f"Issue found — {_mm} canonical mismatch(es)", False
+        _cv, _cok = f"Issue found - {_mm} canonical mismatch(es)", False
     else:
         _cv, _cok = "No mismatches found", True
     s = header_slide("CANONICAL CHECK",
@@ -1144,7 +1144,7 @@ def build_james_full(data, out_path, log_fn=None):
     if not insp_valid:
         _rv, _rok = "No inspection data available", False
     elif _blocked:
-        _rv, _rok = f"Issue found — {_blocked} URL(s) blocked by robots.txt", False
+        _rv, _rok = f"Issue found - {_blocked} URL(s) blocked by robots.txt", False
     else:
         _rv, _rok = "No URLs blocked", True
     s = header_slide("ROBOTS.TXT BLOCKING",
@@ -1170,7 +1170,7 @@ def build_james_full(data, out_path, log_fn=None):
     if not insp_valid:
         _fv, _fok = "No inspection data available", False
     elif _badfetch:
-        _fv, _fok = f"Issue found — {_badfetch} page(s) not fetchable", False
+        _fv, _fok = f"Issue found - {_badfetch} page(s) not fetchable", False
     else:
         _fv, _fok = "All pages fetchable", True
     s = header_slide("PAGE FETCHABILITY & LAST CRAWLED",
@@ -1194,7 +1194,7 @@ def build_james_full(data, out_path, log_fn=None):
     if not insp_valid:
         _dv, _dok = "No inspection data available", False
     elif _desktop:
-        _dv, _dok = f"Issue found — {_desktop} page(s) crawled as desktop", False
+        _dv, _dok = f"Issue found - {_desktop} page(s) crawled as desktop", False
     else:
         _dv, _dok = "Mobile-first (all pages)", True
     s = header_slide("CRAWL TYPE - MOBILE-FIRST CHECK",
@@ -1225,7 +1225,7 @@ def build_james_full(data, out_path, log_fn=None):
     rich_rows = []
     for ins in inspections:
         if ins.get("error"):
-            rich_rows.append([ins.get("url", ""), "—", "ERROR"])
+            rich_rows.append([ins.get("url", ""), "N/A", "ERROR"])
             continue
         rr = ins.get("richResultsResult", {})
         verdict = rr.get("verdict", "N/A")
@@ -1331,7 +1331,7 @@ def build_james_full(data, out_path, log_fn=None):
     for shot_key, title, desc in SHOT_SLIDES:
         img_path = screenshots.get(shot_key, "")
         status_text = gsc_statuses.get(shot_key, "")
-        # Always emit the Manual Action / Security / Removals slide — never skip it. If a
+        # Always emit the Manual Action / Security / Removals slide - never skip it. If a
         # screenshot couldn't be captured, show a "please check this manually" note instead
         # of silently dropping the section (Google's most-looked-at checks must appear).
         s = header_slide(title, desc)
@@ -1592,8 +1592,8 @@ def build_sigma(data, out_path, log_fn=None):
     s = header_slide("INTRODUCTION")
     _rect(s, 0.689, 1.5, 0.12, 4.5, "#E6C069")
     _text(s, "Reviewing the Search Console for the website is one of the major aspects of our work. "
-             "We check the webmaster for all the important parameters — traffic & performance, "
-             "sitemaps, manual actions, security issues and removals — to confirm everything is "
+             "We check the webmaster for all the important parameters - traffic & performance, "
+             "sitemaps, manual actions, security issues and removals - to confirm everything is "
              "performing well, so corrective steps can be taken if required. "
              "This report is shared for acknowledgement of the website's current Search Console health.",
           1.0, 1.6, 11.5, 3.0, 18, "Calibri", INK)
@@ -1968,7 +1968,7 @@ GSC_FORMATS = {
     "neon":        {"label": "Neon (8 slides)",             "builder": build_neon},
 }
 
-# Status strings that mean "no problem" — everything else from
+# Status strings that mean "no problem" - everything else from
 # _detect_page_status counts as a real issue worth emailing about.
 _GSC_STATUS_OK = {"no issues detected", "no removals found", ""}
 _GSC_STATUS_LABELS = {
@@ -1980,7 +1980,7 @@ _GSC_STATUS_LABELS = {
 
 def _send_gsc_alert(webapp_url, domain, statuses, email, log_fn=None):
     """POST the Apps Script's send_alert action for any real GSC issue found
-    (manual action, security issue, removals) — handleSendAlert already
+    (manual action, security issue, removals) - handleSendAlert already
     exists and works server-side, it just had no caller."""
     if log_fn is None:
         log_fn = print
@@ -2021,7 +2021,7 @@ def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
     # like https://x.com/ produces an invalid filename).
     domain = re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
 
-    # Build EXACTLY the selected format — fail loudly rather than silently building
+    # Build EXACTLY the selected format - fail loudly rather than silently building
     # a different one after doing all the API/screenshot work.
     fmt = str(fmt or "").strip().lower()
     if fmt not in GSC_FORMATS:
@@ -2066,7 +2066,7 @@ def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
                                           api_data.get("topPages", []), log_fn)
             report_data["inspections"] = inspections
 
-    # Capture screenshots from the per-account LOGGED-IN browser session — NOT a shared
+    # Capture screenshots from the per-account LOGGED-IN browser session - NOT a shared
     # profile. The shared profile isn't signed into the account, so it would screenshot
     # the Google sign-in page instead of the real GSC data (Manual Actions / Security /
     # Removals). capture_gsc_with_session verifies the login and retries in a visible
@@ -2092,21 +2092,21 @@ def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
             log_fn(f"  Session {sess.get('label', sess['id'])} needs re-login (GSC Audit > Browser Sessions).")
     if not screenshots:
         if not sessions:
-            log_fn("  No GSC browser session found — connect the account in GSC Audit > Browser Sessions.")
+            log_fn("  No GSC browser session found - connect the account in GSC Audit > Browser Sessions.")
         else:
-            log_fn("  Could not capture from any session — slides will show a 'check manually' note.")
+            log_fn("  Could not capture from any session - slides will show a 'check manually' note.")
     log_fn(f"  {len(screenshots)} screenshot(s) captured.")
     report_data["screenshots"] = screenshots
 
     # Email the admin when a real issue is found (manual action, security
-    # issue, or removals) — the Apps Script's handleSendAlert already builds
+    # issue, or removals) - the Apps Script's handleSendAlert already builds
     # and sends this email, but nothing was ever calling it, so these alerts
     # never went out.
     if webapp_url:
         _send_gsc_alert(webapp_url, domain, screenshots.get("_statuses", {}), email, log_fn)
 
     # Build PPTX
-    format_info = GSC_FORMATS[fmt]   # validated above — build the selected format
+    format_info = GSC_FORMATS[fmt]   # validated above - build the selected format
     timestamp = datetime.now().strftime("%d-%B-%Y")
     out_file = os.path.join(out_dir, f"GSC_Audit_{domain}_{timestamp}.pptx")
 

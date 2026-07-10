@@ -1,5 +1,5 @@
 """
-engine.py — Hardened, human-like Google SERP engine.
+engine.py - Hardened, human-like Google SERP engine.
 
 This module is the anti-CAPTCHA core. It replaces the old "hit
 /search?q=...&num=10&start=0&pws=0" pattern (which Google 403-blocks on sight)
@@ -378,7 +378,7 @@ CITY_GEO = CITY_COORDS
 
 
 def google_domain(country: str) -> str:
-    # Bare domain (no leading www) — callers prepend "www." themselves.
+    # Bare domain (no leading www) - callers prepend "www." themselves.
     return GOOGLE_DOMAINS.get((country or "us").lower(), "google.com")
 
 
@@ -395,7 +395,7 @@ def encode_uule(city_key: str) -> str | None:
     return "w+CAIQICI" + encoded
 
 
-# Canonical city names for Google UULE encoding — single source of truth
+# Canonical city names for Google UULE encoding - single source of truth
 # Keys: "CityName, CC" (used in dropdown). Values: Google Ads canonical name.
 CITY_CANONICAL = {
     # United States (50 cities)
@@ -1215,7 +1215,7 @@ _STEALTH_JS = r"""
   Object.defineProperty(navigator, 'webdriver', {get: () => undefined, configurable: true});
 
   // --- realistic navigator properties ---
-  // Don't override navigator.languages — Chrome sets it correctly from --lang flag
+  // Don't override navigator.languages - Chrome sets it correctly from --lang flag
   Object.defineProperty(navigator, 'platform',  {get: () => 'Win32'});
   Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0});
   Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
@@ -1323,7 +1323,7 @@ def get_chrome_major_version():
 
 
 # --------------------------------------------------------------------------- #
-# Browser discovery (Edge preferred — far fewer CAPTCHAs than Chrome)
+# Browser discovery (Edge preferred - far fewer CAPTCHAs than Chrome)
 # --------------------------------------------------------------------------- #
 _PF   = os.environ.get("PROGRAMFILES", r"C:\Program Files")
 _PFX  = os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")
@@ -1389,7 +1389,7 @@ def fetch_free_proxy(country_code="us", logger=print):
                         continue
         except Exception:
             continue
-    logger(f"No working free proxy for {cc} — continuing without one")
+    logger(f"No working free proxy for {cc} - continuing without one")
     return None
 
 
@@ -1484,7 +1484,7 @@ def _build_edge_driver(args, country, binary, logger, latitude=None, longitude=N
         "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         f"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{ev}.0.0.0 "
         f"Safari/537.36 Edg/{ev}.0.0.0")
-    # Native Edge (unlike uc) accepts these — they hide the automation banner.
+    # Native Edge (unlike uc) accepts these - they hide the automation banner.
     opts.add_experimental_option("excludeSwitches", ["enable-automation"])
     opts.add_experimental_option("useAutomationExtension", False)
     # Block all downloads and mute audio
@@ -1708,7 +1708,7 @@ def accept_google_consent(driver, logger=print):
         src = (driver.page_source or "").lower()
         if "consent.google" not in src and "before you continue" not in src:
             return False
-        logger("Google consent page detected — accepting...")
+        logger("Google consent page detected - accepting...")
         # Try various accept button selectors
         for sel in ['button[aria-label*="Accept"]', 'button[aria-label*="accept"]',
                      '#L2AGLb', 'button[jsname="b3VHJd"]',
@@ -1810,7 +1810,7 @@ def human_search(driver, keyword, country, logger=print, city=None, lang="en"):
         human_pause(0.8, 1.5)
         box = _find_box()
 
-    # Still not found — reload Google homepage and try once more
+    # Still not found - reload Google homepage and try once more
     if box is None:
         try:
             safe_get(driver, f"https://www.{dom}/")
@@ -1846,7 +1846,7 @@ def human_search(driver, keyword, country, logger=print, city=None, lang="en"):
         return True
 
     # Fallback: go to homepage first (sets referer + session), then search URL
-    logger("Search box not found — using URL fallback via homepage")
+    logger("Search box not found - using URL fallback via homepage")
     try:
         cur2 = driver.current_url or ""
         if "google." not in cur2:
@@ -1940,12 +1940,12 @@ def load_more_results(driver, target_count, max_pages, logger=print):
 
 
 # --------------------------------------------------------------------------- #
-# Organic result extraction — JavaScript-based (like Ctrl+F in a real browser)
+# Organic result extraction - JavaScript-based (like Ctrl+F in a real browser)
 # --------------------------------------------------------------------------- #
 
 def _get_organic_links(src):
     """Parse page source and return ordered list of organic result URLs.
-    Like Ctrl+F on the page — only main result title links, no sitelinks or ads."""
+    Like Ctrl+F on the page - only main result title links, no sitelinks or ads."""
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(src, "html.parser")
 
@@ -1970,11 +1970,11 @@ def _get_organic_links(src):
 
     rso = soup.select_one("#rso") or soup.select_one("#search") or soup
 
-    # 1. jsname="UWckNb" — Google's primary title anchor attribute
+    # 1. jsname="UWckNb" - Google's primary title anchor attribute
     for a in rso.select('a[jsname="UWckNb"]'):
         add(a.get("href", ""))
 
-    # 2. zReHs class — alternative Google title anchor class
+    # 2. zReHs class - alternative Google title anchor class
     if not links:
         for a in rso.select("a.zReHs"):
             add(a.get("href", ""))
@@ -2035,7 +2035,7 @@ def extract_organic(driver, debug=False):
 def _host_is_domain(link, domain_clean):
     """True only if the RESULT's HOST is the domain (or a subdomain of it). This is
     what makes the rank count by domain, not by the domain merely appearing in the
-    URL path or title — e.g. uk.trustpilot.com/review/exactprint.co.uk is Trustpilot
+    URL path or title - e.g. uk.trustpilot.com/review/exactprint.co.uk is Trustpilot
     ranking, NOT exactprint.co.uk, so it must not be counted as the client's result."""
     from urllib.parse import urlparse
     try:
@@ -2066,7 +2066,7 @@ def find_domain_in_page(driver, domain_clean, page_offset=0):
 
 def match_domain(links, domain_clean):
     """All 1-based positions where the domain (as the result HOST/subdomain) appears
-    in the ordered links — not where it merely appears in a URL path or title."""
+    in the ordered links - not where it merely appears in a URL path or title."""
     matches = []
     for i, link in enumerate(links):
         if _host_is_domain(link, domain_clean):
@@ -2126,7 +2126,7 @@ def human_visit_neutral(driver, target_domain=None):
 
 def human_visit_neutral_bg(driver, target_domain=None, logger=print):
     """Open a neutral site in a background tab (non-blocking).
-    Returns quickly — the tab loads in parallel while ranking continues."""
+    Returns quickly - the tab loads in parallel while ranking continues."""
     from selenium.webdriver.common.keys import Keys
     sites = [
         "https://www.wikipedia.org",
@@ -2168,7 +2168,7 @@ def check_ip_location(driver=None, logger=print, use_browser=False):
             region = data.get("region", "")
             country = data.get("country", "")
             loc_str = ", ".join(filter(None, [city, region, country]))
-            logger(f"Current IP: {ip} — Location: {loc_str}")
+            logger(f"Current IP: {ip} - Location: {loc_str}")
             return {"ip": ip, "city": city, "region": region, "country": country, "location": loc_str}
         except Exception:
             pass
@@ -2183,7 +2183,7 @@ def check_ip_location(driver=None, logger=print, use_browser=False):
             region = data.get("region", "")
             country = data.get("country", "")
             loc_str = ", ".join(filter(None, [city, region, country]))
-            logger(f"Current IP: {ip} — Location: {loc_str}")
+            logger(f"Current IP: {ip} - Location: {loc_str}")
             return {"ip": ip, "city": city, "region": region, "country": country, "location": loc_str}
     except Exception:
         logger("Could not detect IP location")

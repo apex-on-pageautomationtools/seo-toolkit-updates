@@ -1,5 +1,5 @@
 """
-generate_seo_onpage_phase2.py — On-Page SEO Phase 2 report engine for Report Studio.
+generate_seo_onpage_phase2.py - On-Page SEO Phase 2 report engine for Report Studio.
 
 Given a domain + a "target pages & keywords" list, it crawls each target page, audits
 the Phase-2 on-page layer, and produces the same deliverables the manual skill makes:
@@ -7,19 +7,19 @@ the Phase-2 on-page layer, and produces the same deliverables the manual skill m
     1. On Page-Analysis-Report - <domain>.docx     (branded cover page + per-site narrative + screenshots)
     2. Meta Suggestions - <domain>.xlsx            (existing + suggested title/desc/H1; suggested via free Gemini or heuristic)
     3. Image Alt Tag Suggestions - <domain>.xlsx   (self-hosted + Shopify-CDN images only; alt suggestions)
-    4. Canonical Tag Suggestions - <domain>.xlsx   (existing vs recommended; self-canonical -> "No Changes Needed…")
+    4. Canonical Tag Suggestions - <domain>.xlsx   (existing vs recommended; self-canonical -> "No Changes Needed...")
     5. Target Pages and Keywords - <domain>.xlsx   (the complete target-pages + keywords list)
     6. sitemap (existing - review).xml             (the site's REAL sitemap if found) OR
        sitemap.xml                                 (a freshly-generated working sitemap when none exists)
 
-…all bundled into a single ZIP: "SEO On-Page Phase 2 - <domain>.zip".
+...all bundled into a single ZIP: "SEO On-Page Phase 2 - <domain>.zip".
 
 The .xlsx are produced by CLONING the templates in backend/ (template_*.xlsx) so the
 formatting matches the house style exactly. The .docx is built from scratch (dynamic
 narrative + live screenshots). Page 1 is the branded cover (backend/onpage_cover.png,
 A4 full-bleed; per-domain override seo_onpage_screens/<domain>/cover.png; text cover if
 absent). Suggested meta copy uses Google Gemini's FREE tier when GEMINI_API_KEY is set,
-else a heuristic — no paid APIs.
+else a heuristic - no paid APIs.
 
 Run:
     python generate_seo_onpage_phase2.py --domain example.com --targets targets.json
@@ -185,7 +185,7 @@ _SHOPIFY_CDN = re.compile(r"(?:^|\.)(?:shopify\.com|myshopify\.com|shopifycdn\.c
 def _allowed_image_host(src, site_host):
     """Keep only self-hosted images (same registrable domain as the site) and
     Shopify-CDN images. Drops trackers / fonts / analytics pixels / third-party
-    CDNs (facebook.com/tr, fonts.gstatic.com, *.blob.core.windows.net, …)."""
+    CDNs (facebook.com/tr, fonts.gstatic.com, *.blob.core.windows.net, ...)."""
     host = urllib.parse.urlparse(src).netloc.lower()
     if not host:
         return True  # same-origin relative URL (already resolved against the page)
@@ -219,7 +219,7 @@ def _mock_page(url, keywords):
 # --- selenium-rendered crawl (fallback when patchright isn't bundled) ----------
 # The embedded python ships selenium + Chrome but NOT patchright/playwright, so on
 # user machines the patchright path below never runs. Without this fallback every
-# page would be fetched as raw HTML — JS-rendered / SPA sites then report a missing
+# page would be fetched as raw HTML - JS-rendered / SPA sites then report a missing
 # H1, zero images, zero headings and zero internal links. Rendering with Chrome
 # fixes that. One driver is reused for the whole run.
 _op_driver = None
@@ -396,7 +396,7 @@ def _parse_html(html, url, status):
         if not src or src.startswith("data:"):
             continue
         src = urllib.parse.urljoin(base, src)
-        # Only the site's own images + Shopify CDN — drop trackers, fonts,
+        # Only the site's own images + Shopify CDN - drop trackers, fonts,
         # analytics pixels and third-party CDNs.
         if _allowed_image_host(src, site_host):
             images.append({"src": src, "alt": (im.get("alt") or "").strip()})
@@ -405,7 +405,7 @@ def _parse_html(html, url, status):
     internal, external = [], []
     for a in soup.find_all("a", href=True):
         href = (a["href"] or "").strip()
-        # skip mailto:, tel:, javascript:, fragments and data URIs — not links
+        # skip mailto:, tel:, javascript:, fragments and data URIs - not links
         if not href or href.startswith(("mailto:", "tel:", "javascript:", "#", "data:")):
             continue
         full = urllib.parse.urljoin(base, href)
@@ -486,7 +486,7 @@ def suggest_meta(page_data, keywords, brand):
     }
 
 
-# Tracking pixels, font icons, analytics — skip entirely (not real images)
+# Tracking pixels, font icons, analytics - skip entirely (not real images)
 _SKIP_PATTERNS = re.compile(
     r"facebook\.com/tr\?|"
     r"fonts\.gstatic\.com|"
@@ -648,7 +648,7 @@ def write_alt_xlsx(self_hosted, external_cdn, out_path):
 
     if external_cdn:
         row += 1
-        note_cell = ws.cell(row, 1, "Below images are on external CDN — ask developer if alt text can be updated:")
+        note_cell = ws.cell(row, 1, "Below images are on external CDN - ask developer if alt text can be updated:")
         note_cell.font = Font(bold=True, color="C00000", size=11)
         row += 1
         for a in external_cdn:
@@ -699,7 +699,7 @@ def write_targets_xlsx(targets, out_path):
 def find_existing_sitemap(domain, dry_run=False):
     """Look for the site's REAL sitemap (robots.txt 'Sitemap:' line, then common
     locations). Returns (url, body) if found, else (None, None). We never fabricate
-    a sitemap from just the target pages — that would miss most of the site."""
+    a sitemap from just the target pages - that would miss most of the site."""
     if dry_run:
         return None, None
     root = site_root(domain)
@@ -758,7 +758,7 @@ def _http(url, method="GET", timeout=20):
 
 def _resolve_gsc_creds(domain, account=None):
     """Best-effort (token, property_url) from a connected GSC account, using the
-    shared gsc_audit module. Returns (None, None) if nothing is configured — the
+    shared gsc_audit module. Returns (None, None) if nothing is configured - the
     report then shows a graceful 'no GSC access' note rather than fabricating data.
     Never raises: any failure just means indexing falls back to the manual note."""
     try:
@@ -770,14 +770,14 @@ def _resolve_gsc_creds(domain, account=None):
             _sys.path.insert(0, _repo)
         import gsc_audit
     except Exception as e:
-        log(f"   [info] GSC module unavailable ({type(e).__name__}) — indexing note only")
+        log(f"   [info] GSC module unavailable ({type(e).__name__}) - indexing note only")
         return None, None
     try:
         email = account
         if not email:
             accts = gsc_audit.list_accounts()
             if not accts:
-                log("   [info] no connected GSC account — indexing note only")
+                log("   [info] no connected GSC account - indexing note only")
                 return None, None
             # prefer an account that has a refresh token (can mint a fresh token)
             email = next((a["email"] for a in accts if a.get("has_refresh")), accts[0]["email"])
@@ -786,7 +786,7 @@ def _resolve_gsc_creds(domain, account=None):
         log(f"   [info] GSC creds resolved for {email} -> {property_url}")
         return token, property_url
     except Exception as e:
-        log(f"   [info] could not resolve GSC creds ({type(e).__name__}: {e}) — indexing note only")
+        log(f"   [info] could not resolve GSC creds ({type(e).__name__}: {e}) - indexing note only")
         return None, None
 
 
@@ -833,7 +833,7 @@ def _detect_footer_logo(home_html):
     html = home_html
     low = html.lower()
 
-    # 1) Find where the footer region starts. Prefer the LAST literal <footer …>,
+    # 1) Find where the footer region starts. Prefer the LAST literal <footer ...>,
     #    else the last element whose class/id contains "footer".
     start = low.rfind("<footer")
     if start == -1:
@@ -907,7 +907,7 @@ def audit_site(domain, pages_data, dry_run=False):
     f["social_found"] = bool(socials)
 
     cur_year = datetime.date.today().year
-    # take the MAX year near a copyright mark (sites often show "© 2026 … est. 2022")
+    # take the MAX year near a copyright mark (sites often show "© 2026 ... est. 2022")
     yrs = [int(y) for y in re.findall(r"(?:©|&copy;|copyright)[^0-9]{0,25}(20\d\d)", home_html, re.I)]
     f["copyright_year"] = max(yrs) if yrs else None
     f["copyright_stale"] = bool(f["copyright_year"] and f["copyright_year"] < cur_year)
@@ -918,7 +918,7 @@ def audit_site(domain, pages_data, dry_run=False):
     f["alt_missing"] = sum(1 for im in imgs if not im.get("alt"))
 
     # footer logo: robustly detect a logo in the footer region. The old check only
-    # matched a literal <footer>…<img> in the first 50k chars, missing SVG logos,
+    # matched a literal <footer>...<img> in the first 50k chars, missing SVG logos,
     # CSS background-image logos, <a class="logo">, footers built from
     # <div class="...footer...">, or footers beyond the slice. Detect the footer
     # region (last <footer>, else last element whose class/id contains "footer"),
@@ -933,7 +933,7 @@ def audit_site(domain, pages_data, dry_run=False):
     f["home_canonical"] = m.group(1) if m else None
     f["canonical_issue"] = bool(f["home_canonical"] and f["home_canonical"].rstrip("/") != root)
 
-    # noindex check — look for meta robots noindex in each target page's HTML
+    # noindex check - look for meta robots noindex in each target page's HTML
     noindex_pages = []
     for pd in pages_data:
         page_url = pd["url"]
@@ -949,7 +949,7 @@ def audit_site(domain, pages_data, dry_run=False):
             pass
     f["noindex_pages"] = noindex_pages
 
-    # mixed content — check if HTTPS pages load HTTP resources
+    # mixed content - check if HTTPS pages load HTTP resources
     mixed_content_pages = []
     for pd in pages_data:
         page_url = pd["url"]
@@ -964,7 +964,7 @@ def audit_site(domain, pages_data, dry_run=False):
             pass
     f["mixed_content_pages"] = mixed_content_pages
 
-    # sucuri site check — query the free Sucuri SiteCheck API
+    # sucuri site check - query the free Sucuri SiteCheck API
     f["sucuri_clean"] = None  # None = couldn't check, True = clean, False = issues
     if not dry_run:
         try:
@@ -979,7 +979,7 @@ def audit_site(domain, pages_data, dry_run=False):
         except Exception:
             f["sucuri_clean"] = None
 
-    # broken links — check each external link for 404/5xx
+    # broken links - check each external link for 404/5xx
     broken_links = []
     if not dry_run:
         ext_links = list(dict.fromkeys(home.get("external_links", [])[:30]))  # cap at 30
@@ -1001,7 +1001,7 @@ def audit_site(domain, pages_data, dry_run=False):
 
 
 def capture_onpage_screenshots(domain, sitemap_url=None):
-    """Live, HEADLESS screenshots for the report — all public pages/tools, so no
+    """Live, HEADLESS screenshots for the report - all public pages/tools, so no
     Google login is needed. Captured with selenium + Chrome via CDP: the embedded
     python ships selenium but NOT patchright/playwright, so the old patchright
     capture path silently produced NO screenshots on user machines. The sitemap
@@ -1011,7 +1011,7 @@ def capture_onpage_screenshots(domain, sitemap_url=None):
 
     driver = _get_op_driver()
     if not driver:
-        log("   [warn] no browser available — screenshots skipped")
+        log("   [warn] no browser available - screenshots skipped")
         return {}
 
     out = {}
@@ -1027,13 +1027,13 @@ def capture_onpage_screenshots(domain, sitemap_url=None):
             driver.get(("view-source:" + url) if view_source else url)
             _t.sleep(15 if sucuri else 4)          # let the page (or Sucuri scan) settle
             # Google serves headless browsers a reCAPTCHA / "unusual traffic" wall
-            # instead of results — a screenshot of that is useless, so skip it (the
+            # instead of results - a screenshot of that is useless, so skip it (the
             # indexing section falls back to a text note / GSC data).
             if key == "serp":
                 src = (driver.page_source or "").lower()
                 if any(m in src for m in ("unusual traffic", "not a robot", "recaptcha",
                                           "/sorry/", "detected unusual", "before you continue")):
-                    log("   [warn] Google SERP blocked (captcha) — skipping serp screenshot")
+                    log("   [warn] Google SERP blocked (captcha) - skipping serp screenshot")
                     return
             if sucuri:
                 # Click Sucuri's cookie-consent "Accept" so it isn't in the shot.
@@ -1063,7 +1063,7 @@ def capture_onpage_screenshots(domain, sitemap_url=None):
                         " window.innerWidth||0, 1366);")
                 except Exception:
                     _w = 1366
-                # Sucuri's verdict sits at the very top — clip a fixed top region of
+                # Sucuri's verdict sits at the very top - clip a fixed top region of
                 # the document so we never grab a scrolled 'check another URL' view.
                 h = 1300.0 if sucuri else float(height)
                 cdp = {"format": "png", "captureBeyondViewport": True,
@@ -1092,7 +1092,7 @@ def capture_onpage_screenshots(domain, sitemap_url=None):
     _shot("viewport",  root + "/", height=900)
     _shot("sucuri",    f"https://sitecheck.sucuri.net/results/https/{domain}", sucuri=True)
 
-    # Broken-links image — reuse health_audit's pure (non-patchright) helpers.
+    # Broken-links image - reuse health_audit's pure (non-patchright) helpers.
     try:
         import sys as _sys
         _repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1252,7 +1252,7 @@ def _setup_docx(domain):
         body.left_margin = body.right_margin = Inches(0.49)
         body.top_margin = body.bottom_margin = Inches(1)
     else:
-        log("   [info] no cover image (backend/onpage_cover.png) — using a text cover.")
+        log("   [info] no cover image (backend/onpage_cover.png) - using a text cover.")
         sec.left_margin = sec.right_margin = Inches(0.49)
         sec.top_margin = sec.bottom_margin = Inches(1)
         _text_cover(doc, domain)
@@ -1467,16 +1467,16 @@ def _sec_indexing(h, findings, captured):
         if indexed:
             h["green"]("Indexed Pages:")
             for r in indexed:
-                h["para"](f"  {r['url']}  —  Indexed")
+                h["para"](f"  {r['url']}  -  Indexed")
         if not_indexed:
             h["para_red"]("Not Indexed / Issues:")
             for r in not_indexed:
                 state = r.get("coverageState") or r["verdict"]
-                h["para"](f"  {r['url']}  —  {state}")
+                h["para"](f"  {r['url']}  -  {state}")
         if errors:
             h["para"]("Could not check:")
             for r in errors:
-                h["para"](f"  {r['url']}  —  {r.get('coverageState', 'API error')}")
+                h["para"](f"  {r['url']}  -  {r.get('coverageState', 'API error')}")
     else:
         h["para"](f"{len(findings['target_pages'])} target page(s) found:", bold=True)
         for u in findings["target_pages"]:
@@ -1487,7 +1487,7 @@ def _sec_indexing(h, findings, captured):
                           "pages manually in GSC or via a site: search on Google.")
         else:
             h["para_red"]("Indexing could not be verified automatically (no Google Search Console "
-                          "access configured) — please verify via GSC or a site: search.")
+                          "access configured) - please verify via GSC or a site: search.")
     h["shot"]("serp", captured)
 
 def _sec_sitemap(h, findings, captured):
@@ -1674,7 +1674,7 @@ def _sec_viewport(h, findings, captured):
         h["result"]("Result: Yes, The Website pages have a viewport meta tag. It will look good on mobile "
                     "devices and will get a high position in mobile search results.")
     else:
-        h["result"]("Result: Viewport meta tag missing — add it so pages render well on mobile.")
+        h["result"]("Result: Viewport meta tag missing - add it so pages render well on mobile.")
     h["shot"]("viewport", captured)
 
 def _sec_lang(h, findings, captured):
@@ -1690,7 +1690,7 @@ def _sec_lang(h, findings, captured):
         h["result"](f'Result: We found the lang="{lang}" attribute on the website, it is good from search '
                     f'engine point of view.')
     else:
-        h["result"]('Result: No lang attribute found — add an html lang attribute (e.g. lang="en-US").')
+        h["result"]('Result: No lang attribute found - add an html lang attribute (e.g. lang="en-US").')
     h["shot"]("lang", captured)
 
 
@@ -1721,7 +1721,7 @@ def _build_docx_james(domain, pages_data, findings, captured, brand, out_path):
     root = h["root"]
 
     # Cover image already shows the site URL + intro, and _sec_alt_tags prints the
-    # ALT result — so the James body starts at "On Page Analysis" (no duplicate
+    # ALT result - so the James body starts at "On Page Analysis" (no duplicate
     # intro paragraph, no duplicate "SEO Factors" ALT summary table).
     _sec_on_page_analysis(h)
     _sec_additional_notes(h, findings, captured, year)
@@ -2078,7 +2078,7 @@ def _build_docx_neon(domain, pages_data, findings, captured, brand, out_path):
     """Neon (Sjjanarrabeen) on-page report.
 
     Neon has NO page background (white). Section headers are TEAL (215868) shaded
-    bars with white bold 13pt text — NOT the navy 000066 ribbon used by James/Xenon.
+    bars with white bold 13pt text - NOT the navy 000066 ribbon used by James/Xenon.
     Body/description text is Calibri 12pt. "Result:" labels are bold BLUE (1D5489)
     where the reference shows them, other labels (Hyperlinking/Robots "Result",
     Broken-Link "Conclusion") are bold black. Section order + wording mirror the
@@ -2091,7 +2091,7 @@ def _build_docx_neon(domain, pages_data, findings, captured, brand, out_path):
     from docx.oxml.ns import qn
 
     doc, h = _setup_docx(domain)
-    # Neon has NO page background — do not call _set_page_background().
+    # Neon has NO page background - do not call _set_page_background().
     home = next((pd for pd in pages_data if urllib.parse.urlparse(pd["url"]).path in ("", "/")),
                 pages_data[0] if pages_data else {})
     year = datetime.date.today().year
@@ -2760,7 +2760,7 @@ def _build_docx_gamma(domain, pages_data, findings, captured, brand, out_path):
     from docx.oxml.ns import qn
 
     doc, h = _setup_docx(domain)
-    # Gamma has NO page background (white) — deliberately not calling _set_page_background.
+    # Gamma has NO page background (white) - deliberately not calling _set_page_background.
     home = next((pd for pd in pages_data if urllib.parse.urlparse(pd["url"]).path in ("", "/")),
                 pages_data[0] if pages_data else {})
     root = h["root"]
@@ -3070,7 +3070,7 @@ def _build_docx_gamma(domain, pages_data, findings, captured, brand, out_path):
 
 
 def build_content_suggestion_docx(domain, pages_data, targets, out_path, captured=None):
-    """Generate the Content Suggestion DOCX — per-page content optimization notes,
+    """Generate the Content Suggestion DOCX - per-page content optimization notes,
     matching the reference layout: a navy 'Content Optimization' ribbon, a
     highlighted 'More Content Required:' lead-in, then per target page the URL,
     keywords, a red 'Section' label, a 'Screenshots:' label + bordered page
@@ -3178,7 +3178,7 @@ def build_content_suggestion_docx(domain, pages_data, targets, out_path, capture
 
 
 def _build_docx_deltafl(domain, pages_data, findings, captured, brand, out_path):
-    """Delta Fl — verified against the client reference "On Page Analysis Report -
+    """Delta Fl - verified against the client reference "On Page Analysis Report -
     aptasentry.com.docx": navy (#1F4E79) shaded paragraph banners with white bold
     13pt section titles, black Calibri body text, navy (#1F4E79) "Result:" labels
     and green (#00B050) "Recommendations:" labels. Uses the shared summary_table
@@ -3278,7 +3278,7 @@ def _build_docx_deltafl(domain, pages_data, findings, captured, brand, out_path)
         year = datetime.date.today().year
         labeled("Note for Copyright: ",
                 f"As we analyse your website, we have noticed the copyright year still displays a "
-                f"past year. Suggested — Copyright {year}.")
+                f"past year. Suggested - Copyright {year}.")
     if not findings.get("has_custom_404"):
         labeled("Note for custom 404 Page: ",
                 "As we analyse your website, broken links show a generic Access Denied error with no "
@@ -3473,7 +3473,7 @@ def _build_docx_deltafl(domain, pages_data, findings, captured, brand, out_path)
 
 
 def _build_docx_deltafvr(domain, pages_data, findings, captured, brand, out_path):
-    """Delta FVR — verified against the client reference "On Page Suggestions
+    """Delta FVR - verified against the client reference "On Page Suggestions
     Report - attunedtherapy.ca.docx": NO shaded banners at all (plain white
     page), section labels use a "Label → description" arrow style in dark
     navy (#002060), "Status:" lines in black, issues flagged in red (#EE0000),
@@ -3637,7 +3637,7 @@ def _build_docx_deltafvr(domain, pages_data, findings, captured, brand, out_path
     label_arrow("Website Redirection", "A redirect is a way to send both users and search engines to "
                                        "a different URL from the one they originally requested.")
     if findings.get("www_redirect_issue") or findings.get("url_changes"):
-        status("Redirection issue found — the website is reachable on multiple versions "
+        status("Redirection issue found - the website is reachable on multiple versions "
                "independently. We recommend a single 301 redirect to one canonical version.",
                color=RED)
     else:
@@ -3671,7 +3671,7 @@ def _build_docx_deltafvr(domain, pages_data, findings, captured, brand, out_path
 
 
 def _build_docx_deltaup(domain, pages_data, findings, captured, brand, out_path):
-    """Delta Up — verified against the client reference "On Page-Analysis-Report -
+    """Delta Up - verified against the client reference "On Page-Analysis-Report -
     walkaboutent.ca.docx": teal (#215868) shaded section banners (white bold),
     "Result:" labels in a distinct teal-blue (#31849B, NOT Neon's #1D5489 blue),
     green (#00B050) Recommendations, and green (#388600) reference-URL lines.
@@ -3911,7 +3911,7 @@ def _build_docx_deltaup(domain, pages_data, findings, captured, brand, out_path)
                "engine point of view.")
     else:
         result("Security issues were detected on your website. Please review and fix them.")
-    labeled("Screenshot – ")
+    labeled("Screenshot - ")
     shot("homepage")
 
     # ---- No-Index ----
@@ -3952,10 +3952,10 @@ def _build_docx_deltaup(domain, pages_data, findings, captured, brand, out_path)
 
 
 def _build_docx_octal(domain, pages_data, findings, captured, brand, out_path):
-    """Octal — verified against the client reference "Onpage suggestion Report -
+    """Octal - verified against the client reference "Onpage suggestion Report -
     zeeboo.in.docx": no shaded banners, blue (#4F81BD) title, navy (#002060)
     "Label → description" arrow style for the SEO analysis section (same
-    technique as Delta FVR but different palette — title blue, section-title
+    technique as Delta FVR but different palette - title blue, section-title
     #0070C0, "More Content Require" green #00B050), closing with "Thank You!"."""
     from docx.shared import Pt, RGBColor
 
@@ -4028,7 +4028,7 @@ def _build_docx_octal(domain, pages_data, findings, captured, brand, out_path):
              "with regular posts. We recommend adding one.")
     if not findings.get("has_faq"):
         body("Note For FAQ: FAQs have answers to the general queries that a client might have while "
-             "browsing your website — we recommend adding a dedicated FAQ page.")
+             "browsing your website - we recommend adding a dedicated FAQ page.")
 
     p = doc.add_paragraph()
     _run(p, "Content optimization suggestions", bold=True, color=SECBLUE, size=13)
@@ -4151,7 +4151,7 @@ def _build_docx_octal(domain, pages_data, findings, captured, brand, out_path):
 
 
 def _build_docx_camila(domain, pages_data, findings, captured, brand, out_path):
-    """Camila — verified against the client reference "On Page Audit Report __
+    """Camila - verified against the client reference "On Page Audit Report __
     electroitsolutions.com.docx": solid BLACK (#000000) 1-cell-table section
     banners with white bold uppercase text (distinct from every other format's
     banner color), navy blue (#1D5489) "Result:" labels, black body text,
@@ -4240,13 +4240,13 @@ def _build_docx_camila(domain, pages_data, findings, captured, brand, out_path):
              "Kindly find the attached content document for suggestions.")
     banner("Content Suggestion Deferred for Existing Service Pages")
     body("During our analysis, we found that some of the existing service pages are already "
-         "targeting relevant keywords — no changes required there.")
+         "targeting relevant keywords - no changes required there.")
 
     # ---- Image Optimization / Alt Tags ----
     banner("Image Optimization")
     body("Image optimization involves reducing the file size of images without compromising "
          "quality, which helps improve page load speed.")
-    body("Status – Suitable images are found on the target page. Which is good from an SEO Point "
+    body("Status - Suitable images are found on the target page. Which is good from an SEO Point "
          "of view.")
     banner("Optimization Suggestions for Image ALT Tags")
     body("ALT tags or ALT attributes are \"alternative text\" for an image. ALT tags are used to "
@@ -4263,7 +4263,7 @@ def _build_docx_camila(domain, pages_data, findings, captured, brand, out_path):
     banner("Optimization Suggestions for Robots File")
     if findings.get("robots_found"):
         result("Robots.txt file tells web robots which pages on your site to crawl and which pages "
-               "not to crawl — the existing file is optimized, which is good from an SEO point of "
+               "not to crawl - the existing file is optimized, which is good from an SEO point of "
                "view.")
     else:
         result("An optimized robots.txt file was created; please find it attached and upload it to "
@@ -4392,16 +4392,16 @@ def _build_docx_camila(domain, pages_data, findings, captured, brand, out_path):
     banner("Schema Mark-up")
     body("Schema Mark-up is a type of structured data used in websites to help search engines "
          "understand the content of the page better.")
-    body("Status – We have checked the schema on the website and found that there is no schema "
+    body("Status - We have checked the schema on the website and found that there is no schema "
          "present. We recommend adding relevant schema markup.")
 
     doc.save(out_path)
 
 
 def _build_docx_alpha(domain, pages_data, findings, captured, brand, out_path):
-    """Alpha — verified against the client reference "Alpha - On Page.docx"
+    """Alpha - verified against the client reference "Alpha - On Page.docx"
     (mobilityscootrike.com): same solid BLACK 1-cell-table banner technique as
-    Camila, but its own distinct section list/wording — adds URL Versions,
+    Camila, but its own distinct section list/wording - adds URL Versions,
     Lang Attribute, SSL Certification, Schema Optimization, Dummy Content and
     Copied Content checks that Camila doesn't have. Navy (#1D5489) "Result:"
     labels, green (#00B050) "Additional Suggestion:" label."""
@@ -4454,7 +4454,7 @@ def _build_docx_alpha(domain, pages_data, findings, captured, brand, out_path):
     def note(text):
         p = doc.add_paragraph()
         p.paragraph_format.space_after = Pt(4)
-        _run(p, "Note – ", bold=True, color=BLACK, size=12)
+        _run(p, "Note - ", bold=True, color=BLACK, size=12)
         _run(p, text, bold=False, color=BLACK, size=12)
         return p
 
@@ -4485,7 +4485,7 @@ def _build_docx_alpha(domain, pages_data, findings, captured, brand, out_path):
     if findings.get("copyright_stale"):
         year = datetime.date.today().year
         body(f"Note for Copyright: We inform you that, when we analyzed your website, we noticed "
-             f"that your copyright year is outdated. Suggested — Copyright {year}.")
+             f"that your copyright year is outdated. Suggested - Copyright {year}.")
 
     # ---- Image Alt ----
     banner("Optimization Suggestions for Image Alt Tags")
@@ -4609,7 +4609,7 @@ def _build_docx_alpha(domain, pages_data, findings, captured, brand, out_path):
              "security/malware issue on the website. It is good from an SEO point of view.")
     else:
         body("Security issues were detected on your website. Please review and fix them.")
-    body("Screenshot – ")
+    body("Screenshot - ")
     shot("sucuri")
 
     # ---- Mixed Content ----
@@ -4671,8 +4671,8 @@ def _build_docx_alpha(domain, pages_data, findings, captured, brand, out_path):
 
 
 def _build_docx_eta(domain, pages_data, findings, captured, brand, out_path):
-    """ETA — verified against the client reference "On Page Suggestion Report -
-    fundamedic.com.docx": no shaded banners or tables at all — plain bold black
+    """ETA - verified against the client reference "On Page Suggestion Report -
+    fundamedic.com.docx": no shaded banners or tables at all - plain bold black
     14pt section titles, navy (#1D5489) "Result:" labels, green (#00B050)
     "Recommendations:" labels. Adds Lang Attribute, SSL Certification, Indexing
     Overview, Backlink Audit, Copied Content, Structured Schema Data and Web
@@ -4753,8 +4753,8 @@ def _build_docx_eta(domain, pages_data, findings, captured, brand, out_path):
              "recommend publishing fresh content periodically.")
     if findings.get("copyright_stale"):
         year = datetime.date.today().year
-        body(f"Outdated Copyright Notice – During our website audit, we found that the copyright "
-             f"notice is outdated. Suggested — Copyright {year}.")
+        body(f"Outdated Copyright Notice - During our website audit, we found that the copyright "
+             f"notice is outdated. Suggested - Copyright {year}.")
 
     # ---- Canonical ----
     section("Canonical Issue Suggestion")
@@ -4874,7 +4874,7 @@ def _build_docx_eta(domain, pages_data, findings, captured, brand, out_path):
         result("No, malware issue not found in the website. It is good from an SEO point of view.")
     else:
         result("Security issues were detected on your website. Please review and fix them.")
-    body("Screenshot – ")
+    body("Screenshot - ")
     shot("sucuri")
 
     # ---- No-Index ----
@@ -4927,7 +4927,7 @@ def _build_docx_eta(domain, pages_data, findings, captured, brand, out_path):
     section("Backlink Audit")
     body("A backlink audit is a thorough analysis of the links pointing to your site. These links "
          "influence domain authority and search rankings.")
-    body("Note—Please refer to the attached backlink profile sheet for details. To improve "
+    body("Note - Please refer to the attached backlink profile sheet for details. To improve "
          "overall SEO performance, it is recommended to focus on building high-quality, relevant "
          "backlinks.")
 
@@ -4963,7 +4963,7 @@ def _build_docx_eta(domain, pages_data, findings, captured, brand, out_path):
 
 
 def _build_docx_kappa(domain, pages_data, findings, captured, brand, out_path):
-    """Kappa — verified against the client reference "ON Page Audit Report __
+    """Kappa - verified against the client reference "ON Page Audit Report __
     Amail.Agency.docx" (from the "Kappa Up" report suite's On-page folder):
     same 1-cell-table banner technique as Camila/Alpha, but PURPLE (#5F497A)
     fill instead of black, uppercase white bold text. Adds a "Note for USP"
@@ -5051,7 +5051,7 @@ def _build_docx_kappa(domain, pages_data, findings, captured, brand, out_path):
     banner("Image Optimization")
     body("Image optimization involves reducing the file size of images without compromising "
          "quality, which helps improve page load speed.")
-    body("Status – Suitable and Optimized images are found on the target page. It is good from "
+    body("Status - Suitable and Optimized images are found on the target page. It is good from "
          "search engine point of view.")
     banner("Optimization Suggestions for Image Alt Tags")
     body("ALT tags or ALT attributes are \"alternative text\" for an image. ALT tags are used to "
@@ -5206,7 +5206,7 @@ def _build_docx_kappa(domain, pages_data, findings, captured, brand, out_path):
     banner("Schema Markup")
     body("Schema Markup is a type of structured data used in websites to help search engines "
          "understand the content of the page better.")
-    body("Status – Schema Markup is not found on the website. It is not good from search engine "
+    body("Status - Schema Markup is not found on the website. It is not good from search engine "
          "point of view. We recommend adding relevant schema markup.")
     body("Screenshot -")
 
@@ -5214,7 +5214,7 @@ def _build_docx_kappa(domain, pages_data, findings, captured, brand, out_path):
 
 
 def _build_docx_peta(domain, pages_data, findings, captured, brand, out_path):
-    """Peta / Beta — verified against the client reference "On page Suggestions
+    """Peta / Beta - verified against the client reference "On page Suggestions
     Report - calcmaster.in.docx": a dark (#171717, white bold) title banner, then
     each section is its own light-gray (#D9D9D9) bold-black banner followed by
     black Calibri body text. "Additional suggestion:" is a standalone bold red
@@ -5336,8 +5336,8 @@ def _build_docx_peta(domain, pages_data, findings, captured, brand, out_path):
     ext_count = findings.get("ext_count", 0)
     home_url = (pages_data[0]["url"] if pages_data else root + "/")
     p = doc.add_paragraph()
-    _run(p, f"Web-Page URL— {home_url}", bold=True, color=BLACK, size=12)
-    body(f"{ext_count} external link(s) found on the home page — All external links are safe, "
+    _run(p, f"Web-Page URL - {home_url}", bold=True, color=BLACK, size=12)
+    body(f"{ext_count} external link(s) found on the home page - All external links are safe, "
          "it is good from an SEO point of view." if ext_count else
          "No external links found on the home page.")
     shot("externallinks")
@@ -5436,7 +5436,7 @@ def _build_docx_peta(domain, pages_data, findings, captured, brand, out_path):
     section("Optimization Suggestions for Hyperlinking")
     body("Hyperlinking of the website is good. It's good from an SEO point of view.")
     p = doc.add_paragraph()
-    _run(p, f"Web-Page URL— {home_url}", bold=True, color=BLACK, size=12)
+    _run(p, f"Web-Page URL - {home_url}", bold=True, color=BLACK, size=12)
 
     # ---- Security ----
     section("Security Issue Check")
@@ -5468,7 +5468,7 @@ def _build_docx_peta(domain, pages_data, findings, captured, brand, out_path):
 
 
 def _build_docx_sara(domain, pages_data, findings, captured, brand, out_path):
-    """Sara — independent frozen copy of the reference-verified Neon build (teal
+    """Sara - independent frozen copy of the reference-verified Neon build (teal
     #215868 template, verified against On Page Suggestion Report format Sara /
     dcmshriramchemicals.com). Kept separate so Neon can diverge (see its own
     docstring) without changing Sara, which must keep matching its reference.
@@ -5476,7 +5476,7 @@ def _build_docx_sara(domain, pages_data, findings, captured, brand, out_path):
     """Neon (Sjjanarrabeen) on-page report.
 
     Neon has NO page background (white). Section headers are TEAL (215868) shaded
-    bars with white bold 13pt text — NOT the navy 000066 ribbon used by James/Xenon.
+    bars with white bold 13pt text - NOT the navy 000066 ribbon used by James/Xenon.
     Body/description text is Calibri 12pt. "Result:" labels are bold BLUE (1D5489)
     where the reference shows them, other labels (Hyperlinking/Robots "Result",
     Broken-Link "Conclusion") are bold black. Section order + wording mirror the
@@ -5489,7 +5489,7 @@ def _build_docx_sara(domain, pages_data, findings, captured, brand, out_path):
     from docx.oxml.ns import qn
 
     doc, h = _setup_docx(domain)
-    # Neon has NO page background — do not call _set_page_background().
+    # Neon has NO page background - do not call _set_page_background().
     home = next((pd for pd in pages_data if urllib.parse.urlparse(pd["url"]).path in ("", "/")),
                 pages_data[0] if pages_data else {})
     year = datetime.date.today().year
@@ -5783,7 +5783,7 @@ def _build_docx_sara(domain, pages_data, findings, captured, brand, out_path):
 
 
 def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, fmt="james"):
-    """Dispatch to the format-specific DOCX builder — builds EXACTLY the selected
+    """Dispatch to the format-specific DOCX builder - builds EXACTLY the selected
     format, or raises rather than silently defaulting to another one."""
     builders = {
         "james": _build_docx_james, "omega": _build_docx_omega,
@@ -5830,7 +5830,7 @@ def main():
     if args.targets:
         targets = load_targets(args.targets, domain)
     else:
-        log("[*] No targets file — auto-discovering target pages from the site…")
+        log("[*] No targets file - auto-discovering target pages from the site...")
         targets = discover_targets(domain, dry_run=args.dry_run)
     if not targets:
         log("[ERROR] No target pages found. Provide --targets, or make sure the site is reachable.")
@@ -5847,14 +5847,14 @@ def main():
         pages_data.append(pd)
         if homepage is None or urllib.parse.urlparse(pd["url"]).path in ("", "/"):
             homepage = pd
-    _close_op_driver()          # done crawling — free the render browser
+    _close_op_driver()          # done crawling - free the render browser
     log(f"[2/5] Crawled {total} page(s)")
 
     brand = brand_from(domain, homepage.get("title") if homepage else None,
                        homepage.get("h1") if homepage else None,
                        homepage.get("og_site_name") if homepage else None)
 
-    # deliverable data — Meta = existing + suggested (free Gemini if GEMINI_API_KEY,
+    # deliverable data - Meta = existing + suggested (free Gemini if GEMINI_API_KEY,
     # else heuristic); plus alt suggestions + canonical recommendations.
     metas = [suggest_meta(pd, pd["keywords"], brand) for pd in pages_data]
     all_self_hosted, all_external_cdn = [], []
@@ -5871,7 +5871,7 @@ def main():
     findings["sitemap_found"] = bool(sitemap_body)
     findings["sitemap_url"] = sitemap_url
 
-    # GSC URL Inspection — check indexing status of target pages via API.
+    # GSC URL Inspection - check indexing status of target pages via API.
     # Creds come from explicit --gsc-token/--property-url, or are auto-resolved
     # from a connected GSC account (the web app launches us WITHOUT these flags,
     # so without this the indexing section always fell back to "verify manually").
@@ -5887,13 +5887,13 @@ def main():
 
     captured = {}
     if not (args.dry_run or args.no_capture):
-        log("[4/5] Capturing screenshots (Sucuri, robots, indexing, wayback…)")
+        log("[4/5] Capturing screenshots (Sucuri, robots, indexing, wayback...)")
         try:
             captured = capture_onpage_screenshots(domain, sitemap_url=sitemap_url)
         except Exception as e:
             log(f"   [warn] screenshot capture skipped: {type(e).__name__}: {e}")
 
-    # deliverable files — names vary by format
+    # deliverable files - names vary by format
     fmt = args.format
     log(f"   [format] {fmt}")
 
@@ -5925,7 +5925,7 @@ def main():
     if findings.get("robots_body"):
         (work / "Robots.txt").write_text(findings["robots_body"], encoding="utf-8")
 
-    # sitemap: attach the existing one for review only — never generate from target pages
+    # sitemap: attach the existing one for review only - never generate from target pages
     if sitemap_body:
         (work / "sitemap (existing - review).xml").write_text(sitemap_body, encoding="utf-8")
     build_onpage_docx(domain, pages_data, findings, captured, brand, doc_f, fmt=fmt)

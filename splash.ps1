@@ -1,4 +1,4 @@
-# SEO Toolkit Pro — startup splash. Shows a small "Starting…" window immediately so
+# SEO Toolkit Pro - startup splash. Shows a small "Starting..." window immediately so
 # the user has feedback while the server comes up, and closes itself the moment the
 # server writes its port file (or after a timeout). Purely cosmetic — any failure is
 # silent and does not affect launching.
@@ -21,7 +21,7 @@ try {
   $f.Controls.Add($bar)
 
   $lbl = New-Object System.Windows.Forms.Label
-  $lbl.Text      = "Starting SEO Toolkit Pro`r`nPlease wait a moment…"
+  $lbl.Text      = "Starting SEO Toolkit Pro`r`nPlease wait a moment..."
   $lbl.ForeColor = [System.Drawing.Color]::White
   $lbl.Font      = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
   $lbl.TextAlign = 'MiddleCenter'

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#3391ff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0d0f12" media="(prefers-color-scheme: dark)">
-<meta name="description" content="Track Google keyword rankings and index status — hardened, CAPTCHA-resistant.">
+<meta name="description" content="Track Google keyword rankings and index status - hardened, CAPTCHA-resistant.">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
@@ -411,7 +411,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
 <!-- ===================== BIG HEADER ===================== -->
 <div class="bighead">
   <h1 id="page-title">Keyword Ranking</h1>
-  <p id="page-sub">Find where your domain ranks on Google — across regions, CAPTCHA-resistant.</p>
+  <p id="page-sub">Find where your domain ranks on Google - across regions, CAPTCHA-resistant.</p>
 </div>
 
 <!-- ===================== MAIN ===================== -->
@@ -426,13 +426,13 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         Rank Settings
       </div>
-      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Find where your domain ranks on Google — across regions, CAPTCHA-resistant.</p>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Find where your domain ranks on Google - across regions, CAPTCHA-resistant.</p>
       <div class="field">
         <label>Domain to track</label>
         <input type="text" id="r-domain" placeholder="example.com" autocomplete="off">
       </div>
       <div class="field">
-        <label>Keywords <span class="hint">(one per line — max 100)</span></label>
+        <label>Keywords <span class="hint">(one per line - max 100)</span></label>
         <textarea id="r-keywords" placeholder="seo services&#10;best seo company&#10;local seo agency"></textarea>
       </div>
       <div class="row2 field">
@@ -574,7 +574,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
         <div>
           <label>VPN method</label>
           <select id="r-vpn">
-            <option value="none" selected>No VPN (recommended — uses city geolocation)</option>
+            <option value="none" selected>No VPN (recommended - uses city geolocation)</option>
             <option value="pause">Pause to connect VPN manually</option>
             <option value="windscribe">Windscribe extension</option>
             <option value="edge_secure">Edge Secure Network</option>
@@ -584,14 +584,14 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
         </div>
       </div>
       <div class="note" style="line-height:1.6">
-        <b style="color:var(--ok)">Recommended:</b> Use <b>No VPN</b> + select a <b>City</b> above. This spoofs the browser's geolocation to the target city — more stable, faster, and avoids VPN-related blocks.<br><br>
+        <b style="color:var(--ok)">Recommended:</b> Use <b>No VPN</b> + select a <b>City</b> above. This spoofs the browser's geolocation to the target city - more stable, faster, and avoids VPN-related blocks.<br><br>
         <b style="color:var(--warn)">If using VPN (Pause / System / Windscribe):</b><br>
-        1. Click <b>Start</b> — the browser will open and the tool will pause.<br>
+        1. Click <b>Start</b> - the browser will open and the tool will pause.<br>
         2. Connect your VPN to the target country/city in your VPN app.<br>
         3. Come back to this tool and click <b>Resume</b>.<br>
-        4. When the analysis finishes, the tool will pause again — disconnect your VPN, then click <b>Resume</b> to close the browser.<br><br>
+        4. When the analysis finishes, the tool will pause again - disconnect your VPN, then click <b>Resume</b> to close the browser.<br><br>
         <b>Options:</b> <b>Windscribe</b> (free 10GB) · <b>Edge Secure Network</b> (free 5GB) · <b>System VPN</b> (Urban VPN, ProtonVPN, etc.) · <b>Free proxy</b> (auto-fetched).<br>
-        <span style="color:var(--text-3)">Note: Urban VPN may show "restricted" error in India — connect another VPN first, then open the tool.</span>
+        <span style="color:var(--text-3)">Note: Urban VPN may show "restricted" error in India - connect another VPN first, then open the tool.</span>
       </div>
     </section>
 
@@ -601,7 +601,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 12l2 2 4-4"/><path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c1.66 0 3.21.45 4.55 1.23"/></svg>
         Google Indexing Settings
       </div>
-      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Check if your pages are indexed on Google — verify indexing status for up to 100 URLs at once.</p>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Check if your pages are indexed on Google - verify indexing status for up to 100 URLs at once.</p>
       <div class="field">
         <label>URLs to check <span class="hint">(one per line, max 100)</span></label>
         <textarea id="i-urls" placeholder="https://example.com/page-1&#10;https://example.com/blog/post&#10;example.com/about"></textarea>
@@ -730,7 +730,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
           <option value="proxy">Free proxy (auto-fetched)</option>
         </select>
       </div>
-      <div class="note">Searches Google for <b>site:domain.com/path</b> — indexing is global so no country needed. VPN/proxies protect your IP from Google blocks.</div>
+      <div class="note">Searches Google for <b>site:domain.com/path</b> - indexing is global so no country needed. VPN/proxies protect your IP from Google blocks.</div>
       <input type="hidden" id="i-country" value="us">
     </section>
 
@@ -740,9 +740,9 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></svg>
         Search Results Count Settings
       </div>
-      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">For each keyword, get Google's total "About N results" number — same regional browser as the Rank Checker. No domain or pages needed.</p>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">For each keyword, get Google's total "About N results" number - same regional browser as the Rank Checker. No domain or pages needed.</p>
       <div class="field">
-        <label>Keywords <span class="hint">(one per line — max 100)</span></label>
+        <label>Keywords <span class="hint">(one per line - max 100)</span></label>
         <textarea id="c-keywords" placeholder="seo expert&#10;best seo company&#10;digital marketing agency"></textarea>
       </div>
       <div class="row2 field">
@@ -864,7 +864,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
         <div>
           <label>VPN method</label>
           <select id="c-vpn">
-            <option value="none" selected>No VPN (recommended — uses city geolocation)</option>
+            <option value="none" selected>No VPN (recommended - uses city geolocation)</option>
             <option value="pause">Pause to connect VPN manually</option>
             <option value="windscribe">Windscribe extension</option>
             <option value="edge_secure">Edge Secure Network</option>
@@ -882,7 +882,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
         Backlink Status Settings
       </div>
-      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Verify if your backlinks are live and dofollow — paste referring URLs and check their status instantly.</p>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Verify if your backlinks are live and dofollow - paste referring URLs and check their status instantly.</p>
       <div class="field">
         <label>Your domain to find</label>
         <input type="text" id="b-domain" placeholder="example.com" autocomplete="off">
@@ -925,7 +925,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
         </select>
       </div>
       <label class="switch-row" style="margin-top:10px">
-        <span><span class="lbl">Check DA / PA</span><span class="sub">Uses free online tools to check Domain Authority — adds ~10s per unique domain</span></span>
+        <span><span class="lbl">Check DA / PA</span><span class="sub">Uses free online tools to check Domain Authority - adds ~10s per unique domain</span></span>
         <span class="switch"><input type="checkbox" id="b-check-da" checked><span class="track"></span></span>
       </label>
       <div class="note">Visits each backlink URL, checks if your domain link exists, reads <b>meta robots</b> (index/noindex), link <b>rel</b> (dofollow/nofollow), and optionally <b>DA/DR/PA</b> from free tools.</div>
@@ -937,13 +937,13 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
         SEO On-Page Report
       </div>
-      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Generate a detailed on-page SEO analysis report — meta tags, headings, images, links, and more.</p>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Generate a detailed on-page SEO analysis report - meta tags, headings, images, links, and more.</p>
       <div class="field">
-        <label>Website URL <span class="hint">(the report is generated for the version that actually works — e.g. https://www.example.com/)</span></label>
+        <label>Website URL <span class="hint">(the report is generated for the version that actually works - e.g. https://www.example.com/)</span></label>
         <input type="text" id="op-domain" placeholder="https://example.com" autocomplete="off">
       </div>
       <div class="field">
-        <label>Target pages &amp; keywords <span class="hint">(paste or upload Excel — leave empty to auto-discover)</span></label>
+        <label>Target pages &amp; keywords <span class="hint">(paste or upload Excel - leave empty to auto-discover)</span></label>
         <textarea id="op-targets" placeholder='https://example.com/services | keyword1, keyword2&#10;https://example.com/about | keyword3&#10;https://example.com/contact'></textarea>
         <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
           <label for="op-file-upload" style="margin:0;cursor:pointer;padding:7px 14px;border-radius:var(--r-sm);background:var(--surface-2);border:1.5px solid var(--border);font-size:12px;font-weight:600;color:var(--text-2);display:inline-flex;align-items:center;gap:6px;transition:background .2s">
@@ -991,7 +991,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
         Website Health Audit
       </div>
-      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Run a full website health checkup — security, indexing, broken links, page speed, spam detection, and more.</p>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Run a full website health checkup - security, indexing, broken links, page speed, spam detection, and more.</p>
       <div class="field">
         <label>Domain</label>
         <input type="text" id="ha-domain" placeholder="example.com" autocomplete="off">
@@ -1022,7 +1022,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
       <label class="switch-row" style="margin-bottom:14px">
         <div>
           <span class="lbl">Include PageSpeed Insights</span>
-          <span class="sub">Adds PSI score to the report — may take 30-60 seconds extra</span>
+          <span class="sub">Adds PSI score to the report - may take 30-60 seconds extra</span>
         </div>
         <div class="switch"><input type="checkbox" id="ha-include-psi"><span class="track"></span></div>
       </label>
@@ -1035,7 +1035,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
         GSC Audit Studio
       </div>
-      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Run a Google Search Console audit — sitemaps, indexing, performance, manual actions, security issues. Generates a PPTX report.</p>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Run a Google Search Console audit - sitemaps, indexing, performance, manual actions, security issues. Generates a PPTX report.</p>
 
       <div class="field">
         <label>Domain</label>
@@ -1058,10 +1058,10 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
           <div style="font-weight:700;font-size:13px">Google Accounts</div>
           <button class="btn btn-primary" style="font-size:12px;padding:6px 14px" onclick="gscConnect()">+ Connect account</button>
         </div>
-        <div id="gsc-none" style="font-size:11px;color:var(--text-3);margin-top:6px">No Google account connected. Click "Connect account" to add one — you can connect several; the one that owns the domain is picked automatically.</div>
+        <div id="gsc-none" style="font-size:11px;color:var(--text-3);margin-top:6px">No Google account connected. Click "Connect account" to add one - you can connect several; the one that owns the domain is picked automatically.</div>
         <div id="gsc-accounts-list" style="margin-top:4px"></div>
       </div>
-      <div class="note">The account that owns the domain is selected automatically when you enter it — you don't have to pick one. If it isn't connected yet, click "+ Connect account" above. (OAuth credentials are set in Settings.)</div>
+      <div class="note">The account that owns the domain is selected automatically when you enter it - you don't have to pick one. If it isn't connected yet, click "+ Connect account" above. (OAuth credentials are set in Settings.)</div>
 
       <!-- GSC Browser Sessions -->
       <div style="margin-top:18px;padding:14px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border)">
@@ -1108,13 +1108,13 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         Brief Website Analysis
       </div>
-      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Quick SEO analysis — indexing, domain age, title tags, meta descriptions, headers, image alts, redirections, canonical, sitemap, robots.txt, broken links. Generates a PPTX report.</p>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Quick SEO analysis - indexing, domain age, title tags, meta descriptions, headers, image alts, redirections, canonical, sitemap, robots.txt, broken links. Generates a PPTX report.</p>
       <div class="field">
         <label>Domain</label>
         <input type="text" id="ba-domain" placeholder="example.com" autocomplete="off">
       </div>
       <div class="field">
-        <label>Target pages <span class="hint">(one URL path per line, optional — defaults to /, /about, /contact, /services, /blog)</span></label>
+        <label>Target pages <span class="hint">(one URL path per line, optional - defaults to /, /about, /contact, /services, /blog)</span></label>
         <textarea id="ba-targets" rows="3" placeholder="/services&#10;/about&#10;/contact"></textarea>
       </div>
       <div class="field">
@@ -1135,7 +1135,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
           <option value="kappa_up">Kappa Up (plain issue list DOCX)</option>
         </select>
       </div>
-      <div class="note">No browser or GSC needed — runs entirely via HTTP checks. Takes ~30-60 seconds.</div>
+      <div class="note">No browser or GSC needed - runs entirely via HTTP checks. Takes ~30-60 seconds.</div>
     </section>
 
     <!-- PROXY / VPN -->
@@ -1531,7 +1531,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
     </button>
   </div>
   <div class="sheet-body">
-    <div class="note accent" style="margin-bottom:18px">Saved proxies rotate automatically across keywords and on every block — the single biggest lever to cut CAPTCHA. user/pass optional.</div>
+    <div class="note accent" style="margin-bottom:18px">Saved proxies rotate automatically across keywords and on every block - the single biggest lever to cut CAPTCHA. user/pass optional.</div>
 
     <div class="sec-t">Proxy Pool (<span id="pp-count">0</span>)</div>
     <div id="pp-list"></div>
@@ -1556,7 +1556,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
     <input type="text" id="s-downloads-folder" placeholder="e.g. C:\Users\You\Downloads" autocomplete="off" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:14px">
 
     <div class="sec-t" style="margin-top:22px">Change Password</div>
-    <div class="note" style="margin-bottom:8px">Update your account password — saved to your account immediately.</div>
+    <div class="note" style="margin-bottom:8px">Update your account password - saved to your account immediately.</div>
     <input type="password" id="cp-old" placeholder="Current password" autocomplete="current-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:14px;margin-bottom:8px;box-sizing:border-box">
     <input type="password" id="cp-new" placeholder="New password (min 6 characters)" autocomplete="new-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:14px;margin-bottom:8px;box-sizing:border-box">
     <input type="password" id="cp-confirm" placeholder="Confirm new password" autocomplete="new-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:14px;margin-bottom:8px;box-sizing:border-box">
@@ -1566,7 +1566,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
     <div class="note" style="margin-bottom:8px">API keys for PageSpeed, GSC, and Apps Script are managed by the admin in the <b>Admin</b> tab. Contact your admin to configure.</div>
 
     <div class="sec-t" style="margin-top:22px;color:var(--text-3)">Software Updates</div>
-    <div class="note" style="margin-bottom:8px">Updates download automatically when you open the app. You can also check right now — no command line needed.</div>
+    <div class="note" style="margin-bottom:8px">Updates download automatically when you open the app. You can also check right now - no command line needed.</div>
     <button class="btn btn-tonal" style="width:100%" id="btn-check-updates" onclick="checkUpdates()">Check for updates</button>
     <div id="update-status" style="font-size:12px;color:var(--text-3);margin-top:8px"></div>
     <button class="btn btn-tonal" style="width:100%;margin-top:8px" onclick="restartTool()">Restart tool</button>
@@ -1579,7 +1579,7 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
 
 <div class="toast" id="toast"></div>
 <div id="update-banner" style="display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:22px;z-index:99999;background:#1a73e8;color:#fff;padding:11px 16px;border-radius:12px;font-size:13px;box-shadow:0 6px 22px rgba(0,0,0,.28);max-width:92vw">
-  <span id="update-banner-text">Update installed — please relaunch to apply.</span>
+  <span id="update-banner-text">Update installed - please relaunch to apply.</span>
   <button onclick="restartTool()" style="margin-left:14px;background:#fff;border:none;color:#1a73e8;border-radius:7px;padding:4px 14px;cursor:pointer;font-size:12px;font-weight:700">Restart now</button>
   <button onclick="document.getElementById('update-banner').style.display='none'" style="margin-left:8px;background:rgba(255,255,255,.22);border:none;color:#fff;border-radius:7px;padding:4px 12px;cursor:pointer;font-size:12px">Dismiss</button>
 </div>
@@ -1741,15 +1741,15 @@ function switchTab(m){
   $('tbl-admin').style.display=m==='admin'?'':'none';
   $('tbl-brief').style.display=m==='brief'?'':'none';
   const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',admin:'Admin Panel'};
-  const subs={ranking:'Find where your domain ranks on Google — across regions, CAPTCHA-resistant.',
-    index:'Check if your URLs are indexed in Google — searches site:url to verify.',
-    count:'Get Google\'s total "About N results" number for each keyword — regional, CAPTCHA-resistant.',
+  const subs={ranking:'Find where your domain ranks on Google - across regions, CAPTCHA-resistant.',
+    index:'Check if your URLs are indexed in Google - searches site:url to verify.',
+    count:'Get Google\'s total "About N results" number for each keyword - regional, CAPTCHA-resistant.',
     backlink:'Check if backlink pages have index/noindex meta tag, and if your link is dofollow/nofollow.',
     onpage:'Generate a comprehensive SEO on-page analysis report with meta, alt, canonical suggestions.',
-    health:'Run a full website health checkup — Sucuri, robots, sitemap, canonical, broken links, PageSpeed, and more.',
-    gsc:'Run a Google Search Console audit — sitemaps, indexing, performance, manual actions, security. Generates a PPTX report.',
-    crawl:'Check when Google last crawled your URLs — uses URL Inspection API via configured GSC accounts.',
-    brief:'Quick SEO analysis — indexing, domain age, titles, meta, headers, images, redirects, canonical, sitemap, robots, broken links.',
+    health:'Run a full website health checkup - Sucuri, robots, sitemap, canonical, broken links, PageSpeed, and more.',
+    gsc:'Run a Google Search Console audit - sitemaps, indexing, performance, manual actions, security. Generates a PPTX report.',
+    crawl:'Check when Google last crawled your URLs - uses URL Inspection API via configured GSC accounts.',
+    brief:'Quick SEO analysis - indexing, domain age, titles, meta, headers, images, redirects, canonical, sitemap, robots, broken links.',
     admin:'Manage users, cities, and app configuration.'};
   $('page-title').textContent=titles[m];
   $('page-sub').textContent=subs[m];
@@ -1802,7 +1802,7 @@ const $=id=>document.getElementById(id);
 ['p_type','p_host','p_port','p_user','p_pass'].forEach(k=>window[k]=document.getElementById(k.replace('_','-')));
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2600);}
 
-/* country → city sync — both country and city are searchable dropdowns (type to filter
+/* country → city sync - both country and city are searchable dropdowns (type to filter
    or pick from the list). country-list (alphabetical) is shared; each city gets its own
    datalist filled from the chosen country. */
 (function(){
@@ -1866,7 +1866,7 @@ async function doStart(){
     try{
       const gc=await(await fetch('/api/gsc/check-for-domain?domain='+encodeURIComponent(p.domain))).json();
       if(gc.connected){
-        toast('GSC connected ('+gc.email+') — screenshots will be included');
+        toast('GSC connected ('+gc.email+') - screenshots will be included');
       }else if(gc.available){
         const proceed=confirm('GSC screenshots available!\n\n'+gc.message+'\n\nClick OK to continue without GSC screenshots, or Cancel to connect first.');
         if(!proceed)return;
@@ -1880,7 +1880,7 @@ async function doStart(){
     $('health-active').classList.remove('hidden');
     $('btn-ha-download').disabled=true;
     $('badge').className='badge b-running';$('dot').className='dot d-running';
-    $('status-txt').textContent='Running — 0%';
+    $('status-txt').textContent='Running - 0%';
     $('prog').style.width='0%';$('prog-lbl').textContent='Starting...';
     setButtons('running');
     startHaPoll();
@@ -1954,7 +1954,7 @@ async function doStart(){
   const m=p.mode;   // pin to the tool being started (user may switch tabs mid-request)
   const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
   const d=await r.json();
-  if(d.error){toast(d.error);return;}   // rejected (this tool already running) — keep existing results on screen
+  if(d.error){toast(d.error);return;}   // rejected (this tool already running) - keep existing results on screen
   clearResults(m);lastCounts[m]=0;applyPrev[m]='starting';  // only clear once the new run is actually accepted
   toast('Started');startPoll(m);setButtons('running',m);
 }
@@ -1969,7 +1969,7 @@ async function doStop(){
   const m=mode;await fetch('/api/stop',_mkbody(m));setButtons('stopped',m);stopPoll(m);showAlert(false);toast('Stopped');
 }
 async function doReset(){
-  // Reset only the tool for the current tab — the shared toolbar is used by every tool,
+  // Reset only the tool for the current tab - the shared toolbar is used by every tool,
   // so resetting must never reach into a different tool's state/results.
   if(mode==='onpage'){opReset();return;}
   if(mode==='health'){haReset();return;}
@@ -1993,7 +1993,7 @@ function saveLog(){
 
 /* ===================== polling ===================== */
 // On page load / re-open, rejoin any batch tools still running so their tables refill
-// and their poll timers resume — all four can be in progress at once.
+// and their poll timers resume - all four can be in progress at once.
 async function reconnectBatch(){
   for(const m of BATCH){
     try{
@@ -2069,7 +2069,7 @@ function showAlert(show,msg){
 }
 // Clear ONLY the given tool's table. The four browser tools run in parallel, so
 // starting/resetting one must never touch another's results (nor an on-page/health
-// report — those are separate tools with their own reset). Omitting m clears the
+// report - those are separate tools with their own reset). Omitting m clears the
 // active tab's tool.
 function clearResults(m){
   m=m||mode;
@@ -2104,12 +2104,12 @@ function appendRow(row,num,m){
     const lu=row.loaded_url||'';
     const loaded=lu.startsWith('http')
       ?'<a class="lnk" href="'+esc(lu)+'" target="_blank" rel="noopener" title="'+esc(lu)+'">'+esc(lu.replace(/https?:\/\/(www\.)?/,''))+'</a>'
-      :'<span style="color:var(--text-3)">—</span>';
+      :'<span style="color:var(--text-3)">N/A</span>';
     const tr=document.createElement('tr');
     const ss=row.screenshot||'';
-    const ssCell=ss?'<a class="lnk" href="/api/screenshot/'+esc(ss)+'" target="_blank" title="View SERP screenshot">📷</a>':'<span style="color:var(--text-3)">—</span>';
+    const ssCell=ss?'<a class="lnk" href="/api/screenshot/'+esc(ss)+'" target="_blank" title="View SERP screenshot">📷</a>':'<span style="color:var(--text-3)">N/A</span>';
     const tp=row.target_page||'';
-    const tpCell=tp?'<a class="lnk" href="'+esc(tp)+'" target="_blank" rel="noopener" title="'+esc(tp)+'">'+esc(tp.replace(/https?:\/\/(www\.)?/,''))+'</a>':'<span style="color:var(--text-3)">—</span>';
+    const tpCell=tp?'<a class="lnk" href="'+esc(tp)+'" target="_blank" rel="noopener" title="'+esc(tp)+'">'+esc(tp.replace(/https?:\/\/(www\.)?/,''))+'</a>':'<span style="color:var(--text-3)">N/A</span>';
     if(tp){document.querySelectorAll('.col-target').forEach(el=>el.classList.remove('hidden'));}
     tr.innerHTML='<td style="color:var(--text-3)">'+num+'</td>'+
       '<td class="cell-kw" style="font-weight:600">'+esc(row.keyword)+'</td>'+
@@ -2128,7 +2128,7 @@ function appendRow(row,num,m){
     const fu=row.found_url||'';
     const found=fu.startsWith('http')
       ?'<a class="lnk" href="'+esc(fu)+'" target="_blank" rel="noopener" title="'+esc(fu)+'">'+esc(fu.replace(/https?:\/\/(www\.)?/,''))+'</a>'
-      :'<span style="color:var(--text-3)">—</span>';
+      :'<span style="color:var(--text-3)">N/A</span>';
     const tr=document.createElement('tr');
     tr.innerHTML='<td style="color:var(--text-3)">'+num+'</td>'+
       '<td class="cell-url" style="font-weight:600">'+esc(row.url||'')+'</td>'+
@@ -2152,17 +2152,17 @@ function appendRow(row,num,m){
   } else if(m==='backlink'){
     const df=row.domain_found||'No';
     const dfCls=df==='Yes'?'t-yes':'t-not_found';
-    const mr=row.meta_robots||'—';
+    const mr=row.meta_robots||'N/A';
     const mrCls=mr==='index'?'t-yes':mr==='noindex'?'t-not_found':'t-unknown';
-    const lt=row.link_type||'—';
+    const lt=row.link_type||'N/A';
     const ltCls=lt==='dofollow'?'t-yes':lt==='nofollow'?'t-not_found':'t-unknown';
     const lu=row.link_url||'';
     const linkCell=lu.startsWith('http')
       ?'<a class="lnk" href="'+esc(lu)+'" target="_blank" rel="noopener" title="'+esc(lu)+'">'+esc(lu.replace(/https?:\/\/(www\.)?/,''))+'</a>'
-      :'<span style="color:var(--text-3)">—</span>';
+      :'<span style="color:var(--text-3)">N/A</span>';
     const tr=document.createElement('tr');
-    const da=row.da!=null?row.da:'—', dr=row.dr!=null?row.dr:'—', pa=row.pa!=null?row.pa:'—';
-    const daSrc=row.da_source||'—';
+    const da=row.da!=null?row.da:'N/A', dr=row.dr!=null?row.dr:'N/A', pa=row.pa!=null?row.pa:'N/A';
+    const daSrc=row.da_source||'N/A';
     const daNum=typeof da==='number'?da:parseInt(da)||0;
     const daCls=daNum>=50?'r-gold':daNum>=30?'r-green':daNum>=10?'r-blue':daNum>0?'r-gray':'';
     const drNum=typeof dr==='number'?dr:parseInt(dr)||0;
@@ -2271,7 +2271,7 @@ async function haPoll(){
       setButtons('stopped','health');stopHaPoll();
     }else{
       $('ha-progress').className='tag t-yes';
-      if(isActive){$('badge').className='badge b-running';$('dot').className='dot d-running';$('status-txt').textContent='Running — '+pct+'%';$('prog').style.width=pct+'%';$('prog-lbl').textContent=prog;}
+      if(isActive){$('badge').className='badge b-running';$('dot').className='dot d-running';$('status-txt').textContent='Running - '+pct+'%';$('prog').style.width=pct+'%';$('prog-lbl').textContent=prog;}
     }
   }catch(e){}
 }
@@ -2286,13 +2286,13 @@ async function haCheckGsc(){
     const r=await(await fetch('/api/gsc/check-for-domain?domain='+encodeURIComponent(domain))).json();
     if(r.connected){
       box.style.background='#e8f5e9';box.style.color='#2e7d32';
-      box.innerHTML='<b>GSC Connected</b> — '+r.email+'<br>Property: '+r.property+' ('+r.permission+')<br>GSC screenshots (manual actions, security issues) will be captured automatically.';
+      box.innerHTML='<b>GSC Connected</b> - '+r.email+'<br>Property: '+r.property+' ('+r.permission+')<br>GSC screenshots (manual actions, security issues) will be captured automatically.';
     }else if(r.available){
       box.style.background='#fff3e0';box.style.color='#e65100';
-      box.innerHTML='<b>GSC Not Connected</b> — found in mapping<br>Account: <b>'+r.email+'</b> | Access: <b>'+(r.accessLevel||'—')+'</b><br>Connect this account in GSC Audit tab to include GSC screenshots in the report.';
+      box.innerHTML='<b>GSC Not Connected</b> - found in mapping<br>Account: <b>'+r.email+'</b> | Access: <b>'+(r.accessLevel||'N/A')+'</b><br>Connect this account in GSC Audit tab to include GSC screenshots in the report.';
     }else{
       box.style.background='#fce4ec';box.style.color='#c62828';
-      box.innerHTML='<b>GSC Not Found</b> — domain not in any connected account or mapping.<br>Ask your admin to add this domain to the GSC mapping sheet, or connect a Google account with access.';
+      box.innerHTML='<b>GSC Not Found</b> - domain not in any connected account or mapping.<br>Ask your admin to add this domain to the GSC mapping sheet, or connect a Google account with access.';
     }
   }catch(e){box.style.display='none';}
 }
@@ -2453,12 +2453,12 @@ async function gscSessionCreate(){
     const r=await fetch('/api/gsc/sessions/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:label||''})});
     const d=await r.json();
     if(d.error){toast(d.error,'err');return;}
-    toast('Session created — click Login to open browser');
+    toast('Session created - click Login to open browser');
     gscSessionsLoad();
   }catch(e){toast('Failed to create session','err');}
 }
 async function gscSessionLaunch(sid){
-  toast('Launching browser — log into Google, then click Done...');
+  toast('Launching browser - log into Google, then click Done...');
   try{
     const r=await fetch('/api/gsc/sessions/'+sid+'/launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({browser:$('s-browser')?$('s-browser').value:'edge'})});
     const d=await r.json();
@@ -2472,7 +2472,7 @@ async function gscSessionLaunch(sid){
       if(d2.accounts&&d2.accounts.length){
         toast('Found accounts: '+d2.accounts.join(', '));
       }else{
-        toast('No Google accounts detected — make sure you logged in','warn');
+        toast('No Google accounts detected - make sure you logged in','warn');
       }
       gscSessionsLoad();
     }
@@ -2484,7 +2484,7 @@ async function gscSessionRefresh(sid){
     const r=await fetch('/api/gsc/sessions/'+sid+'/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({browser:$('s-browser')?$('s-browser').value:'edge'})});
     const d=await r.json();
     if(d.accounts&&d.accounts.length){toast('Accounts: '+d.accounts.join(', '));}
-    else{toast('Session may be expired — click Login to re-authenticate','warn');}
+    else{toast('Session may be expired - click Login to re-authenticate','warn');}
     gscSessionsLoad();
   }catch(e){toast('Refresh failed','err');}
 }
@@ -2510,7 +2510,7 @@ function closeSettings(){
 }
 function renderProxies(){
   const list=$('pp-list');$('pp-count').textContent=proxyPool.length;
-  if(!proxyPool.length){list.innerHTML='<div class="proxy-empty">No proxies yet — uses your direct connection.</div>';return;}
+  if(!proxyPool.length){list.innerHTML='<div class="proxy-empty">No proxies yet - uses your direct connection.</div>';return;}
   list.innerHTML=proxyPool.map((p,i)=>{
     const auth=p.user?('• auth: '+esc(p.user)):'• no auth';
     return '<div class="proxy-row">'+
@@ -2544,17 +2544,17 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('sheet').classLis
 /* ===================== software updates ===================== */
 async function checkUpdates(){
   const btn=$('btn-check-updates'), st=$('update-status');
-  const old=btn?btn.textContent:''; if(btn){btn.disabled=true;btn.textContent='Checking…';} if(st)st.textContent='';
+  const old=btn?btn.textContent:''; if(btn){btn.disabled=true;btn.textContent='Checking...';} if(st)st.textContent='';
   try{
     const d=await(await fetch('/api/check-updates',{method:'POST'})).json();
     if(!d.updated && d.reason){
-      st.textContent = /reach/i.test(d.reason) ? 'Could not reach the update server — check internet/firewall.' : d.reason;
+      st.textContent = /reach/i.test(d.reason) ? 'Could not reach the update server - check internet/firewall.' : d.reason;
     }else if(d.updated && (d.updated_files||[]).length){
       st.innerHTML='<span style="color:var(--ok)">Updated '+d.updated_files.length+' file(s). Please close and reopen the app to apply.</span>';
     }else{
       st.textContent='You are on the latest version.';
     }
-  }catch(e){ if(st)st.textContent='Update check failed — try again.'; }
+  }catch(e){ if(st)st.textContent='Update check failed - try again.'; }
   if(btn){btn.disabled=false;btn.textContent=old;}
 }
 async function autoCheckUpdates(){
@@ -2562,13 +2562,13 @@ async function autoCheckUpdates(){
     const d=await(await fetch('/api/check-updates',{method:'POST'})).json();
     if(d.updated && (d.updated_files||[]).length){
       const n=d.updated_files.length;
-      $('update-banner-text').textContent='Update installed ('+n+' file'+(n>1?'s':'')+') — restart to apply.';
+      $('update-banner-text').textContent='Update installed ('+n+' file'+(n>1?'s':'')+') - restart to apply.';
       $('update-banner').style.display='block';
     }
   }catch(e){}
 }
 async function restartTool(){
-  toast('Restarting — a fresh window will open…');
+  toast('Restarting - a fresh window will open...');
   try{ fetch('/api/restart',{method:'POST'}).catch(()=>{}); }catch(e){}
   // The new launcher kills this server and opens a new window; close this one.
   setTimeout(()=>{ try{ window.close(); }catch(e){} }, 1500);
@@ -2586,7 +2586,7 @@ async function authLogin(){
   if(!email||!pass){authMsg('Enter email and password');return;}
   const btn=$('auth-btn');
   btn.disabled=true; btn.dataset.orig=btn.innerHTML;
-  btn.innerHTML='<span class="auth-spin"></span>Logging in…';
+  btn.innerHTML='<span class="auth-spin"></span>Logging in...';
   try{
     const r=await(await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pass})})).json();
     if(r.status==='approved'){$('auth-overlay').style.display='none';initApp();return;}
@@ -2653,7 +2653,7 @@ async function admLoadUsers(){
     const users=r.users||[];
     if(!users.length){$('adm-users-list').textContent='No users found.';return;}
     $('adm-users-list').innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Email</th><th style="padding:6px">Name</th><th style="padding:6px">Device ID</th><th style="padding:6px;text-align:center">Approved</th><th style="padding:6px;text-align:center">Admin</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
-      users.map(u=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px">'+esc(u.email)+'</td><td style="padding:6px">'+esc(u.name||'')+'</td><td style="padding:6px;font-family:monospace;font-size:11px">'+esc(u.mac||'')+'</td><td style="padding:6px;text-align:center">'+(u.approved?'<span style="color:var(--ok)">Yes</span>':'<span style="color:var(--err)">No</span>')+'</td><td style="padding:6px;text-align:center">'+(u.is_admin?'<span style="color:var(--ok)">Yes</span>':'—')+'</td><td style="padding:6px;white-space:nowrap">'+
+      users.map(u=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px">'+esc(u.email)+'</td><td style="padding:6px">'+esc(u.name||'')+'</td><td style="padding:6px;font-family:monospace;font-size:11px">'+esc(u.mac||'')+'</td><td style="padding:6px;text-align:center">'+(u.approved?'<span style="color:var(--ok)">Yes</span>':'<span style="color:var(--err)">No</span>')+'</td><td style="padding:6px;text-align:center">'+(u.is_admin?'<span style="color:var(--ok)">Yes</span>':'N/A')+'</td><td style="padding:6px;white-space:nowrap">'+
         (!u.approved?'<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admApprove(\''+esc(u.email)+'\')">Approve</button>':
         '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admReject(\''+esc(u.email)+'\')">Reject</button>')+
         '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admChgPass(\''+esc(u.email)+'\')">Password</button>'+
@@ -2752,10 +2752,10 @@ async function admLoadConfig(){
     $('adm-admin-key').value=c.admin_key||'';
     const urlEl=$('adm-url-status');
     if(c.auth_api_url){urlEl.textContent='✅';urlEl.title='URL configured';}
-    else{urlEl.textContent='⚠️';urlEl.title='Not configured — add URL and click Save, then Sync';}
+    else{urlEl.textContent='⚠️';urlEl.title='Not configured - add URL and click Save, then Sync';}
     const authEl=$('adm-auth-url-status');
     if(c.user_auth_url){authEl.textContent='✅';authEl.title='URL configured';}
-    else{authEl.textContent='⚠️';authEl.title='Not configured — login will not work without this';}
+    else{authEl.textContent='⚠️';authEl.title='Not configured - login will not work without this';}
   }catch(e){}
 }
 async function admSaveConfig(){
@@ -2764,12 +2764,12 @@ async function admSaveConfig(){
     const d=await r.json();toast(d.error||'Config saved');
     const url=$('adm-script-url').value.trim();
     const urlEl=$('adm-url-status');
-    if(url){urlEl.textContent='✅';urlEl.title='URL saved — click Sync API Keys to activate';}
+    if(url){urlEl.textContent='✅';urlEl.title='URL saved - click Sync API Keys to activate';}
     else{urlEl.textContent='⚠️';urlEl.title='Not configured';}
     const authUrl=$('adm-auth-url').value.trim();
     const authEl=$('adm-auth-url-status');
     if(authUrl){authEl.textContent='✅';authEl.title='URL saved';}
-    else{authEl.textContent='⚠️';authEl.title='Not configured — login will not work';}
+    else{authEl.textContent='⚠️';authEl.title='Not configured - login will not work';}
   }catch(e){toast('Failed to save config');}
 }
 async function admSyncKeys(){
@@ -3037,7 +3037,7 @@ async function gscCheckDomain(){
       info.style.color='var(--md-on-surface, #1b5e20)';
       info.innerHTML='<b>'+esc(domain)+'</b><br>Account: <b>'+esc(r.email)+'</b><br>Access: <b>'+esc(r.accessLevel)+'</b>'
         + (connected ? '<br><span style="opacity:.85">✓ selected automatically for this domain</span>'
-                     : '<br><span style="color:#b71c1c">Not connected yet — click “+ Connect account” below and sign in with this account.</span>');
+                     : '<br><span style="color:#b71c1c">Not connected yet - click “+ Connect account” below and sign in with this account.</span>');
       // Auto-use the account that owns this domain (no manual pick needed)
       if(connected && _gscEmail!==r.email){ gscSelectAccount(r.email); }
     }else{

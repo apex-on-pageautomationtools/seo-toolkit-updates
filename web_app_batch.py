@@ -1,5 +1,5 @@
 """
-SEO Toolkit Pro v3.2 — Merged edition
+SEO Toolkit Pro v3.2 - Merged edition
 ======================================
 Combines v3 hardened engine (engine.py) with v2.3 features:
   - Country-specific Google domains + typed search + continuous scroll (v3)
@@ -89,7 +89,7 @@ SERPCOUNTER_DIR = os.path.join(BUNDLE_DIR, "extensions", "serpcounter")
 SCREENSHOTS_DIR = os.path.join(DATA_DIR, "screenshots")
 
 PROFILE_POOL_SIZE = 5
-PROFILE_MAX_AGE_H = 168   # 7 days — keep (Google) cookies for human-like sessions; only wipe truly stale profiles
+PROFILE_MAX_AGE_H = 168   # 7 days - keep (Google) cookies for human-like sessions; only wipe truly stale profiles
 
 for d in (UPLOADS_DIR, DOWNLOADS_DIR, SCREENSHOTS_DIR, PROFILES_DIR):
     os.makedirs(d, exist_ok=True)
@@ -210,7 +210,7 @@ if os.path.isdir(_old_profile):
     else:
         shutil.rmtree(_old_profile, ignore_errors=True)
 
-# For backward compat — PROFILE_DIR points to a random profile each launch
+# For backward compat - PROFILE_DIR points to a random profile each launch
 PROFILE_DIR = pick_profile()
 print(f"[GRC v{APP_VERSION}] Profile pool: {PROFILES_DIR} ({PROFILE_POOL_SIZE} profiles)")
 print(f"[GRC v{APP_VERSION}] Selected: {os.path.basename(PROFILE_DIR)}")
@@ -306,7 +306,7 @@ def resolve_working_url(value, log=None):
     """Given a domain OR a URL, follow the full redirect chain to the version that
     actually serves content (HTTP 200), and return (final_url, host). Tries the entered
     value first, then https/http x www/non-www variants. Used for URL-based tools
-    (on-page) so the report is generated for the version that really works — e.g. a site
+    (on-page) so the report is generated for the version that really works - e.g. a site
     that redirects http/non-www to https://www.x/ resolves to https://www.x. Returns
     (None, host) if nothing responds."""
     import re as _r
@@ -340,7 +340,7 @@ def resolve_working_url(value, log=None):
         except Exception:
             continue
     if log:
-        log(f"Could not reach any version of {host} — proceeding with {host} as entered.")
+        log(f"Could not reach any version of {host} - proceeding with {host} as entered.")
     return None, host
 
 # --------------------------------------------------------------------------- #
@@ -351,7 +351,7 @@ def resolve_working_url(value, log=None):
 # only one could run at a time and starting a second clobbered the first. Each now has
 # its own independent Job (state, events, lock, browser profile). The module-level
 # `state`, `stop_event`, `pause_event`, `state_lock` names below are thread-aware
-# proxies that transparently resolve to the CURRENT thread's job — so every existing
+# proxies that transparently resolve to the CURRENT thread's job - so every existing
 # `state[...]` / `stop_event.set()` call keeps working unchanged while operating on the
 # right job. A worker thread pins its mode at the top of run_*(); Flask request handlers
 # pin the mode from the request. See _ctx / _set_mode / _current_job below.
@@ -564,7 +564,7 @@ def _click_in_bframe(driver, selectors):
         return False
 
 def _click_buster_button(driver):
-    """Find and click Buster's solver button — it may be outside the iframe."""
+    """Find and click Buster's solver button - it may be outside the iframe."""
     from selenium.webdriver.common.by import By
     try:
         driver.switch_to.default_content()
@@ -598,8 +598,8 @@ def _click_buster_button(driver):
 
 def _click_audio_and_buster(driver):
     """Recovery when Buster/audio keeps failing: FIRST toggle to the IMAGE challenge
-    (the image / 'eye' button) and reload it a couple of times — this clears the audio
-    'automated queries' rate-limit — THEN switch to a fresh AUDIO challenge and click
+    (the image / 'eye' button) and reload it a couple of times - this clears the audio
+    'automated queries' rate-limit - THEN switch to a fresh AUDIO challenge and click
     Buster (which solves audio). Image-reload → audio → Buster is what gets it unstuck."""
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.action_chains import ActionChains
@@ -688,7 +688,7 @@ def solve_with_buster(driver, max_attempts=1):
             add_log("Solved by checkbox.")
             return True
         # Wait for Buster to inject its button in the bframe's help-button-holder
-        # Buster uses a CLOSED shadow DOM — use CDP to pierce it
+        # Buster uses a CLOSED shadow DOM - use CDP to pierce it
         clicked = False
         for _w in range(6):
             time.sleep(1.5)
@@ -746,7 +746,7 @@ def solve_with_buster(driver, max_attempts=1):
         if clicked:
             add_log("Buster button clicked, waiting up to 20s... (solve manually if you can)")
         else:
-            add_log("Buster button not found — waiting for manual solve...")
+            add_log("Buster button not found - waiting for manual solve...")
         for _ in range(10):
             time.sleep(2)
             if not is_alive(driver):
@@ -762,7 +762,7 @@ def solve_with_buster(driver, max_attempts=1):
             except Exception:
                 pass
 
-        # Buster didn't solve — try reloading CAPTCHA and retrying (up to 3 times)
+        # Buster didn't solve - try reloading CAPTCHA and retrying (up to 3 times)
         for reload_try in range(3):
             if stop_event.is_set() or not is_alive(driver):
                 return False
@@ -787,7 +787,7 @@ def solve_with_buster(driver, max_attempts=1):
                 try: driver.switch_to.default_content()
                 except Exception: pass
             if not reloaded:
-                # Reload button not found — wait and check for manual solve before giving up
+                # Reload button not found - wait and check for manual solve before giving up
                 for _ in range(10):
                     time.sleep(2)
                     if not is_alive(driver):
@@ -824,7 +824,7 @@ def solve_with_buster(driver, max_attempts=1):
                         pass
 
     # Final fallback: force a FRESH audio challenge (the "eye"/headphones button)
-    # then let Buster try once more — often solves when reloads alone didn't.
+    # then let Buster try once more - often solves when reloads alone didn't.
     if is_alive(driver) and not stop_event.is_set() and _click_audio_and_buster(driver):
         for _ in range(12):
             time.sleep(2)
@@ -872,12 +872,12 @@ class Session:
             exts.append(WINDSCRIBE_DIR)
             add_log("Windscribe VPN loaded -- sign in once to activate")
         # "system" and "pause" rely on the user's OS-level VPN (Urban VPN desktop app,
-        # ProtonVPN, Windscribe app, etc.) — no extension needed. Loading the Urban VPN
+        # ProtonVPN, Windscribe app, etc.) - no extension needed. Loading the Urban VPN
         # browser extension causes a registration error because it gets a different ID
         # when loaded as unpacked vs installed from the Chrome Web Store.
         if os.path.isdir(SERPCOUNTER_DIR):
             exts.append(SERPCOUNTER_DIR)
-            add_log("SERP Counter loaded — results will show position numbers")
+            add_log("SERP Counter loaded - results will show position numbers")
         return exts
 
     def start(self, rotate=False):
@@ -904,7 +904,7 @@ class Session:
             self.driver.execute_cdp_cmd("Network.setCacheDisabled", {"cacheDisabled": True})
             self.driver.execute_cdp_cmd("Network.clearBrowserCache", {})
             self.driver.execute_cdp_cmd("Network.clearBrowserCookies", {})
-            add_log("Cleared cache & cookies — fetching fresh results")
+            add_log("Cleared cache & cookies - fetching fresh results")
         except Exception:
             pass
         warm_up(self.driver, self.country, add_log, lang=self.lang)
@@ -932,12 +932,12 @@ def _recover(sess, kind):
             if solve_with_buster(sess.driver, 3):
                 return True
 
-        # Buster failed — pause and auto-detect when solved (no Resume button needed)
+        # Buster failed - pause and auto-detect when solved (no Resume button needed)
         bring_browser_to_front()
         return _captcha_manual_wait(sess.driver)
 
     # When using a VPN (system/pause), the current VPN IP is likely hard-blocked by Google.
-    # Cooling down on the same IP won't help — ask the user to switch VPN server instead.
+    # Cooling down on the same IP won't help - ask the user to switch VPN server instead.
     if sess.vpn_method in ("system", "pause") and not sess.headless:
         bring_browser_to_front()
         return _manual_pause(
@@ -975,7 +975,7 @@ def _recover(sess, kind):
         except Exception:
             pass
 
-    # All retries failed — last resort manual pause
+    # All retries failed - last resort manual pause
     if CONFIG.get("manual_fallback", True) and not sess.headless:
         bring_browser_to_front()
         return _manual_pause("Automatic recovery failed")
@@ -986,13 +986,13 @@ def _recover_page(sess, page_num):
     """A pagination page came back with 0 organic links.
 
     That is almost always a block (CAPTCHA / soft-block) or a transient empty
-    render — NOT the true end of results. Previously the loop trusted the empty
+    render - NOT the true end of results. Previously the loop trusted the empty
     page, found no 'Next' button on it, and reported the keyword as "not found",
     producing false negatives whenever the site actually ranked deeper.
 
     Try to clear the page *in place* (no browser restart, so we keep our spot in
     the pagination) and re-extract. Returns (links, reason):
-        (links, "ok")      recovered — links found
+        (links, "ok")      recovered - links found
         ([],    "empty")   page is genuinely empty (real end of results)
         ([],    "blocked") a block persisted and could not be cleared (incomplete)
     """
@@ -1010,16 +1010,16 @@ def _recover_page(sess, page_num):
 
         if kind == "captcha":
             reason = "blocked"
-            add_log(f"CAPTCHA on page {page_num} — recovering (attempt {attempt}/{retries})...")
+            add_log(f"CAPTCHA on page {page_num} - recovering (attempt {attempt}/{retries})...")
             cur = None
             try:
                 cur = sess.driver.current_url
             except Exception:
                 pass
             if not _recover(sess, kind):
-                add_log(f"Could not clear CAPTCHA on page {page_num} — stopping (results incomplete)")
+                add_log(f"Could not clear CAPTCHA on page {page_num} - stopping (results incomplete)")
                 return [], "blocked"
-            # Cool down before reloading — reloading immediately after a solve usually just
+            # Cool down before reloading - reloading immediately after a solve usually just
             # re-serves the challenge (Google is rate-limiting this IP). A short backoff
             # gives it a moment; the durable fix for repeated page-2 blocks is a proxy/VPN.
             backoff = min(45.0, 8.0 * attempt) + random.uniform(0, 4)
@@ -1037,7 +1037,7 @@ def _recover_page(sess, page_num):
                 pass
         elif kind in ("soft_block", "http_403"):
             reason = "blocked"
-            add_log(f"Block ({kind}) on page {page_num} — cooling down and reloading "
+            add_log(f"Block ({kind}) on page {page_num} - cooling down and reloading "
                     f"(attempt {attempt}/{retries})...")
             # Reload the same page after a backoff. Deliberately avoid a full browser
             # restart here so we don't lose our place in the pagination.
@@ -1054,7 +1054,7 @@ def _recover_page(sess, page_num):
             except Exception:
                 pass
         elif kind == "consent":
-            add_log(f"Consent wall on page {page_num} — accepting and reloading...")
+            add_log(f"Consent wall on page {page_num} - accepting and reloading...")
             try:
                 engine.accept_consent(sess.driver, add_log)
                 engine.accept_google_consent(sess.driver, add_log)
@@ -1064,8 +1064,8 @@ def _recover_page(sess, page_num):
             except Exception:
                 pass
         else:
-            # Not a detected block — likely a slow/partial render. Reload once.
-            add_log(f"Page {page_num}: 0 links ({kind}) — reloading (attempt {attempt}/{retries})...")
+            # Not a detected block - likely a slow/partial render. Reload once.
+            add_log(f"Page {page_num}: 0 links ({kind}) - reloading (attempt {attempt}/{retries})...")
             human_pause(2.5, 4.5)
             try:
                 if is_alive(sess.driver):
@@ -1091,7 +1091,7 @@ def _recover_page(sess, page_num):
 def _captcha_manual_wait(driver):
     """Show manual CAPTCHA prompt and auto-resume once the CAPTCHA clears —
     no Resume button click needed. Also resumes if user clicks Resume manually."""
-    msg = ("CAPTCHA detected — solve it in the browser window. "
+    msg = ("CAPTCHA detected - solve it in the browser window. "
            "The tool will continue automatically once solved.")
     add_log(msg)
     with state_lock:
@@ -1099,14 +1099,14 @@ def _captcha_manual_wait(driver):
         state["status"] = "paused"
     pause_event.clear()
 
-    # Poll every 2 seconds — resume as soon as CAPTCHA disappears from the page
+    # Poll every 2 seconds - resume as soon as CAPTCHA disappears from the page
     while not stop_event.is_set() and not pause_event.is_set():
         time.sleep(2)
         try:
             src = page_source(driver)
             kind = classify_page(src)
             if kind in ("ok", "empty", "consent"):
-                add_log("CAPTCHA solved — resuming automatically.")
+                add_log("CAPTCHA solved - resuming automatically.")
                 break
         except Exception:
             pass
@@ -1119,11 +1119,11 @@ def _captcha_manual_wait(driver):
 
 
 def _manual_pause(reason):
-    add_log(f"{reason}. Pausing for manual solve — solve in the browser, then Resume.")
+    add_log(f"{reason}. Pausing for manual solve - solve in the browser, then Resume.")
     bring_browser_to_front()
     with state_lock:
         state["captcha_msg"] = (f"{reason}. The browser window has been brought to the "
-                                f"front — solve the CAPTCHA there, then click Resume.")
+                                f"front - solve the CAPTCHA there, then click Resume.")
         state["status"] = "paused"
     pause_event.clear()
     pause_event.wait()
@@ -1135,8 +1135,8 @@ def _manual_pause(reason):
 
 def _highlight_domain_in_serp(driver, domain_clean, first_only=False):
     """Highlight the target domain's organic result(s) in the LIVE SERP before the
-    screenshot — like the SERP Highlighter extension: an orange outline, a soft
-    background and a 'YOUR SITE' badge — so the client's position is obvious in the
+    screenshot - like the SERP Highlighter extension: an orange outline, a soft
+    background and a 'YOUR SITE' badge - so the client's position is obvious in the
     captured image.
 
     Matching is on the result's URL (the title link's href), NOT the title text.
@@ -1203,7 +1203,7 @@ def _save_full_page_screenshot(driver, path):
 
 
 # --------------------------------------------------------------------------- #
-# Keyword ranking — hardened
+# Keyword ranking - hardened
 # --------------------------------------------------------------------------- #
 def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_found", city=None, lang="en"):
     domain_clean = clean_domain(domain)
@@ -1214,7 +1214,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
             return {"status": "stopped", "matches": []}
         pause_event.wait()
         if not is_alive(sess.driver):
-            add_log("Browser lost — restarting for retry...")
+            add_log("Browser lost - restarting for retry...")
             try:
                 sess.start(rotate=bool(sess.pool))
             except Exception:
@@ -1226,7 +1226,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
         kind = classify_page(src)
 
         if kind == "consent":
-            add_log("Consent page detected — accepting...")
+            add_log("Consent page detected - accepting...")
             engine.accept_consent(sess.driver, add_log)
             engine.accept_google_consent(sess.driver, add_log)
             human_search(sess.driver, keyword, country, add_log, city=city, lang=lang)
@@ -1243,7 +1243,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
         time.sleep(1.0)
         links_page1, dbg = extract_organic(sess.driver, debug=True)
 
-        # If no links found, might be consent or empty — try accepting consent and retry
+        # If no links found, might be consent or empty - try accepting consent and retry
         if not links_page1 and _try < CONFIG.get("max_block_retries", 3):
             engine.accept_consent(sess.driver, add_log)
             engine.accept_google_consent(sess.driver, add_log)
@@ -1258,7 +1258,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     domain_part = l[:50]
                 add_log(f"  #{idx}: {domain_part}")
         else:
-            add_log(f"Page 1: 0 links — URL={dbg.get('url','?')[:80]} "
+            add_log(f"Page 1: 0 links - URL={dbg.get('url','?')[:80]} "
                     f"h3={dbg.get('h3count','?')} jsname={dbg.get('jsname_count','?')} "
                     f"zReHs={dbg.get('zReHs_count','?')} rso={dbg.get('rso','?')}")
 
@@ -1316,7 +1316,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                 try:
                     nxt = sess.driver.find_elements(By.CSS_SELECTOR, _NEXT_SELECTORS)
                     if not nxt:
-                        add_log(f"No 'Next' button on page {page_num} — stopping")
+                        add_log(f"No 'Next' button on page {page_num} - stopping")
                         break
                     # Human-like paging: scroll to the Next button and pause before AND after
                     # the click. Rapid back-to-back page clicks from one IP are what trip
@@ -1334,21 +1334,21 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     page_links = extract_organic(sess.driver)
                     if not page_links:
                         # 0 links is almost always a block or a transient empty render,
-                        # NOT the end of results — try to clear it before trusting it.
+                        # NOT the end of results - try to clear it before trusting it.
                         page_links, reason = _recover_page(sess, page_num)
                         if not page_links:
                             if reason == "blocked":
-                                add_log(f"Page {page_num}: blocked and could not recover — "
+                                add_log(f"Page {page_num}: blocked and could not recover - "
                                         f"stopping (results may be incomplete)")
                                 blocked_incomplete = True
                             else:
-                                add_log(f"Page {page_num}: 0 links — reached end of results")
+                                add_log(f"Page {page_num}: 0 links - reached end of results")
                             break
                     prev_total = total_links   # organic results counted on all prior pages
                     total_links += len(page_links)
                     add_log(f"Page {page_num}: {len(page_links)} links")
                     # Rank = results on prior pages + position on THIS page. Use the ACTUAL
-                    # cumulative count, not page_num*10 — Google frequently shows fewer than
+                    # cumulative count, not page_num*10 - Google frequently shows fewer than
                     # 10 organic results per page (ads/snippets/local pack take slots; page 1
                     # here had 9), and assuming 10/page inflates the reported position.
                     page_matches = find_domain_in_page(sess.driver, domain_clean, page_offset=prev_total)
@@ -1392,9 +1392,9 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     f"({total_links} results across {page_num} pages)")
             return {"status": "found", "matches": matches, "pages": page_num}
         if blocked_incomplete:
-            add_log(f"'{keyword}': search cut short by a block at page {page_num} — "
+            add_log(f"'{keyword}': search cut short by a block at page {page_num} - "
                     f"ranking may exist deeper ({total_links} results seen)")
-            return {"status": f"not_found (incomplete — blocked at page {page_num})",
+            return {"status": f"not_found (incomplete - blocked at page {page_num})",
                     "matches": [], "pages": page_num, "incomplete": True}
         add_log(f"'{keyword}': not in top {page_num} pages ({total_links} results)")
         return {"status": f"not_found in {page_num} pages", "matches": [], "pages": page_num}
@@ -1480,7 +1480,7 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
         with state_lock:
             initial_ip = state.get("vpn_location", "")
 
-        # Keywords whose search was cut short by a CAPTCHA/block — retried at the end.
+        # Keywords whose search was cut short by a CAPTCHA/block - retried at the end.
         incomplete = []   # list of (kw, kw_domain, kw_target, result_row_index)
 
         def _make_row(kw, kw_target, result):
@@ -1532,7 +1532,7 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
 
             # Auto-recover if browser died between keywords
             if not is_alive(sess.driver):
-                add_log("Browser disconnected — restarting...")
+                add_log("Browser disconnected - restarting...")
                 try:
                     sess.start(rotate=bool(sess.pool))
                     add_log("Browser restarted successfully.")
@@ -1573,7 +1573,7 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
 
         # Retry pass: re-check keywords whose search was cut short by a CAPTCHA/block.
         # A fresh session (new profile, rotated proxy if a pool is set) resets the IP /
-        # challenge state, giving the best chance to complete them — so a site that DOES
+        # challenge state, giving the best chance to complete them - so a site that DOES
         # rank isn't left as a false "not found (incomplete)".
         if incomplete and not stop_event.is_set():
             add_log(f"Re-checking {len(incomplete)} keyword(s) that a block cut short...",
@@ -1624,7 +1624,7 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
         autosave()
         with state_lock:
             state["status"] = "error"
-            state["error_msg"] = "Browser was closed. Results saved — Export CSV to download."
+            state["error_msg"] = "Browser was closed. Results saved - Export CSV to download."
     except Exception as e:
         import traceback; traceback.print_exc()
         add_log(f"Fatal error: {e}")
@@ -1635,7 +1635,7 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
         sess.quit()
 
 # --------------------------------------------------------------------------- #
-# Index checker — hardened
+# Index checker - hardened
 # --------------------------------------------------------------------------- #
 def index_one(sess, raw_url, country, city=None, lang="en"):
     from urllib.parse import urlparse
@@ -1686,7 +1686,7 @@ def run_index_analysis(urls, delay, headless, country, proxies,
             if stop_event.is_set():
                 break
             if not is_alive(sess.driver):
-                add_log("Browser disconnected — restarting...")
+                add_log("Browser disconnected - restarting...")
                 try:
                     sess.start(rotate=bool(sess.pool))
                     add_log("Browser restarted successfully.")
@@ -1728,7 +1728,7 @@ def run_index_analysis(urls, delay, headless, country, proxies,
         autosave()
         with state_lock:
             state["status"] = "error"
-            state["error_msg"] = "Browser closed. Results saved — Export CSV to download."
+            state["error_msg"] = "Browser closed. Results saved - Export CSV to download."
     except Exception as e:
         import traceback; traceback.print_exc()
         add_log(f"Fatal error: {e}")
@@ -1739,7 +1739,7 @@ def run_index_analysis(urls, delay, headless, country, proxies,
         sess.quit()
 
 # --------------------------------------------------------------------------- #
-# Search-results count — searches each keyword and reads Google's "About N results"
+# Search-results count - searches each keyword and reads Google's "About N results"
 # --------------------------------------------------------------------------- #
 def _capture_result_count(driver):
     """Read Google's 'About N results' total from the current SERP. Returns the
@@ -1838,7 +1838,7 @@ def run_count_analysis(keywords, delay, headless, country, proxies,
             if stop_event.is_set():
                 break
             if not is_alive(sess.driver):
-                add_log("Browser disconnected — restarting...")
+                add_log("Browser disconnected - restarting...")
                 try:
                     sess.start(rotate=bool(sess.pool))
                     add_log("Browser restarted successfully.")
@@ -1880,7 +1880,7 @@ def run_count_analysis(keywords, delay, headless, country, proxies,
         autosave()
         with state_lock:
             state["status"] = "error"
-            state["error_msg"] = "Browser closed. Results saved — Export CSV to download."
+            state["error_msg"] = "Browser closed. Results saved - Export CSV to download."
     except Exception as e:
         import traceback; traceback.print_exc()
         add_log(f"Fatal error: {e}")
@@ -1891,7 +1891,7 @@ def run_count_analysis(keywords, delay, headless, country, proxies,
         sess.quit()
 
 # --------------------------------------------------------------------------- #
-# Backlink checker — visits each backlink URL, finds domain link, checks meta
+# Backlink checker - visits each backlink URL, finds domain link, checks meta
 # --------------------------------------------------------------------------- #
 def _wait_page_ready(driver, timeout=10):
     """Block until the browser reports the document has finished loading, so anchors
@@ -1909,7 +1909,7 @@ def _wait_page_ready(driver, timeout=10):
 def _page_blocked_or_empty(src):
     """True when the fetched page is a transient challenge / rate-limit / empty shell
     rather than the real content. On such pages the backlink would falsely read as
-    'not found', so we retry once — this is what caused the '404 first, Ok on retry'
+    'not found', so we retry once - this is what caused the '404 first, Ok on retry'
     inconsistency."""
     if not src or len(src) < 800:
         return True
@@ -1940,11 +1940,11 @@ def backlink_one(sess, backlink_url, target_domain, check_da=True):
             if attempt == 0:
                 human_pause(2, 4)
                 continue
-            return {"status": "error", "domain_found": "Error", "meta_robots": "—",
-                    "link_type": "—", "link_url": "", "error": str(e)}
+            return {"status": "error", "domain_found": "Error", "meta_robots": "N/A",
+                    "link_type": "N/A", "link_url": "", "error": str(e)}
         if not is_alive(sess.driver):
-            return {"status": "error", "domain_found": "Error", "meta_robots": "—",
-                    "link_type": "—", "link_url": ""}
+            return {"status": "error", "domain_found": "Error", "meta_robots": "N/A",
+                    "link_type": "N/A", "link_url": ""}
         _wait_page_ready(sess.driver, timeout=10)
         human_pause(2, 4)
         src = page_source(sess.driver)
@@ -1954,8 +1954,8 @@ def backlink_one(sess, backlink_url, target_domain, check_da=True):
             human_pause(3, 6)  # settle, then one clean retry
 
     if not is_alive(sess.driver):
-        return {"status": "error", "domain_found": "Error", "meta_robots": "—",
-                "link_type": "—", "link_url": ""}
+        return {"status": "error", "domain_found": "Error", "meta_robots": "N/A",
+                "link_type": "N/A", "link_url": ""}
 
     # Capture final URL after any redirects
     try:
@@ -1980,12 +1980,12 @@ def backlink_one(sess, backlink_url, target_domain, check_da=True):
     # Find target domain links. Profile/directory sites usually wrap the outbound
     # website link in a redirect/tracking URL (e.g. href="/outbound?url=https%3A%2F%2F
     # target.com" or a l.php?u=... wrapper), so the anchor's NETLOC is the host site, not
-    # the target — matching only the netloc misses a link that's genuinely there. We match
+    # the target - matching only the netloc misses a link that's genuinely there. We match
     # the target anywhere in the DECODED href, and fall back to scanning the rendered HTML.
     from urllib.parse import unquote as _unquote
     domain_found = "No"
     link_url = ""
-    link_type = "—"
+    link_type = "N/A"
 
     def _host_is_target(host):
         host = (host or "").lower().replace("www.", "").strip("/")
@@ -2028,14 +2028,14 @@ def backlink_one(sess, backlink_url, target_domain, check_da=True):
         except Exception:
             pass
 
-    da_val, dr_val, pa_val, da_src = "—", "—", "—", "—"
+    da_val, dr_val, pa_val, da_src = "N/A", "N/A", "N/A", "N/A"
     if check_da:
         bl_domain = urlparse(url).netloc.replace("www.", "").lower()
         da_result = check_da_pa(sess.driver, bl_domain, log_fn=add_log)
-        da_val = da_result.get("da", "—")
-        dr_val = da_result.get("dr", "—")
-        pa_val = da_result.get("pa", "—")
-        da_src = da_result.get("source", "—")
+        da_val = da_result.get("da", "N/A")
+        dr_val = da_result.get("dr", "N/A")
+        pa_val = da_result.get("pa", "N/A")
+        da_src = da_result.get("source", "N/A")
 
     return {"status": "ok", "domain_found": domain_found, "meta_robots": meta_robots,
             "link_type": link_type, "link_url": link_url, "final_url": final_url,
@@ -2065,7 +2065,7 @@ def run_backlink_analysis(urls, domain, delay, headless, country, proxies,
             if stop_event.is_set():
                 break
             if not is_alive(sess.driver):
-                add_log("Browser disconnected — restarting...")
+                add_log("Browser disconnected - restarting...")
                 try:
                     sess.start(rotate=bool(sess.pool))
                     add_log("Browser restarted successfully.")
@@ -2082,12 +2082,12 @@ def run_backlink_analysis(urls, domain, delay, headless, country, proxies,
             with state_lock:
                 state["results"].append({
                     "url": url, "domain_found": result.get("domain_found", "No"),
-                    "meta_robots": result.get("meta_robots", "—"),
-                    "link_type": result.get("link_type", "—"),
+                    "meta_robots": result.get("meta_robots", "N/A"),
+                    "link_type": result.get("link_type", "N/A"),
                     "link_url": result.get("link_url", ""),
-                    "da": result.get("da", "—"), "pa": result.get("pa", "—"),
-                    "dr": result.get("dr", "—"),
-                    "da_source": result.get("da_source", "—"),
+                    "da": result.get("da", "N/A"), "pa": result.get("pa", "N/A"),
+                    "dr": result.get("dr", "N/A"),
+                    "da_source": result.get("da_source", "N/A"),
                     "status": result.get("status", "unknown"),
                     "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
             autosave()
@@ -2109,7 +2109,7 @@ def run_backlink_analysis(urls, domain, delay, headless, country, proxies,
         autosave()
         with state_lock:
             state["status"] = "error"
-            state["error_msg"] = "Browser closed. Results saved — Export CSV to download."
+            state["error_msg"] = "Browser closed. Results saved - Export CSV to download."
     except Exception as e:
         import traceback; traceback.print_exc()
         add_log(f"Fatal error: {e}")
@@ -2134,7 +2134,7 @@ def _proxies_from_request(data):
     return proxies
 
 # --------------------------------------------------------------------------- #
-# Flask routes — Auth
+# Flask routes - Auth
 # --------------------------------------------------------------------------- #
 @app.route("/api/auth/check")
 def api_auth_check():
@@ -2203,7 +2203,7 @@ def api_auth_tools():
     return jsonify({"tools": auth.get_allowed_tools()})
 
 # --------------------------------------------------------------------------- #
-# Flask routes — API
+# Flask routes - API
 # --------------------------------------------------------------------------- #
 @app.route("/")
 def index():
@@ -2301,7 +2301,7 @@ def api_start():
     pause_event.set(); stop_event.clear(); clear_autosave()
 
     if city and latitude is not None:
-        add_log(f"City: {city} — Geolocation sensor: {latitude}, {longitude}")
+        add_log(f"City: {city} - Geolocation sensor: {latitude}, {longitude}")
 
     if mode == "ranking":
         t = threading.Thread(target=run_rank_analysis,
@@ -2329,7 +2329,7 @@ def api_start():
                                    latitude, longitude, city, lang),
                              daemon=True)
     t.start()
-    activity(f"{mode.title()} started — {domain or 'multi-target'} ({len(keywords)} keywords)")
+    activity(f"{mode.title()} started - {domain or 'multi-target'} ({len(keywords)} keywords)")
     return jsonify({"status": "started", "total": len(keywords), "mode": mode})
 
 def _pin_request_mode():
@@ -2391,7 +2391,7 @@ def api_cities():
     return jsonify(cities)
 
 # --------------------------------------------------------------------------- #
-# Admin — City Management
+# Admin - City Management
 # --------------------------------------------------------------------------- #
 @app.route("/api/admin/cities")
 def api_admin_cities():
@@ -2409,13 +2409,13 @@ def api_admin_add_city():
     if not display or not canonical:
         return jsonify({"error": "Display name and canonical name are required"})
     custom = CONFIG.setdefault("custom_cities", {})
-    # Never silently overwrite an existing location (built-in or custom) — a
+    # Never silently overwrite an existing location (built-in or custom) - a
     # re-add with different coordinates would corrupt the lat/lng already
     # in use for that city.
     existing = next((k for k in list(custom.keys()) + list(engine.CITY_CANONICAL.keys())
                      if k.strip().lower() == display.lower()), None)
     if existing:
-        return jsonify({"error": f'"{existing}" is already added — skipped to avoid overwriting its coordinates.'})
+        return jsonify({"error": f'"{existing}" is already added - skipped to avoid overwriting its coordinates.'})
     custom[display] = canonical
     # Register in engine dicts so ranking/UULE work immediately
     engine.CITY_CANONICAL[display] = canonical
@@ -2449,7 +2449,7 @@ def api_admin_remove_city():
 def api_admin_upload_cities():
     """Bulk-add cities from CSV text.  Expected columns:
        City, Country, Latitude, Longitude [, Canonical]
-    Canonical is optional — when omitted it is generated as "City,Country".
+    Canonical is optional - when omitted it is generated as "City,Country".
     Display name is built as "City, CC" (e.g. "Perth, AU")."""
     import csv, io
     data = request.get_json(silent=True) or {}
@@ -2634,7 +2634,7 @@ def api_health():
 
 @app.route("/api/check-updates", methods=["POST"])
 def api_check_updates():
-    """Run the OTA updater on demand — used by the Settings 'Check for updates'
+    """Run the OTA updater on demand - used by the Settings 'Check for updates'
     button and the auto-check on open, so users never touch the command line.
     Downloads any changed files to disk; a relaunch applies backend changes."""
     try:
@@ -2659,7 +2659,7 @@ def api_restart():
         return jsonify({"ok": False, "error": str(e)})
 
 # --------------------------------------------------------------------------- #
-# SEO On-Page Report — runs phase2 script as subprocess
+# SEO On-Page Report - runs phase2 script as subprocess
 # --------------------------------------------------------------------------- #
 onpage_state = {
     "status": "idle",  # idle, running, completed, error
@@ -2676,7 +2676,7 @@ SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"
 
 
 # --------------------------------------------------------------------------- #
-# On-page "target pages & keywords" parsing — order-agnostic (paste + Excel)
+# On-page "target pages & keywords" parsing - order-agnostic (paste + Excel)
 # --------------------------------------------------------------------------- #
 import re as _re
 
@@ -2801,7 +2801,7 @@ def _run_onpage_report(domain, targets_json, fmt, no_capture):
 
     # On-page takes a Website URL: before generating, find which version actually works
     # (follow the redirect chain to the live HTTP 200 version) and build the report for
-    # THAT version — e.g. an entry of example.com that redirects to https://www.example.com/
+    # THAT version - e.g. an entry of example.com that redirects to https://www.example.com/
     # produces a report for www.example.com, not a dead non-www host.
     _log0("Checking which website version is running...")
     final_url, host = resolve_working_url(domain, log=_log0)
@@ -2813,7 +2813,7 @@ def _run_onpage_report(domain, targets_json, fmt, no_capture):
         onpage_state["progress"] = "Starting..."
 
     # Save into the user's configured Downloads folder (per-domain), same as every
-    # other tool — not a hidden "onpage_output" folder inside the install dir.
+    # other tool - not a hidden "onpage_output" folder inside the install dir.
     out_dir = _domain_folder(domain, "onpage")
     os.makedirs(out_dir, exist_ok=True)
 
@@ -2963,7 +2963,7 @@ def api_onpage_download():
 
 
 # --------------------------------------------------------------------------- #
-# Health Audit — runs checks + optional Selenium screenshots, builds report
+# Health Audit - runs checks + optional Selenium screenshots, builds report
 # --------------------------------------------------------------------------- #
 ha_state = {
     "status": "idle",  # idle, running, completed, error
@@ -3068,7 +3068,7 @@ def api_ha_start():
                          args=(domain, fmt, target_pages, no_capture, headless, browser_name, psi_key),
                          daemon=True)
     t.start()
-    activity(f"Health audit started — {domain} ({fmt})")
+    activity(f"Health audit started - {domain} ({fmt})")
     return jsonify({"status": "started", "domain": domain})
 
 
@@ -3155,7 +3155,7 @@ def _run_gsc_audit(domain, email, fmt, headless, browser_name):
     try:
         # Screenshots are captured from the per-account logged-in session inside
         # run_gsc_audit (each session opens its own browser), so we no longer launch a
-        # shared-profile browser here — that shared profile isn't signed in and was
+        # shared-profile browser here - that shared profile isn't signed in and was
         # screenshotting the Google sign-in page instead of real GSC data.
         _log("[1/2] Running GSC audit (API data + session screenshots)...")
         path = gsc_audit.run_gsc_audit(
@@ -3196,9 +3196,9 @@ def api_gsc_connect():
 
     # Run OAuth inside a per-account browser SESSION profile so the very same
     # signed-in browser is saved for the Manual Action / Security screenshot
-    # capture — one login covers both the API token AND the screenshots. Using a
+    # capture - one login covers both the API token AND the screenshots. Using a
     # fresh profile per account also avoids Google's ~10-accounts-per-browser cap.
-    session = gsc_audit.create_session(label="Connecting…")
+    session = gsc_audit.create_session(label="Connecting...")
     driver = None
     try:
         driver = engine.build_driver(
@@ -3254,7 +3254,7 @@ def api_gsc_start():
             return jsonify({"error": "GSC audit already running."}), 400
 
     data = request.get_json(silent=True) or {}
-    # GSC audit is domain/property-based — trim a pasted URL to the bare domain.
+    # GSC audit is domain/property-based - trim a pasted URL to the bare domain.
     domain = to_domain(data.get("domain") or "")
     email = (data.get("email") or "").strip()
     if not domain:
@@ -3341,7 +3341,7 @@ def api_gsc_session_launch(sid):
         driver = gsc_audit.launch_session_browser(sid, browser_pref=browser_name)
         _session_drivers[sid] = driver
         return jsonify({"status": "launched", "session_id": sid,
-                        "message": "Browser opened — log into your Google accounts, then click 'Done' when finished."})
+                        "message": "Browser opened - log into your Google accounts, then click 'Done' when finished."})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3453,7 +3453,7 @@ def api_activity_log():
         return jsonify(list(_activity_log))
 
 # --------------------------------------------------------------------------- #
-# Auth — is_admin
+# Auth - is_admin
 # --------------------------------------------------------------------------- #
 @app.route("/api/auth/is_admin")
 def api_auth_is_admin():
@@ -3617,13 +3617,13 @@ def api_gsc_domain_check():
         return jsonify({"found": False, "error": str(e)})
 
 # --------------------------------------------------------------------------- #
-# Crawl Tracker — proxy to Apps Script Web App
+# Crawl Tracker - proxy to Apps Script Web App
 # --------------------------------------------------------------------------- #
 def _crawl_apps_script_post(webapp_url, payload, timeout=180, retries=1):
     """POST to the Apps Script web app the same way the known-working
     last-gsc-crawl-date-check frontend does: Content-Type: text/plain
     (requests.post(json=...) sends application/json instead, which some
-    doPost(e) handlers branch on) and a generous timeout — that frontend
+    doPost(e) handlers branch on) and a generous timeout - that frontend
     uses no timeout at all, since the URL Inspection API can genuinely take
     well over 30-60s per URL. One retry, since a slow/cold Apps Script
     execution is transient, not a hard failure."""
@@ -3689,7 +3689,7 @@ def api_brief_start():
             return jsonify({"error": "Brief analysis already running"}), 400
         _brief_state.update({"running": True, "progress": 0, "status": "starting", "result": None, "error": None, "error_msg": None, "stop": False, "log": []})
     data = request.get_json(silent=True) or {}
-    # Brief analysis is domain-based — trim a pasted URL to the bare domain.
+    # Brief analysis is domain-based - trim a pasted URL to the bare domain.
     domain = to_domain(data.get("domain") or "")
     if not domain:
         with _brief_lock:

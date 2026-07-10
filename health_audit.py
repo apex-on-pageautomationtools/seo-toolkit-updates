@@ -35,7 +35,7 @@ _RENDER_CACHE = {}
 
 def _render_html(url, driver=None, wait=1.2):
     """Return the page as a real browser renders it (so JS-set title / meta /
-    canonical are seen — Google renders JS, so this is the ACTUAL state that
+    canonical are seen - Google renders JS, so this is the ACTUAL state that
     matters). Falls back to raw HTTP when no browser/driver is available."""
     if url in _RENDER_CACHE:
         return _RENDER_CACHE[url]
@@ -155,7 +155,7 @@ def check_canonical(target_pages, domain, driver=None):
             url = "https://" + url
         html = _render_html(url, driver)
         if html is None:
-            results.append({"url": url, "canonical": "—", "ok": False, "note": "Could not fetch"})
+            results.append({"url": url, "canonical": "N/A", "ok": False, "note": "Could not fetch"})
             continue
         meta = _parse_meta(html)
         canonicals = list(dict.fromkeys(meta["canonical"]))
@@ -185,7 +185,7 @@ def check_double_meta(target_pages, domain, driver=None):
             url = "https://" + url
         html = _render_html(url, driver)
         if html is None:
-            results.append({"url": url, "title_count": "—", "desc_count": "—", "ok": False, "note": "Could not fetch"})
+            results.append({"url": url, "title_count": "N/A", "desc_count": "N/A", "ok": False, "note": "Could not fetch"})
             continue
         meta = _parse_meta(html)
         tc, dc = len(meta["title"]), len(meta["description"])
@@ -219,7 +219,7 @@ def check_meta_suggestions(target_pages, domain, driver=None):
             url = "https://" + url
         html = _render_html(url, driver)
         if html is None:
-            results.append({"url": url, "title": "—", "description": "—",
+            results.append({"url": url, "title": "N/A", "description": "N/A",
                             "ok": False, "note": "Could not fetch"})
             continue
         meta = _parse_meta(html)
@@ -243,7 +243,7 @@ def check_meta_robots(target_pages, domain, driver=None):
             url = "https://" + url
         html = _render_html(url, driver)
         if html is None:
-            results.append({"url": url, "robots_value": "—", "ok": False, "note": "Could not fetch"})
+            results.append({"url": url, "robots_value": "N/A", "ok": False, "note": "Could not fetch"})
             continue
         meta = _parse_meta(html)
         robots_values = meta["robots"]
@@ -266,7 +266,7 @@ def check_meta_robots(target_pages, domain, driver=None):
 def check_versions_full(domain):
     """Determine whether the site runs as a single canonical version or as several
     independent ones. Each variant is followed through its FULL redirect chain to the
-    final destination — a site that 301-redirects http/non-www/etc. to one canonical URL
+    final destination - a site that 301-redirects http/non-www/etc. to one canonical URL
     (e.g. http://x -> https://x -> https://www.x/) is a single version, NOT multiple.
     Only variants that independently land on DIFFERENT HTTP 200 URLs count as multiple."""
     variants = [
@@ -303,13 +303,13 @@ def check_versions_full(domain):
             summary = f"No issue found. The site runs on a single version: {canonical}"
     elif len(final_200) >= 2:
         is_ok = False
-        summary = (f"Issue found — the site is reachable at {len(final_200)} independent "
+        summary = (f"Issue found - the site is reachable at {len(final_200)} independent "
                    f"versions ({', '.join(final_200)}) that each return HTTP 200 without "
                    f"redirecting to one canonical URL. Fix: 301-redirect all variants to "
                    f"a single canonical URL.")
     else:
         is_ok = False
-        summary = ("Could not verify the site version(s) — no variant returned HTTP 200. "
+        summary = ("Could not verify the site version(s) - no variant returned HTTP 200. "
                    "Please check the site's availability manually.")
 
     rows = []
@@ -342,7 +342,7 @@ def check_dummy_content(domain, driver=None):
     titles = re.findall(r'<h3[^>]*>(.*?)</h3>', html, re.S)
     titles = [re.sub(r'<[^>]+>', '', t).strip() for t in titles[:5] if t.strip()]
     if titles:
-        result = f"Possible dummy content found — Google shows {count} result(s) for 'site:{domain} lorem'.\nPages found:\n"
+        result = f"Possible dummy content found - Google shows {count} result(s) for 'site:{domain} lorem'.\nPages found:\n"
         result += "\n".join(f"  - {t}" for t in titles)
     else:
         result = f"Google returned {count} result(s) for 'site:{domain} lorem'. Please verify manually."
@@ -351,7 +351,7 @@ def check_dummy_content(domain, driver=None):
 
 def check_broken_links(domain, target_pages=None):
     """Check all links on every target page (or homepage if none given).
-    No artificial limit — every link on each page is checked."""
+    No artificial limit - every link on each page is checked."""
     from urllib.parse import urljoin
     headers = {"User-Agent": _UA}
 
@@ -394,7 +394,7 @@ def check_broken_links(domain, target_pages=None):
                 code = 0
         # Only genuinely dead links count as broken: 404 (Not Found) / 410 (Gone).
         # 429 (rate-limited), 403/401/405 (bot-blocked), 5xx (temporary server errors)
-        # and timeouts are NOT broken links — they're the server refusing the automated
+        # and timeouts are NOT broken links - they're the server refusing the automated
         # request, so flagging them gives false "broken link" counts.
         if code in (404, 410):
             broken.append((u, code))
@@ -413,7 +413,7 @@ def check_sucuri(domain):
     ok = True
     html_lower = html.lower()
 
-    # Malware — check the actual result text, not template text
+    # Malware - check the actual result text, not template text
     has_no_malware = "didn't detect any malware" in html_lower or "no malware found" in html_lower
     has_malware = bool(re.search(r'Warning:\s*Malware\s+Detected', html))
     # The raw HTML contains BOTH templates; check which is actually shown
@@ -443,12 +443,12 @@ def check_sucuri(domain):
     else:
         bl_ok = True
 
-    # Blacklist details — count "Domain clean by" entries
+    # Blacklist details - count "Domain clean by" entries
     bl_clean = len(re.findall(r'Domain clean by', html))
     if bl_clean:
         details.append(f"{bl_clean} blacklist checks clean")
 
-    # Risk level — infer from malware/blacklist status
+    # Risk level - infer from malware/blacklist status
     if not malware_ok or not bl_ok:
         risk_level = "High"
     elif malware_ok and bl_ok:
@@ -506,7 +506,7 @@ def check_robots_txt(domain):
             content = r.read().decode("utf-8", "ignore")
     except _ue.HTTPError as e:
         return {"ok": False, "status": e.code,
-                "summary": f"robots.txt returned HTTP {e.code} — file is missing or inaccessible."}
+                "summary": f"robots.txt returned HTTP {e.code} - file is missing or inaccessible."}
     except Exception as e:
         return {"ok": False, "status": 0,
                 "summary": f"Could not fetch robots.txt: {e}"}
@@ -549,7 +549,7 @@ def check_robots_txt(domain):
 
 def check_sitemap(domain, robots_data=None):
     """Fetch and validate the sitemap. Tries /sitemap.xml then /sitemap_index.xml
-    (many sites — e.g. Yoast — expose only a sitemap index). `robots_data` is
+    (many sites - e.g. Yoast - expose only a sitemap index). `robots_data` is
     accepted for compatibility with callers that pass robots.txt results; when it
     carries explicit Sitemap: URLs those are tried first."""
     candidates = []
@@ -578,7 +578,7 @@ def check_sitemap(domain, robots_data=None):
                 content = r.read().decode("utf-8", "ignore")
         except _ue.HTTPError as e:
             last = {"ok": False, "status": e.code,
-                    "summary": f"{name} returned HTTP {e.code} — file is missing or inaccessible."}
+                    "summary": f"{name} returned HTTP {e.code} - file is missing or inaccessible."}
             continue
         except Exception as e:
             last = {"ok": False, "status": 0, "summary": f"Could not fetch {name}: {e}"}
@@ -604,7 +604,7 @@ def check_sitemap(domain, robots_data=None):
 
 
 def check_serp(domain, driver=None):
-    """Check Google SERP for site:{domain} — count indexed pages AND detect
+    """Check Google SERP for site:{domain} - count indexed pages AND detect
     hacked/spam content (pharma, casino, Japanese SEO spam, cloaked pages)."""
     query = f"site:{domain}"
     if driver:
@@ -689,7 +689,7 @@ def check_blank_pages(target_pages, domain, driver=None):
         text = re.sub(r'\s+', ' ', text).strip()
         is_blank = len(text) < 100
         results.append({"url": url, "ok": not is_blank, "text_len": len(text),
-                         "note": f"Only {len(text)} chars of text — appears blank" if is_blank else "OK"})
+                         "note": f"Only {len(text)} chars of text - appears blank" if is_blank else "OK"})
     blank_count = sum(1 for r in results if not r["ok"])
     return results, blank_count
 
@@ -777,7 +777,7 @@ def _render_table_image(title, headers, rows, col_widths, path):
             text = str(cell)
             max_chars = col_widths[ci] // 8
             if len(text) > max_chars:
-                text = text[:max_chars - 1] + "…"
+                text = text[:max_chars - 1] + "..."
             d.text((x + 8, y + 6), text, fill=color, font=cell_font)
             x += col_widths[ci]
             if ci < len(row) - 2:
@@ -801,11 +801,11 @@ def _render_broken_links_image(domain, checked, broken, path):
         fs = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 15)
     except Exception:
         bold = f = fs = ImageFont.load_default()
-    d.text((26, 24), f"Broken Links Check — {domain}", fill=(31, 41, 55), font=bold)
+    d.text((26, 24), f"Broken Links Check - {domain}", fill=(31, 41, 55), font=bold)
     if not broken:
-        d.text((26, 74), f"Checked {checked} links — No broken links found.", fill=(22, 128, 67), font=f)
+        d.text((26, 74), f"Checked {checked} links - No broken links found.", fill=(22, 128, 67), font=f)
     else:
-        d.text((26, 74), f"Checked {checked} links — {len(broken)} broken:", fill=(200, 40, 60), font=f)
+        d.text((26, 74), f"Checked {checked} links - {len(broken)} broken:", fill=(200, 40, 60), font=f)
         y = 116
         d.text((26, y), "URL", fill=(120, 120, 120), font=fs)
         d.text((W - 150, y), "Status", fill=(120, 120, 120), font=fs)
@@ -840,7 +840,7 @@ CHECKPOINTS = [
      "body": " The Manual Actions report lists manually detected issues with a "
              "page or site that are mostly attempts to manipulate our search "
              "index, but are not necessarily dangerous for users.",
-     "status": ("Status –", " Not found"),
+     "status": ("Status -", " Not found"),
      "capture": "gsc"},
 
     {"key": "security_issues", "label": "Security Issues:",
@@ -1043,7 +1043,7 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
                 driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(0.5)
 
-            # Use CDP for the screenshot — a plain viewport-only capture (no
+            # Use CDP for the screenshot - a plain viewport-only capture (no
             # captureBeyondViewport/clip), so every checkpoint gets a tight
             # crop of what's actually on screen after scrolling, not an
             # oversized capture of the full document.
@@ -1147,7 +1147,7 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
     else:
         _prog("Waiting for Sucuri results...")
     sucuri = fut_sucuri.result(timeout=120)
-    psi = fut_psi.result(timeout=120) if fut_psi else {"summary": "PageSpeed Insights — skipped", "scores": {}}
+    psi = fut_psi.result(timeout=120) if fut_psi else {"summary": "PageSpeed Insights - skipped", "scores": {}}
     if executor:
         executor.shutdown(wait=False)
     log_fn("Sucuri" + (" & PageSpeed" if fut_psi else "") + " done.")
@@ -1157,16 +1157,16 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
         p = _tmp / f"ha_status200_{domain}.png"
         rows = [(r["url"].replace("https://", "").replace("http://", ""),
                  r["status"], "OK" if r["ok"] else "Issue", r["ok"]) for r in s200]
-        _render_table_image(f"HTTP Status Check — {domain}", ["Page URL", "Status", "Result"],
+        _render_table_image(f"HTTP Status Check - {domain}", ["Page URL", "Status", "Result"],
                             rows, [780, 120, 140], p)
         captured["status200"] = str(p)
 
     if canon:
         p = _tmp / f"ha_canonical_{domain}.png"
         rows = [(r["url"],
-                 r["canonical"][:60] + "…" if len(r["canonical"]) > 60 else r["canonical"],
+                 r["canonical"][:60] + "..." if len(r["canonical"]) > 60 else r["canonical"],
                  r["note"], r["ok"]) for r in canon]
-        _render_table_image(f"Canonical Tag Check — {domain}", ["Page URL", "Canonical", "Result"],
+        _render_table_image(f"Canonical Tag Check - {domain}", ["Page URL", "Canonical", "Result"],
                             rows, [540, 360, 180], p)
         captured["canonical"] = str(p)
 
@@ -1180,7 +1180,7 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
                             f"{sc['best_practices']}/100", f"{sc['accessibility']}/100",
                             sc['performance'] >= 50))
         if rows:
-            _render_table_image(f"PageSpeed Insights — {domain}",
+            _render_table_image(f"PageSpeed Insights - {domain}",
                                 ["Device", "Performance", "SEO", "Best Practices", "Accessibility"],
                                 rows, [180, 220, 180, 260, 220], p)
             captured["pagespeed"] = str(p)
@@ -1189,7 +1189,7 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
         p = _tmp / f"ha_doublemeta_{domain}.png"
         rows = [(r["url"].replace("https://", "").replace("http://", ""),
                  r["title_count"], r["desc_count"], r["note"], r["ok"]) for r in dmeta]
-        _render_table_image(f"Meta Tags Check — {domain}", ["Page URL", "Title", "Meta Desc", "Result"],
+        _render_table_image(f"Meta Tags Check - {domain}", ["Page URL", "Title", "Meta Desc", "Result"],
                             rows, [600, 90, 110, 240], p)
         captured["double_meta"] = str(p)
 
@@ -1197,13 +1197,13 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
         p = _tmp / f"ha_metarobots_{domain}.png"
         rows = [(r["url"].replace("https://", "").replace("http://", ""),
                  r["robots_value"], r["note"], r["ok"]) for r in mrobots]
-        _render_table_image(f"Meta Robots Check — {domain}", ["Page URL", "Robots Value", "Result"],
+        _render_table_image(f"Meta Robots Check - {domain}", ["Page URL", "Robots Value", "Result"],
                             rows, [540, 360, 180], p)
         captured["meta_robots"] = str(p)
 
     if versions_rows:
         p = _tmp / f"ha_versions_{domain}.png"
-        _render_table_image(f"URL Versions Check — {domain}", ["URL Variant", "HTTP", "Result"],
+        _render_table_image(f"URL Versions Check - {domain}", ["URL Variant", "HTTP", "Result"],
                             versions_rows, [620, 90, 360], p)
         captured["versions"] = str(p)
 
@@ -1216,8 +1216,8 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
     if blank_results:
         p = _tmp / f"ha_blankpage_{domain}.png"
         rows = [(r["url"].replace("https://", "").replace("http://", ""),
-                 str(r.get("text_len", "—")), r["note"], r["ok"]) for r in blank_results]
-        _render_table_image(f"Blank Page Check — {domain}", ["Page URL", "Text Length", "Result"],
+                 str(r.get("text_len", "N/A")), r["note"], r["ok"]) for r in blank_results]
+        _render_table_image(f"Blank Page Check - {domain}", ["Page URL", "Text Length", "Result"],
                             rows, [700, 120, 220], p)
         captured["blank_page"] = str(p)
 
@@ -1225,9 +1225,9 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
     if serp.get("spam_found"):
         p = _tmp / f"ha_serp_spam_{domain}.png"
         rows = [(s["type"], str(s["count"]),
-                 s["example_titles"][0][:60] + "…" if s["example_titles"] else "—", False)
+                 s["example_titles"][0][:60] + "..." if s["example_titles"] else "N/A", False)
                 for s in serp["spam_found"]]
-        _render_table_image(f"SERP Spam/Hack Detection — {domain}", ["Spam Type", "Hits", "Example Title"],
+        _render_table_image(f"SERP Spam/Hack Detection - {domain}", ["Spam Type", "Hits", "Example Title"],
                             rows, [300, 80, 660], p)
         captured["serp"] = str(p)
 
@@ -1236,8 +1236,8 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
         if bl_checked == 0:
             return "Could not check for broken links."
         if not bl_broken:
-            return f"Checked {bl_checked} links — no broken links found."
-        return f"Checked {bl_checked} links — {len(bl_broken)} broken link(s) found."
+            return f"Checked {bl_checked} links - no broken links found."
+        return f"Checked {bl_checked} links - {len(bl_broken)} broken link(s) found."
 
     def _s200_summary():
         if not s200:
@@ -1275,7 +1275,7 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
         if not blank_results:
             return "No target pages provided for blank page check."
         if blank_count == 0:
-            return f"All {len(blank_results)} target page(s) have content — no blank pages found."
+            return f"All {len(blank_results)} target page(s) have content - no blank pages found."
         return f"{blank_count} of {len(blank_results)} target page(s) appear blank (less than 100 chars of text)."
 
     def _meta_sugg_summary():
@@ -1335,7 +1335,7 @@ def build_health_docx(domain, captured, computed, out_dir, include_keys=None, vo
     def _set_cell_border(cell, sz=24, color="111111"):
         """Solid border on all 4 sides of a table cell. `sz` is in EIGHTHS of a point
         (3pt = 24). A bordered INLINE picture gets its top edge clipped by Word's line
-        box until the image is resized by hand — a table cell grows to fit its image,
+        box until the image is resized by hand - a table cell grows to fit its image,
         so the border is never clipped."""
         tcPr = cell._tc.get_or_add_tcPr()
         for old in tcPr.findall(qn('w:tcBorders')):
@@ -1362,7 +1362,7 @@ def build_health_docx(domain, captured, computed, out_dir, include_keys=None, vo
 
     def _add_bordered_picture(img_path):
         """Screenshot framed with a 3pt border via a single-cell table (matches the
-        reference report exactly) — a bordered inline picture gets clipped by Word
+        reference report exactly) - a bordered inline picture gets clipped by Word
         until resized by hand, so we frame with a table cell border instead."""
         from docx.enum.table import WD_TABLE_ALIGNMENT
         from PIL import Image as PILImage
@@ -1393,7 +1393,7 @@ def build_health_docx(domain, captured, computed, out_dir, include_keys=None, vo
         run = cp.add_run()
         run.add_picture(img_path, **pic_kwargs)
 
-        # Small gap after the framed image — also gives Word the paragraph it
+        # Small gap after the framed image - also gives Word the paragraph it
         # needs to render cleanly after a table.
         spacer = doc.add_paragraph()
         spacer.add_run("").font.size = Pt(6)
@@ -1467,7 +1467,7 @@ def build_health_docx(domain, captured, computed, out_dir, include_keys=None, vo
         return p
 
     def _shaded_header(text, fill):
-        """A full-width shaded section-header bar (white bold) — used by Neon
+        """A full-width shaded section-header bar (white bold) - used by Neon
         so its sections read as coloured bars instead of plain bold labels."""
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
@@ -1873,11 +1873,11 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
     """Run a full health audit. Returns the output file path."""
     if log_fn is None:
         log_fn = print
-    # Normalize to a bare host — a full URL (https://x.com/) breaks temp image
+    # Normalize to a bare host - a full URL (https://x.com/) breaks temp image
     # paths (".png" basename -> PIL "unknown file extension") and the filename.
     domain = re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
 
-    # Build EXACTLY the selected format — never silently fall back to another one.
+    # Build EXACTLY the selected format - never silently fall back to another one.
     fmt = str(fmt or "").strip().lower()
     fi = FORMAT_INFO.get(fmt)
     if not fi:
@@ -1926,7 +1926,7 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
                     gsc_captured = False
                     sessions = gsc_audit.list_sessions()
                     # A session's "accounts" list is only populated by a cookie scan, which
-                    # may not have run — so a perfectly-good logged-in session can look
+                    # may not have run - so a perfectly-good logged-in session can look
                     # "untagged". Try email-matched sessions FIRST, then every other session.
                     # capture_gsc_with_session verifies it's actually logged in (and retries
                     # in a visible window if Google bounces the headless relaunch to login).
@@ -1947,11 +1947,11 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
                             log_fn(f"  Session {sess.get('label', sess['id'])} needs re-login in GSC Sessions.")
                     if not gsc_captured:
                         if not sessions:
-                            log_fn("  No GSC browser session found — create one in GSC Audit > Browser Sessions")
+                            log_fn("  No GSC browser session found - create one in GSC Audit > Browser Sessions")
                         elif not gsc_email:
-                            log_fn("  GSC not connected — skipping manual_action/security_issues screenshots")
+                            log_fn("  GSC not connected - skipping manual_action/security_issues screenshots")
                         else:
-                            log_fn("  No valid GSC browser session found — create one in GSC Audit > Browser Sessions")
+                            log_fn("  No valid GSC browser session found - create one in GSC Audit > Browser Sessions")
                         try:
                             import json as _json, urllib.request as _ur2, urllib.parse as _up2
                             _bd = os.path.dirname(os.path.abspath(__file__))

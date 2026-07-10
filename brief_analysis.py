@@ -1,5 +1,5 @@
 """
-Brief Website Analysis — SEO check + PPTX report builder.
+Brief Website Analysis - SEO check + PPTX report builder.
 Formats: james (15 slides, 10×5.625"), xenon (15 slides, 13.33×7.5")
 """
 import os, json, re, time, tempfile, urllib.request, urllib.parse
@@ -76,7 +76,7 @@ _NF_SIG = [None]     # a deliberately-nonexistent probe URL = the site's 404 vie
 def _page_signature(html):
     """A fingerprint of a page's visible content (title + a large slice of body
     text) used to tell whether two URLs render the SAME page. The slice is big so
-    a real content page (long) is clearly distinct from the short 404/shell — on
+    a real content page (long) is clearly distinct from the short 404/shell - on
     themed sites (Shopify/WordPress) every page shares the header/nav, so a small
     slice would make everything look alike."""
     if not html:
@@ -90,7 +90,7 @@ def _page_signature(html):
 
 
 def _sig_similar(a, b, thresh=0.95):
-    """True only if two page signatures are near-identical — i.e. the browser
+    """True only if two page signatures are near-identical - i.e. the browser
     rendered essentially the SAME page (a pure-SPA catch-all)."""
     if not a or not b:
         return False
@@ -128,7 +128,7 @@ def _http_status(url):
             with urllib.request.urlopen(req, timeout=10) as r:
                 return getattr(r, "status", 200) or 200
         except urllib.error.HTTPError as e:
-            return e.code          # 404/410/etc. is a real answer — stop here
+            return e.code          # 404/410/etc. is a real answer - stop here
         except Exception:
             continue
     return 0
@@ -194,7 +194,7 @@ def _get_page(url):
     the run. Returns {'html': str, 'status': int, 'exists': bool}.
 
     Existence is decided by: HTTP status (404/410), a 'page not found' title/H1,
-    OR — for SPAs that 200 every route — the rendered content being identical to
+    OR - for SPAs that 200 every route - the rendered content being identical to
     the homepage (the app served its shell for a URL that doesn't exist)."""
     if url in _PAGE_CACHE:
         return _PAGE_CACHE[url]
@@ -269,7 +269,7 @@ def _browser_get_indexing(domain):
             if classify_page:
                 try:
                     if classify_page(src) in ("captcha", "soft_block", "http_403"):
-                        continue   # Google blocked us — retry once, else give up (N/A)
+                        continue   # Google blocked us - retry once, else give up (N/A)
                 except Exception:
                     pass
             res = _extract(src)
@@ -436,7 +436,7 @@ def _run_index_query(domain, country, headless, extensions, solver, attempts=2):
 
 
 def _stealth_indexing_count(domain, country="us"):
-    """Google 'site:domain' result count via the app's STEALTH engine — the same
+    """Google 'site:domain' result count via the app's STEALTH engine - the same
     path the rank checker uses. Tries quiet headless first; if Google blocks it and
     a Buster solver is available, escalates to a VISIBLE browser with Buster (like
     the rank checker) to solve the CAPTCHA. Returns an int, 0, or None."""
@@ -458,7 +458,7 @@ def capture_brief_screenshots(domain, sitemap_url=None, log_fn=print):
     sample templates): homepage, view-source (title/meta/canonical), Google 'site:'
     SERP (indexing), sitemap and robots.txt. Returns {key: png_path}; best-effort —
     a missing/blocked shot is simply skipped."""
-    # Use a FRESH driver — after all the page rendering + the separate stealth
+    # Use a FRESH driver - after all the page rendering + the separate stealth
     # engine used for indexing, the shared driver can be in a state where get()
     # times out and cascades. A clean driver captures reliably.
     _close_brief_driver()
@@ -479,14 +479,14 @@ def capture_brief_screenshots(domain, sitemap_url=None, log_fn=print):
             try:
                 driver.get(("view-source:" + url) if view_source else url)
             except Exception:
-                # Page-load timeout on a heavy page — stop loading and screenshot
+                # Page-load timeout on a heavy page - stop loading and screenshot
                 # whatever has rendered so far (good enough for a preview).
                 try:
                     driver.execute_script("window.stop();")
                 except Exception:
                     pass
             time.sleep(4 if serp else 3)
-            if serp:                          # skip a Google CAPTCHA wall — useless as an image
+            if serp:                          # skip a Google CAPTCHA wall - useless as an image
                 low = (driver.page_source or "").lower()
                 if any(m in low for m in ("unusual traffic", "not a robot", "recaptcha",
                                           "/sorry/", "detected unusual", "before you continue")):
@@ -582,7 +582,7 @@ def check_indexing(domain):
     """Estimate indexed page count. Stealth engine first (beats Google's block on
     plain headless), then plain browser, then urllib."""
     _INDEXING["serp_shot"] = None    # reset the per-run CAPTCHA-solved SERP screenshot
-    # Stealth engine (undetected-chromedriver + human-typed search) — most reliable.
+    # Stealth engine (undetected-chromedriver + human-typed search) - most reliable.
     try:
         n = _stealth_indexing_count(domain)
     except Exception:
@@ -652,7 +652,7 @@ def _whois_data(clean):
     except Exception:
         pass
 
-    # RDAP (fills gaps — some registries expose registration date here)
+    # RDAP (fills gaps - some registries expose registration date here)
     if "created" not in info:
         try:
             url = f"https://rdap.org/domain/{clean}"
@@ -855,7 +855,7 @@ def check_redirections(domain):
 
     class _NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *a, **k):
-            return None   # don't follow — so we can read the redirect's own status
+            return None   # don't follow - so we can read the redirect's own status
 
     results = []
     variants = [
@@ -872,18 +872,18 @@ def check_redirections(domain):
                     code = r.status
                 if 200 <= code < 300:
                     results.append({"type": rtype, "status": str(code), "checked_url": url,
-                                    "detail": f"Checked {url} — no redirect (already canonical / redirect missing)",
+                                    "detail": f"Checked {url} - no redirect (already canonical / redirect missing)",
                                     "impact": "Check needed"})
                 else:
                     results.append({"type": rtype, "status": str(code), "checked_url": url,
-                                    "detail": f"Checked {url} — unexpected response", "impact": "Review"})
+                                    "detail": f"Checked {url} - unexpected response", "impact": "Review"})
             except urllib.error.HTTPError as e:
                 code = e.code
                 loc = (e.headers.get("Location") or "").strip()
                 if code in (301, 308):
                     impact = "Good (permanent 301)"
                 elif code in (302, 307):
-                    impact = "Check — temporary redirect, use 301"
+                    impact = "Check - temporary redirect, use 301"
                 else:
                     impact = "Review"
                 results.append({"type": rtype, "status": str(code), "checked_url": url,
@@ -891,7 +891,7 @@ def check_redirections(domain):
                                 "impact": impact})
         except Exception as e:
             results.append({"type": rtype, "status": "Error", "checked_url": url,
-                            "detail": f"Checked {url} — {str(e)[:40]}", "impact": "Unknown"})
+                            "detail": f"Checked {url} - {str(e)[:40]}", "impact": "Unknown"})
     return results
 
 
@@ -929,7 +929,7 @@ def check_canonical_tags(domain, pages=None):
 
 
 def _discover_sitemap(domain):
-    """Find the sitemap — robots.txt 'Sitemap:' first, then common locations —
+    """Find the sitemap - robots.txt 'Sitemap:' first, then common locations —
     and return (sitemap_url, [same-site page URLs]). Follows a sitemap index."""
     import urllib.request
     def _get(u):
@@ -972,7 +972,7 @@ def _discover_sitemap(domain):
 
 def _link_section(html, pos):
     """Which region of the page a byte offset falls in: Header / Navigation /
-    Footer / Content — so a broken link can be located for the client."""
+    Footer / Content - so a broken link can be located for the client."""
     for tag, label in (("header", "Header"), ("nav", "Navigation"), ("footer", "Footer")):
         for m in re.finditer(rf'<{tag}\b[^>]*>.*?</{tag}>', html, re.I | re.S):
             if m.start() <= pos < m.end():
@@ -1102,11 +1102,11 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
 
     def _safe(label, default, fn, *args, **kwargs):
         """Run one check; if it raises, log it and keep going so the rest of the
-        report still generates — that section just shows as not completed."""
+        report still generates - that section just shows as not completed."""
         try:
             return fn(*args, **kwargs)
         except Exception as e:
-            log_fn(f"  {label} could not be completed — skipped ({e})")
+            log_fn(f"  {label} could not be completed - skipped ({e})")
             return default
 
     log_fn("  Checking website indexing...")
@@ -1152,7 +1152,7 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
                 sitemap["summary"] = f"Sitemap found with {len(_sm_paths)} page(s)."
 
     # Indexing MUST come from Google (via the stealth engine + Buster). Never
-    # substitute the sitemap count — if Google couldn't be checked, leave it N/A so
+    # substitute the sitemap count - if Google couldn't be checked, leave it N/A so
     # the slide clearly asks the user to verify it manually.
     if isinstance(indexing, dict) and str(indexing.get("count", "")).strip().upper() in ("", "N/A"):
         indexing = {"count": "N/A",
@@ -1168,7 +1168,7 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
 
     log_fn("  Checking Domain Authority / Domain Rating / Page Authority...")
     from da_checker import check_da_pa
-    da_pa = _safe("DA/PA check", {"da": "—", "dr": "—", "pa": "—", "source": "—"},
+    da_pa = _safe("DA/PA check", {"da": "N/A", "dr": "N/A", "pa": "N/A", "source": "N/A"},
                   check_da_pa, _get_brief_driver(), domain, log_fn)
 
     _close_brief_driver()
@@ -1183,7 +1183,7 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
         sitemap = {"ok": False, "found": False, "summary": "Sitemap check could not be completed."}
     if not isinstance(robots, dict):
         robots = {}
-    # check_robots_txt returns status/ok but no explicit "found" — derive it so the
+    # check_robots_txt returns status/ok but no explicit "found" - derive it so the
     # report doesn't show "Found: No" while the summary says robots.txt WAS found.
     if "found" not in robots:
         robots["found"] = (robots.get("status") == 200) or ("found" in str(robots.get("summary", "")).lower())
@@ -1224,7 +1224,7 @@ def run_brief_checks(domain, target_pages=None, log_fn=None):
         "broken_links_checked": bl_checked,
         "broken_links": bl_broken,
         "screenshots": screenshots if isinstance(screenshots, dict) else {},
-        "da_pa": da_pa if isinstance(da_pa, dict) else {"da": "—", "dr": "—", "pa": "—", "source": "—"},
+        "da_pa": da_pa if isinstance(da_pa, dict) else {"da": "N/A", "dr": "N/A", "pa": "N/A", "source": "N/A"},
     }
 
 
@@ -1265,7 +1265,7 @@ def _text(slide, text_str, x, y, w, h, font_size, font_name, color, bold=False,
     if isinstance(color, str):
         color = _C(color)
     runs = p.runs or [p.add_run()]
-    for run in runs:                # format every run — do NOT re-assign run.text (that duplicated multi-line text)
+    for run in runs:                # format every run - do NOT re-assign run.text (that duplicated multi-line text)
         run.font.size = Pt(font_size)
         run.font.name = font_name
         run.font.color.rgb = color
@@ -1343,7 +1343,7 @@ def _add_table(slide, headers, rows, col_widths, start_x, start_y,
 
 
 # ---------------------------------------------------------------------------
-# James format — 15 slides, 10×5.625"
+# James format - 15 slides, 10×5.625"
 # ---------------------------------------------------------------------------
 
 def _james_sidebar(slide):
@@ -1594,7 +1594,7 @@ def build_james(data, out_path, log_fn=None):
 
 
 # ---------------------------------------------------------------------------
-# Xenon format — 15 slides, 13.33×7.5"
+# Xenon format - 15 slides, 13.33×7.5"
 # ---------------------------------------------------------------------------
 
 def build_xenon(data, out_path, log_fn=None):
@@ -1654,7 +1654,7 @@ def build_xenon(data, out_path, log_fn=None):
     _shots = data.get("screenshots", {}) or {}
 
     def page_detail(s, header, lines, y=4.35):
-        """Compact per-page breakdown below the summary box — kept short so a
+        """Compact per-page breakdown below the summary box - kept short so a
         screenshot can sit beneath it (matching the original template)."""
         if not lines:
             return
@@ -1670,7 +1670,7 @@ def build_xenon(data, out_path, log_fn=None):
     _rect(s, 0, 0, 13.33, 7.5, NAVY_DARK)
     _text(s, "SEO AUDIT REPORT", 0.6, 3.5, 5.0, 0.4, 14, "Calibri", LIGHT_BLUE, bold=True)
     _text(s, "Basic SEO Issues", 0.6, 3.9, 5.0, 1.0, 46, "Calibri", WHITE, bold=True)
-    _text(s, "Website Audit — Findings & Recommendations", 0.6, 5.0, 5.0, 0.4, 18, "Calibri", LIGHT_BLUE)
+    _text(s, "Website Audit - Findings & Recommendations", 0.6, 5.0, 5.0, 0.4, 18, "Calibri", LIGHT_BLUE)
     _text(s, f"https://{domain}/", 0.6, 5.8, 5.0, 0.3, 15, "Calibri", MED_BLUE)
     _text(s, date_str, 0.6, 6.2, 5.0, 0.3, 13, "Calibri", "#8AA6CC")
 
@@ -1697,7 +1697,7 @@ def build_xenon(data, out_path, log_fn=None):
                       "The title tag is the HTML element that defines a page's title. It appears on search engine results and browser tabs.",
                       badge[0], badge[1], finding, data_ok=titles_ok)
     page_detail(s, "Pages checked:", [
-        f"{t['page']}  —  \"{(t.get('title') or '(none)')[:55]}\"  ({t['chars']} chars, {t['status']})"
+        f"{t['page']}  -  \"{(t.get('title') or '(none)')[:55]}\"  ({t['chars']} chars, {t['status']})"
         for t in titles])
     topic_shot(s, "viewsource")
 
@@ -1715,7 +1715,7 @@ def build_xenon(data, out_path, log_fn=None):
                       "The meta description is an HTML attribute that summarises a page. Google often displays it as the snippet in search results.",
                       badge[0], badge[1], finding, data_ok=metas_ok)
     page_detail(s, "Pages checked:", [
-        f"{m['page']}  —  meta description {'FOUND' if m['found'] == 'Yes' else 'MISSING'} "
+        f"{m['page']}  -  meta description {'FOUND' if m['found'] == 'Yes' else 'MISSING'} "
         f"({m['chars']} chars, {m['status']})" for m in metas])
     topic_shot(s, "viewsource")
 
@@ -1733,14 +1733,14 @@ def build_xenon(data, out_path, log_fn=None):
                       "Heading tags (H1, H2, and so on) are an important part of a page and play a role in helping search engines understand the topic.",
                       badge[0], badge[1], finding, data_ok=headers_ok)
     page_detail(s, "Pages checked:", [
-        f"{h['page']}  —  H1={h['h1']}, H2={h['h2']}, H3={h['h3']}, H4={h['h4']}, H5={h['h5']}, H6={h['h6']}"
+        f"{h['page']}  -  H1={h['h1']}, H2={h['h2']}, H3={h['h3']}, H4={h['h4']}, H5={h['h5']}, H6={h['h6']}"
         for h in headers])
     topic_shot(s, "homepage")
 
-    # --- Slide 6: Heading Tags — Findings ---
+    # --- Slide 6: Heading Tags - Findings ---
     s = prs.slides.add_slide(prs.slide_layouts[6])
     icon_circle(s, 0.6, 0.5)
-    _text(s, "Heading Tags — Findings", 1.6, 0.5, 10.0, 0.6, 27, "Calibri", NAVY, bold=True)
+    _text(s, "Heading Tags - Findings", 1.6, 0.5, 10.0, 0.6, 27, "Calibri", NAVY, bold=True)
     hdr_detail = "Heading structure breakdown:\n"
     for h in headers[:3]:
         hdr_detail += f"{h['page']}: H1={h['h1']}, H2={h['h2']}, H3={h['h3']}, H4={h['h4']}\n"
@@ -1774,7 +1774,7 @@ def build_xenon(data, out_path, log_fn=None):
     rb_ok = rb.get("found") is not None
     finding = rb.get("summary", "Robots.txt status could not be determined.")
     s = content_slide("Robots.txt",
-                      "The robots.txt file tells web robots — mainly search engines — which pages to crawl and which to skip.",
+                      "The robots.txt file tells web robots - mainly search engines - which pages to crawl and which to skip.",
                       "Good" if rb.get("found") else "ISSUE",
                       "good" if rb.get("found") else "issue",
                       finding, data_ok=rb_ok)
@@ -1817,7 +1817,7 @@ def build_xenon(data, out_path, log_fn=None):
     _rect(s, 0.6, 3.9, 12.1, 1.0, BADGE_BG)
     badge_type = "issue" if bad > 0 else "good"
     status_badge(s, 0.9, 4.1, "ISSUE" if bad > 0 else "Good", badge_type)
-    _text(s, f"{total_imgs} images on the home page — {bad} with no/empty alt tag. Add descriptive alt text to all images.",
+    _text(s, f"{total_imgs} images on the home page - {bad} with no/empty alt tag. Add descriptive alt text to all images.",
           2.7, 4.0, 10.0, 0.5, 13, "Calibri", TEXT_DARK)
 
     # --- Slide 11: Canonical Tag ---
@@ -1834,7 +1834,7 @@ def build_xenon(data, out_path, log_fn=None):
                       "The canonical tag tells search engines which version of a URL is the master copy, preventing duplicate content penalties.",
                       badge[0], badge[1], finding, data_ok=canons_ok)
     page_detail(s, "Pages checked:", [
-        f"{c['page']}  —  tag {c['found']}, correct: {c.get('correct', 'N/A')} ({c['status']})"
+        f"{c['page']}  -  tag {c['found']}, correct: {c.get('correct', 'N/A')} ({c['status']})"
         for c in canons])
     topic_shot(s, "viewsource")
 
@@ -1852,7 +1852,7 @@ def build_xenon(data, out_path, log_fn=None):
                       "Redirects send users and crawlers from one URL to another. Correct 301 redirects pass full link equity to the target URL.",
                       badge[0], badge[1], finding, data_ok=redir_ok)
     page_detail(s, "Redirects checked:", [
-        f"{r['type']}  —  {r['status']}  —  {r.get('detail', '')}" for r in redirects])
+        f"{r['type']}  -  {r['status']}  -  {r.get('detail', '')}" for r in redirects])
 
     # --- Slide 13: Broken Links ---
     bl = data.get("broken_links", [])
@@ -1900,7 +1900,7 @@ def build_xenon(data, out_path, log_fn=None):
 
 
 # ---------------------------------------------------------------------------
-# Omega format — 16 slides, 10×5.625", dark navy bg, blue sidebar
+# Omega format - 16 slides, 10×5.625", dark navy bg, blue sidebar
 # ---------------------------------------------------------------------------
 
 def build_omega(data, out_path, log_fn=None):
@@ -2020,7 +2020,7 @@ def build_omega(data, out_path, log_fn=None):
         (_lines(bl[:5], lambda b: f'[{b.get("location", "Content")}] {b.get("url", "")} ({b.get("status", "")})')
          if bl else (f'No broken links found in {bl_checked} links checked.' if bl_checked > 0 else UNVERIFIED)),
     ]
-    # Domain age — show every attribute we DID find (not just "Created On"), so
+    # Domain age - show every attribute we DID find (not just "Created On"), so
     # ccTLDs like .com.au that hide the creation date still show useful info.
     age_rows = data.get("domain_age", [])
     age_lines = [f"{r[0]}: {r[1]}" + (f"  ({r[2]})" if len(r) > 2 and r[2] else "")
@@ -2049,7 +2049,7 @@ def build_omega(data, out_path, log_fn=None):
 
 
 # ---------------------------------------------------------------------------
-# Neon format — 19 slides, 13.33×7.5", clean white bg, text+image style
+# Neon format - 19 slides, 13.33×7.5", clean white bg, text+image style
 # ---------------------------------------------------------------------------
 
 def build_neon(data, out_path, log_fn=None):
@@ -2082,7 +2082,7 @@ def build_neon(data, out_path, log_fn=None):
         ("Image ALT Tag", "Alt text describes images for screen readers and search engine image indexing."),
         ("Content Optimization", "Unique, keyword-focused content improves rankings, engagement, and user experience."),
         ("Backlink Status", "Links from other websites pointing to yours, a key ranking signal."),
-        ("Domain Age", "How long a domain has been registered — older domains may carry accumulated trust."),
+        ("Domain Age", "How long a domain has been registered - older domains may carry accumulated trust."),
         ("Website Speed", "Page load time affects user experience and is a Google ranking factor."),
         ("Organic Traffic Status", "The volume of visitors arriving from unpaid search results."),
         ("SEO Score", "An overall assessment of a website's search engine optimisation health."),
@@ -2117,7 +2117,7 @@ def build_neon(data, out_path, log_fn=None):
             6: rb.get("summary") if rb.get("found") else None,
             7: f"{len(alts)} images checked. {len([a for a in alts if a['present'] != 'Yes'])} need alt text." if alts else None,
             8: "Review page content for keyword optimization. Ensure at least 300 words of unique content per key page.",
-            9: "Backlink data requires a third-party API (Ahrefs, Moz, etc.) — check manually or connect an API.",
+            9: "Backlink data requires a third-party API (Ahrefs, Moz, etc.) - check manually or connect an API.",
             10: None,
             11: "Run a PageSpeed Insights or GTmetrix test for detailed speed metrics.",
             12: "Check Google Analytics or Search Console for organic traffic data.",
@@ -2127,7 +2127,7 @@ def build_neon(data, out_path, log_fn=None):
             15: "Ensure your brand logo appears in the footer with a link to the homepage.",
             16: f"Verify the copyright year is set to {datetime.now().year}.",
         }
-        # Domain age — show every attribute found (ccTLDs may hide the creation date).
+        # Domain age - show every attribute found (ccTLDs may hide the creation date).
         if i == 10:
             age_lines = [f"{r[0]}: {r[1]}" + (f"  ({r[2]})" if len(r) > 2 and r[2] else "")
                          for r in age_rows if len(r) > 1 and str(r[1]).strip()]
@@ -2172,10 +2172,10 @@ def build_neon(data, out_path, log_fn=None):
 
 
 def build_camila(data, out_path, log_fn=None):
-    """Camila — 16-slide PPTX, verified against the client reference
+    """Camila - 16-slide PPTX, verified against the client reference
     "Camila.pptx" (ltn-stahlhallenbau.de): navy (#002060) cover title, an
     "Index:" status slide with each checked item marked red (#C00000, needs
-    attention) or green (#00B050, optimized), then 14 topic slides — gold
+    attention) or green (#00B050, optimized), then 14 topic slides - gold
     (#7C5F1D) section title + bold black "Result:"/"Results:" label followed
     by the finding."""
     if log_fn is None:
@@ -2213,7 +2213,7 @@ def build_camila(data, out_path, log_fn=None):
     h1_ok = bool(headers) and all(h.get("h1") == 1 for h in headers)
     h2_ok = bool(headers) and all(h.get("h2", 0) >= 1 for h in headers)
     idx_ok = not _is_empty(idx.get("count"))
-    da_ok = (da_pa.get("da") not in (None, "—"))
+    da_ok = (da_pa.get("da") not in (None, "N/A"))
     canon_ok = bool(canonicals) and all(c.get("status") == "Good" for c in canonicals)
     img_ok = bool(img_alts) and all(a.get("present") == "Yes" for a in img_alts)
     sm_ok = bool(sitemap.get("found") or sitemap.get("ok"))
@@ -2287,7 +2287,7 @@ def build_camila(data, out_path, log_fn=None):
     if titles:
         t = titles[0]
         topic_slide("Meta Title",
-                     f"The homepage title is {t.get('chars', '?')} characters — {t.get('status', 'N/A')}. "
+                     f"The homepage title is {t.get('chars', '?')} characters - {t.get('status', 'N/A')}. "
                      "Keeping it within 50-60 characters with the primary keyword near the start "
                      "improves search engine relevance and click-through rate.",
                      "viewsource")
@@ -2299,7 +2299,7 @@ def build_camila(data, out_path, log_fn=None):
         m = metas[0]
         topic_slide("Meta Description",
                      f"The homepage meta description is approximately {m.get('chars', '?')} "
-                     f"characters — {m.get('status', 'N/A')}. It should be unique, keyword-relevant "
+                     f"characters - {m.get('status', 'N/A')}. It should be unique, keyword-relevant "
                      "and within the recommended length to improve the search snippet.",
                      "viewsource")
     else:
@@ -2334,7 +2334,7 @@ def build_camila(data, out_path, log_fn=None):
                  "serp")
 
     # Domain Authority & Page Authority
-    da_val, dr_val, pa_val = da_pa.get("da", "—"), da_pa.get("dr", "—"), da_pa.get("pa", "—")
+    da_val, dr_val, pa_val = da_pa.get("da", "N/A"), da_pa.get("dr", "N/A"), da_pa.get("pa", "N/A")
     if da_ok:
         topic_slide("Domain Authority & Page Authority",
                      f"The website has a Domain Authority (DA) of {da_val}, Page Authority (PA) of "
@@ -2428,7 +2428,7 @@ def build_camila(data, out_path, log_fn=None):
 
 
 def build_eta(data, out_path, log_fn=None):
-    """ETA — DOCX brief report, verified against the client reference
+    """ETA - DOCX brief report, verified against the client reference
     "ETA.docx" (shoreteldepot.com): plain bold-black 14pt lettered/labeled
     sections (no shaded banners, same convention as Alpha), covering Meta
     Optimization, Headings, Image Optimization, Schema, Backlink Profile
@@ -2485,7 +2485,7 @@ def build_eta(data, out_path, log_fn=None):
         return p
 
     p = doc.add_paragraph()
-    _run(p, f"Brief Website Analysis — {domain}", bold=True, color=BLACK, size=18)
+    _run(p, f"Brief Website Analysis - {domain}", bold=True, color=BLACK, size=18)
     body(f"We analyzed your website ({home}) so please go through this doc to get a quick "
          "overview of your website optimization.")
 
@@ -2501,12 +2501,12 @@ def build_eta(data, out_path, log_fn=None):
         t = titles[0]
         body("For example:")
         labeled("URL: ", t.get("page", home))
-        body(f"\"{t.get('title', 'N/A')}\" ({t.get('chars', '?')} chars) — {t.get('status', 'N/A')}.")
+        body(f"\"{t.get('title', 'N/A')}\" ({t.get('chars', '?')} chars) - {t.get('status', 'N/A')}.")
     metas = data.get("metas", []) or []
     meta_issues = [m for m in metas if m.get("status") != "Good"]
     if metas:
         m = metas[0]
-        labeled("Meta Description – ", f"The audit identified {len(meta_issues)} meta "
+        labeled("Meta Description - ", f"The audit identified {len(meta_issues)} meta "
                                         f"description issue(s) across {len(metas)} page(s) "
                                         "audited.")
         labeled("URL: ", m.get("page", home))
@@ -2537,22 +2537,22 @@ def build_eta(data, out_path, log_fn=None):
 
     # ---- Backlink Profile Overview ----
     da_pa = data.get("da_pa") or {}
-    da_val, dr_val, pa_val = da_pa.get("da", "—"), da_pa.get("dr", "—"), da_pa.get("pa", "—")
+    da_val, dr_val, pa_val = da_pa.get("da", "N/A"), da_pa.get("dr", "N/A"), da_pa.get("pa", "N/A")
     labeled("Backlink Profile Overview: ", f"The website currently has a Domain Rating (DR) of "
                                             f"{dr_val}, indicating its current backlink authority.")
 
     # ---- DA/PA/Spam Score ----
     section("Domain authority, page authority & Spam Score:")
-    if da_val != "—" or dr_val != "—":
+    if da_val != "N/A" or dr_val != "N/A":
         body(f"The website currently has a Domain Authority (DA) of {da_val}, Page Authority "
              f"(PA) of {pa_val}, and Domain Rating (DR) of {dr_val}.")
     else:
-        body("Note — Domain Authority / Domain Rating could not be retrieved automatically for "
+        body("Note - Domain Authority / Domain Rating could not be retrieved automatically for "
              "this domain. Please check manually via a DA/DR checker tool.")
 
     # ---- Indexing Status ----
     idx = data.get("indexing", {}) or {}
-    labeled("Indexing Status: – ", f"The website has approximately {idx.get('count', 'N/A')} "
+    labeled("Indexing Status: - ", f"The website has approximately {idx.get('count', 'N/A')} "
                                     f"page(s) indexed by Google. {idx.get('status', '')}")
 
     # ---- Robots.txt ----
@@ -2595,16 +2595,16 @@ def build_eta(data, out_path, log_fn=None):
     # ---- Semrush / Ahrefs performance ----
     p = doc.add_paragraph()
     _run(p, "Website performance according to Semrush: - ", bold=True, color=BLACK, size=14)
-    body("Note — Please refer to the attached Semrush overview screenshot for this domain's "
+    body("Note - Please refer to the attached Semrush overview screenshot for this domain's "
          "Authority Score, organic keywords, organic traffic and referring domains.")
 
     p = doc.add_paragraph()
     _run(p, "Website performance according to Ahrefs: - ", bold=True, color=BLACK, size=14)
-    if da_val != "—" or dr_val != "—":
+    if da_val != "N/A" or dr_val != "N/A":
         body(f"During the audit, we found that the website has a Domain Rating (DR) of "
              f"{dr_val} according to Ahrefs.")
     else:
-        body("Note — Ahrefs data could not be retrieved automatically for this domain. Please "
+        body("Note - Ahrefs data could not be retrieved automatically for this domain. Please "
              "check manually via Ahrefs.")
 
     doc.save(out_path)
@@ -2612,9 +2612,9 @@ def build_eta(data, out_path, log_fn=None):
 
 
 def build_kappa(data, out_path, log_fn=None):
-    """Kappa — DOCX brief report, verified against the client reference
+    """Kappa - DOCX brief report, verified against the client reference
     "Kappa.docx" (newimageopticians.com): solid BLACK paragraph-shaded
-    section titles with white bold text (no tables — the fill is on the
+    section titles with white bold text (no tables - the fill is on the
     paragraph itself), plain black body/recommendation text, covering Title
     Tag, H1 Tag, Missing Description, Images ALT text, Robots.txt, Sitemap,
     URL Redirection, Broken Links, Schema, DA/PA, Backlinks Status and a
@@ -2676,7 +2676,7 @@ def build_kappa(data, out_path, log_fn=None):
     body(f"During the audit of the website ({home}), we found that the website contains "
          f"{len(titles)} indexed page(s), of which {len(issues)} have title tag issue(s).")
     body("We recommend optimizing page titles by keeping them within the recommended length of "
-         "approximately 50–60 characters and including relevant keywords near the beginning.")
+         "approximately 50-60 characters and including relevant keywords near the beginning.")
 
     # ---- H1 Tag ----
     section("H1 Tag")
@@ -2737,7 +2737,7 @@ def build_kappa(data, out_path, log_fn=None):
     if redirects:
         r = redirects[0]
         body(f"During the redirect audit, we checked the homepage URL ({home}) and found "
-             f"{r.get('status', 'N/A')} — {r.get('detail', '')}")
+             f"{r.get('status', 'N/A')} - {r.get('detail', '')}")
     else:
         body(f"During the redirect audit, we checked the homepage URL ({home}) and found "
              "standard redirect behavior with no issues identified.")
@@ -2765,24 +2765,24 @@ def build_kappa(data, out_path, log_fn=None):
     # ---- DA/PA ----
     section("Domain Authority & Page Authority")
     da_pa = data.get("da_pa") or {}
-    da_val, dr_val, pa_val = da_pa.get("da", "—"), da_pa.get("dr", "—"), da_pa.get("pa", "—")
-    if da_val != "—" or dr_val != "—":
+    da_val, dr_val, pa_val = da_pa.get("da", "N/A"), da_pa.get("dr", "N/A"), da_pa.get("pa", "N/A")
+    if da_val != "N/A" or dr_val != "N/A":
         body(f"During the audit, we found that the website currently has a Domain Authority "
              f"(DA) of {da_val}, Page Authority (PA) of {pa_val}, and Domain Rating (DR) of "
              f"{dr_val}.")
     else:
-        body("Note — Domain Authority / Domain Rating could not be retrieved automatically for "
+        body("Note - Domain Authority / Domain Rating could not be retrieved automatically for "
              "this domain. Please check manually via a DA/DR checker tool.")
     body("We recommend focusing on acquiring high-quality backlinks from authoritative and "
          "relevant domains to strengthen overall authority.")
 
     # ---- Backlinks Status ----
     section("Backlinks Status ")
-    if dr_val != "—":
+    if dr_val != "N/A":
         body(f"During the audit, we found that the website currently has a Domain Rating (DR) "
              f"of {dr_val}.")
     else:
-        body("Note — Backlink data could not be retrieved automatically for this domain. "
+        body("Note - Backlink data could not be retrieved automatically for this domain. "
              "Please check manually via an Ahrefs/Moz checker tool.")
     body("We recommend focusing on acquiring high-quality backlinks from authoritative and "
          "relevant domains to strengthen the backlink profile.")
@@ -2803,7 +2803,7 @@ def build_kappa(data, out_path, log_fn=None):
 
 
 def build_w3era_g(data, out_path, log_fn=None):
-    """W3era Quick FVR G — DOCX brief report, verified against the client
+    """W3era Quick FVR G - DOCX brief report, verified against the client
     reference "W3era Quick - FVR G.docx" (toronto-roofer.com): same E1F2F1
     banner / navy #2F5496 title / red #C00000 "Required Action" convention as
     Beta, but a reduced table set (no Canonical Tags table) and a separate
@@ -2883,7 +2883,7 @@ def build_w3era_g(data, out_path, log_fn=None):
 
     # ---- Title / intro ----
     p = doc.add_paragraph()
-    _run(p, f"Brief Website Analysis Report — {domain}", bold=True, color=BLACK, size=18)
+    _run(p, f"Brief Website Analysis Report - {domain}", bold=True, color=BLACK, size=18)
     body(f"After examining the website ({home}) in great detail, we have identified some search "
          "engine optimization (SEO) factors that are essential for improving its visibility and "
          "performance.")
@@ -2983,7 +2983,7 @@ def build_w3era_g(data, out_path, log_fn=None):
 
     # ---- Semrush overview ----
     banner("Semrush overview")
-    body("Note — Please refer to the attached Semrush overview screenshot for this domain's "
+    body("Note - Please refer to the attached Semrush overview screenshot for this domain's "
          "Authority Score, organic traffic, organic keywords, referring domains and backlinks.")
 
     # ---- Google Indexing ----
@@ -3002,15 +3002,15 @@ def build_w3era_g(data, out_path, log_fn=None):
     # ---- Domain Authority & Page Authority ----
     banner("Domain Authority & Page Authority")
     da_pa = data.get("da_pa") or {}
-    da_val, dr_val = da_pa.get("da", "—"), da_pa.get("dr", "—")
-    if da_val != "—" or dr_val != "—":
+    da_val, dr_val = da_pa.get("da", "N/A"), da_pa.get("dr", "N/A")
+    if da_val != "N/A" or dr_val != "N/A":
         body(f"During the domain overview audit for {home}, we found that the website has a "
              f"Domain Authority (DA) of {da_val} and a Domain Rating (DR) of {dr_val}.")
         required_action(f"During the audit, we found that {home} has a Domain Authority (DA) "
                          f"of {da_val}. We recommend building high-quality backlinks from "
                          "authoritative domains to strengthen the backlink profile.")
     else:
-        body("Note — Domain Authority / Domain Rating could not be retrieved automatically for "
+        body("Note - Domain Authority / Domain Rating could not be retrieved automatically for "
              "this domain. Please check manually via a DA/DR checker tool.")
         required_action(f"During the audit, we recommend building high-quality backlinks from "
                          "authoritative domains to strengthen the backlink profile of "
@@ -3027,7 +3027,7 @@ def build_w3era_g(data, out_path, log_fn=None):
 
 
 def build_beta_bhargu_fvr(data, out_path, log_fn=None):
-    """Beta Bhargu FVR — 16-slide PPTX, verified against the client reference
+    """Beta Bhargu FVR - 16-slide PPTX, verified against the client reference
     "Beta Bhargu FVR.pptx" (expatcares.ae): navy (#002060) ALL-CAPS cover
     title, an "INDEX:" status slide with bright red (#FF0000, needs
     attention) or green (#00B050, optimized) labels, then 14 topic slides —
@@ -3071,7 +3071,7 @@ def build_beta_bhargu_fvr(data, out_path, log_fn=None):
     h1_ok = bool(headers) and all(h.get("h1") == 1 for h in headers)
     h2_ok = bool(headers) and all(h.get("h2", 0) >= 1 for h in headers)
     idx_ok = not _is_empty(idx.get("count"))
-    da_ok = (da_pa.get("da") not in (None, "—"))
+    da_ok = (da_pa.get("da") not in (None, "N/A"))
     canon_ok = bool(canonicals) and all(c.get("status") == "Good" for c in canonicals)
     img_ok = bool(img_alts) and all(a.get("present") == "Yes" for a in img_alts)
     sm_ok = bool(sitemap.get("found") or sitemap.get("ok"))
@@ -3150,7 +3150,7 @@ def build_beta_bhargu_fvr(data, out_path, log_fn=None):
         t = titles[0]
         topic_slide("Meta Title",
                      f"The SEO audit for {home} shows the page title is {t.get('chars', '?')} "
-                     f"character(s) — {t.get('status', 'N/A')}.",
+                     f"character(s) - {t.get('status', 'N/A')}.",
                      "viewsource", label="Issue")
     else:
         topic_slide("Meta Title", UNVERIFIED, "viewsource", label="Issue")
@@ -3160,7 +3160,7 @@ def build_beta_bhargu_fvr(data, out_path, log_fn=None):
         m = metas[0]
         topic_slide("Meta Description",
                      f"The SEO audit for {home} shows the page meta description is "
-                     f"{m.get('chars', '?')} character(s) — {m.get('status', 'N/A')}.",
+                     f"{m.get('chars', '?')} character(s) - {m.get('status', 'N/A')}.",
                      "viewsource", label="Issue")
     else:
         topic_slide("Meta Description", UNVERIFIED, "viewsource", label="Issue")
@@ -3194,7 +3194,7 @@ def build_beta_bhargu_fvr(data, out_path, log_fn=None):
                  "serp", label="Issue")
 
     # Domain Authority & Page Authority
-    da_val, dr_val, pa_val = da_pa.get("da", "—"), da_pa.get("dr", "—"), da_pa.get("pa", "—")
+    da_val, dr_val, pa_val = da_pa.get("da", "N/A"), da_pa.get("dr", "N/A"), da_pa.get("pa", "N/A")
     if da_ok:
         topic_slide("Domain Authority & Page Authority",
                      f"The SEO audit for {home} indicates that the website has a Domain "
@@ -3261,7 +3261,7 @@ def build_beta_bhargu_fvr(data, out_path, log_fn=None):
         r = redirects[0]
         topic_slide("Redirection",
                      f"The SEO audit for {home} shows redirect status: {r.get('status', 'N/A')} "
-                     f"— {r.get('detail', '')}",
+                     f"- {r.get('detail', '')}",
                      label="Results")
     else:
         topic_slide("Redirection", UNVERIFIED, label="Results")
@@ -3310,7 +3310,7 @@ def build_beta_bhargu_fvr(data, out_path, log_fn=None):
 
 
 def build_w3era_r(data, out_path, log_fn=None):
-    """W3era Quick FVR R — 17-slide PPTX, verified against the client
+    """W3era Quick FVR R - 17-slide PPTX, verified against the client
     reference "W3era Quick FVR R.pptx" (infoqraf.com): navy (#002060)
     title-case cover, red (#C00000)/green (#00B050) Index slide (same
     red/green pair as Camila, but a distinct dark-red-brown #73330B
@@ -3353,7 +3353,7 @@ def build_w3era_r(data, out_path, log_fn=None):
     h1_ok = bool(headers) and all(h.get("h1") == 1 for h in headers)
     h2_ok = bool(headers) and all(h.get("h2", 0) >= 1 for h in headers)
     idx_ok = not _is_empty(idx.get("count"))
-    da_ok = (da_pa.get("da") not in (None, "—"))
+    da_ok = (da_pa.get("da") not in (None, "N/A"))
     canon_ok = bool(canonicals) and all(c.get("status") == "Good" for c in canonicals)
     img_ok = bool(img_alts) and all(a.get("present") == "Yes" for a in img_alts)
     sm_ok = bool(sitemap.get("found") or sitemap.get("ok"))
@@ -3433,7 +3433,7 @@ def build_w3era_r(data, out_path, log_fn=None):
         t = titles[0]
         topic_slide("Meta Title",
                      f"The audit found that the homepage title tag is {t.get('chars', '?')} "
-                     f"character(s) — {t.get('status', 'N/A')}.",
+                     f"character(s) - {t.get('status', 'N/A')}.",
                      "viewsource", label="Result:")
     else:
         topic_slide("Meta Title", UNVERIFIED, "viewsource", label="Result:")
@@ -3442,7 +3442,7 @@ def build_w3era_r(data, out_path, log_fn=None):
     if metas:
         m = metas[0]
         topic_slide("Meta Description",
-                     f"The homepage meta description is {m.get('chars', '?')} character(s) — "
+                     f"The homepage meta description is {m.get('chars', '?')} character(s) - "
                      f"{m.get('status', 'N/A')}.",
                      "viewsource", label="Result:")
     else:
@@ -3475,7 +3475,7 @@ def build_w3era_r(data, out_path, log_fn=None):
                  "serp", label="Result:")
 
     # Domain Authority & Page Authority
-    da_val, dr_val, pa_val = da_pa.get("da", "—"), da_pa.get("dr", "—"), da_pa.get("pa", "—")
+    da_val, dr_val, pa_val = da_pa.get("da", "N/A"), da_pa.get("dr", "N/A"), da_pa.get("pa", "N/A")
     if da_ok:
         topic_slide("Domain Authority & Page Authority",
                      f"The website has a Domain Authority (DA) of {da_val} and Page Authority "
@@ -3534,7 +3534,7 @@ def build_w3era_r(data, out_path, log_fn=None):
         r = redirects[0]
         topic_slide("Redirection",
                      f"The audit indicates that the tested URL redirect status is "
-                     f"{r.get('status', 'N/A')} — {r.get('detail', '')}",
+                     f"{r.get('status', 'N/A')} - {r.get('detail', '')}",
                      label="Results :")
     else:
         topic_slide("Redirection", UNVERIFIED, label="Results :")
@@ -3555,7 +3555,7 @@ def build_w3era_r(data, out_path, log_fn=None):
     # Broken Link
     if broken_links:
         topic_slide("Broken Link",
-                     f"The audit identified broken links (404 errors) — {len(broken_links)} "
+                     f"The audit identified broken links (404 errors) - {len(broken_links)} "
                      f"out of {bl_checked} URL(s) scanned.",
                      label="Results :")
     else:
@@ -3576,7 +3576,7 @@ def build_w3era_r(data, out_path, log_fn=None):
 
     # Semrush Overview
     topic_slide("Semrush Overview",
-                 "Note — Please refer to the attached Semrush overview screenshot for this "
+                 "Note - Please refer to the attached Semrush overview screenshot for this "
                  "domain's Authority Score, organic traffic, organic keywords and referring "
                  "domains.",
                  label="Results:")
@@ -3587,7 +3587,7 @@ def build_w3era_r(data, out_path, log_fn=None):
 
 
 def build_kappa_up(data, out_path, log_fn=None):
-    """Kappa Up — DOCX brief report, verified against the client reference
+    """Kappa Up - DOCX brief report, verified against the client reference
     "Website Deep Audit Issue Report - Quintasel.com.docx": a plain
     underlined blue (#1155CC) 18pt title, followed by bold-label / plain-body
     "Issue Title - description" paragraphs (13pt, no banners/tables). Covers
@@ -3672,15 +3672,15 @@ def build_kappa_up(data, out_path, log_fn=None):
 
     # ---- Backlink Profile ----
     da_pa = data.get("da_pa") or {}
-    da_val, dr_val = da_pa.get("da", "—"), da_pa.get("dr", "—")
-    if da_val != "—" or dr_val != "—":
+    da_val, dr_val = da_pa.get("da", "N/A"), da_pa.get("dr", "N/A")
+    if da_val != "N/A" or dr_val != "N/A":
         issue("Weak Backlink Profile",
               f"The website currently has a Domain Authority (DA) of {da_val} and Domain "
               f"Rating (DR) of {dr_val}. We recommend building high-quality backlinks from "
               "authoritative, relevant domains to strengthen the backlink profile.")
     else:
         issue("Weak Backlink Profile",
-              "Note — Domain Authority / Domain Rating could not be retrieved automatically "
+              "Note - Domain Authority / Domain Rating could not be retrieved automatically "
               "for this domain. Please check manually via a DA/DR checker tool.")
 
     # ---- Image Alt Tags ----
@@ -3715,7 +3715,7 @@ def build_kappa_up(data, out_path, log_fn=None):
     # ---- Mobile usability / speed (kept as a manual-check note, per the app's
     #      existing convention of leaving PageSpeed as a manual check) ----
     issue("Mobile Usability & Page Speed Performance",
-          "Note — Please refer to the attached PageSpeed Insights screenshots (mobile and "
+          "Note - Please refer to the attached PageSpeed Insights screenshots (mobile and "
           "desktop) for the current mobile usability and performance scores.")
 
     doc.save(out_path)
@@ -3727,7 +3727,7 @@ def build_kappa_up(data, out_path, log_fn=None):
 # ---------------------------------------------------------------------------
 
 def build_alpha(data, out_path, log_fn=None):
-    """Alpha — DOCX brief report, verified against the client reference
+    """Alpha - DOCX brief report, verified against the client reference
     "Alpha.docx" (irishflighttraining.com): plain bold-black lettered/titled
     sections (no shaded banners), flowing document style covering Meta
     Optimization, Headings, Image Alt, Schema, Backlink Profile, DA/PA/Spam
@@ -3786,7 +3786,7 @@ def build_alpha(data, out_path, log_fn=None):
     home = f"https://{domain}/"
 
     p = doc.add_paragraph()
-    _run(p, f"Brief Website Analysis — {domain}", bold=True, color=BLACK, size=18)
+    _run(p, f"Brief Website Analysis - {domain}", bold=True, color=BLACK, size=18)
     body(f"We analyzed your website ({home}) so please go through this doc to get a quick "
          "overview of your website's SEO health.")
 
@@ -3797,13 +3797,13 @@ def build_alpha(data, out_path, log_fn=None):
     titles = data.get("titles", []) or []
     for t in titles[:3]:
         labeled("Meta Title - ", f"During the audit of the website ({home}), we found the title "
-                                  f"\"{t.get('title', 'N/A')}\" ({t.get('chars', '?')} chars) — "
+                                  f"\"{t.get('title', 'N/A')}\" ({t.get('chars', '?')} chars) - "
                                   f"{t.get('status', 'N/A')}.")
         labeled("URL: ", t.get("page", home))
     metas = data.get("metas", []) or []
     for m in metas[:3]:
-        labeled("Meta Description – ", f"During the audit of the website ({home}), we found the "
-                                        f"meta description is {m.get('chars', '?')} characters — "
+        labeled("Meta Description - ", f"During the audit of the website ({home}), we found the "
+                                        f"meta description is {m.get('chars', '?')} characters - "
                                         f"{m.get('status', 'N/A')}.")
         body("Long or duplicate meta descriptions can negatively impact search snippet quality, "
              "reduce click-through rate and confuse search engines about page relevance.")
@@ -3837,18 +3837,18 @@ def build_alpha(data, out_path, log_fn=None):
 
     # ---- Backlink Profile ----
     section("Backlink Profile Overview")
-    body("Note — Please refer to the attached backlink profile sheet (Ahrefs export) for full "
+    body("Note - Please refer to the attached backlink profile sheet (Ahrefs export) for full "
          "details on referring domains and anchor text distribution.")
 
     # ---- DA/PA/DR ----
     section("Domain authority, page authority & Domain Rating:")
     da_pa = data.get("da_pa") or {}
-    da_val, dr_val, pa_val = da_pa.get("da", "—"), da_pa.get("dr", "—"), da_pa.get("pa", "—")
-    if da_val != "—" or dr_val != "—":
+    da_val, dr_val, pa_val = da_pa.get("da", "N/A"), da_pa.get("dr", "N/A"), da_pa.get("pa", "N/A")
+    if da_val != "N/A" or dr_val != "N/A":
         body(f"During the audit, we found that the website currently has a Domain Authority (DA) "
              f"of {da_val}, Domain Rating (DR) of {dr_val}, and Page Authority (PA) of {pa_val}.")
     else:
-        body("Note — Domain Authority / Domain Rating could not be retrieved automatically for "
+        body("Note - Domain Authority / Domain Rating could not be retrieved automatically for "
              "this domain. Please check manually via a DA/DR checker tool.")
 
     # ---- Broken Links ----
@@ -3857,16 +3857,16 @@ def build_alpha(data, out_path, log_fn=None):
     broken = data.get("broken_links", []) or []
     if broken:
         body(f"During the audit, we performed a broken link analysis for the website ({home}) and "
-             f"checked {bl_checked} link(s) — {len(broken)} broken link(s) were found. Kindly "
+             f"checked {bl_checked} link(s) - {len(broken)} broken link(s) were found. Kindly "
              "refer to the attached sheet for details.")
     else:
         body(f"During the audit, we performed a broken link analysis for the website ({home}) and "
-             f"checked {bl_checked} link(s) — no broken links were found.")
+             f"checked {bl_checked} link(s) - no broken links were found.")
 
     # ---- Indexing ----
     section("Indexing Status:")
     idx = data.get("indexing", {}) or {}
-    labeled("Status – ", f"During the audit, we performed a Google site search for {home} and "
+    labeled("Status - ", f"During the audit, we performed a Google site search for {home} and "
                           f"found approximately {idx.get('count', 'N/A')} indexed page(s). "
                           f"{idx.get('status', '')}")
     body("We recommend regularly reviewing index coverage through Google Search Console, "
@@ -3874,10 +3874,10 @@ def build_alpha(data, out_path, log_fn=None):
 
     # ---- Page Speed ----
     section("Page Speed Insights on Mobile:")
-    body("Note — Please refer to the attached PageSpeed Insights screenshot (mobile) for the "
+    body("Note - Please refer to the attached PageSpeed Insights screenshot (mobile) for the "
          "current performance score.")
     section("Page Speed Insights on Desktop:")
-    body("Note — Please refer to the attached PageSpeed Insights screenshot (desktop) for the "
+    body("Note - Please refer to the attached PageSpeed Insights screenshot (desktop) for the "
          "current performance score.")
 
     # ---- Robots.txt ----
@@ -3913,7 +3913,7 @@ def build_alpha(data, out_path, log_fn=None):
 
 
 def build_beta(data, out_path, log_fn=None):
-    """Beta — DOCX brief report, verified against the client reference
+    """Beta - DOCX brief report, verified against the client reference
     "Beta.docx" (arnoldanabolics.com): light-teal (#E1F2F1) 1-cell-table
     section banners with navy (#2F5496) bold text, red (#C00000) "Required
     Action" labels, screenshots for Robots.txt/Sitemap/Google Indexing, and
@@ -3993,7 +3993,7 @@ def build_beta(data, out_path, log_fn=None):
 
     # ---- Title / intro ----
     p = doc.add_paragraph()
-    _run(p, f"Brief Website Analysis Report — {domain}", bold=True, color=BLACK, size=18)
+    _run(p, f"Brief Website Analysis Report - {domain}", bold=True, color=BLACK, size=18)
     body(f"After examining the website ({home}) in great detail, we have identified some search "
          "engine optimization (SEO) factors that are essential for improving its visibility and "
          "performance.")
@@ -4013,7 +4013,7 @@ def build_beta(data, out_path, log_fn=None):
              f"that title tags are implemented on all crawled pages.")
         required_action(f"During the page title audit of {home}, a total of {len(titles)} page "
                          f"title(s) were analyzed, and we found the title \"{t.get('title', 'N/A')}\" "
-                         f"({t.get('chars', '?')} chars) — {t.get('status', 'N/A')}.")
+                         f"({t.get('chars', '?')} chars) - {t.get('status', 'N/A')}.")
     p = doc.add_paragraph()
     _run(p, "ii) Meta Descriptions", bold=True, color=BLACK, size=11)
     metas = data.get("metas", []) or []
@@ -4023,7 +4023,7 @@ def build_beta(data, out_path, log_fn=None):
              "across all crawled pages, which is a positive sign for search visibility.")
         required_action(f"During the meta description audit of {home}, a total of {len(metas)} "
                          f"page(s) were analyzed, and we found a meta description of "
-                         f"{m.get('chars', '?')} characters — {m.get('status', 'N/A')}.")
+                         f"{m.get('chars', '?')} characters - {m.get('status', 'N/A')}.")
 
     # ---- Heading Tag Optimization ----
     banner("Heading Tag Optimization")
@@ -4125,20 +4125,20 @@ def build_beta(data, out_path, log_fn=None):
 
     # ---- Semrush / Ahrefs Overview ----
     banner("Semrush Overview")
-    body("Note — Please refer to the attached Semrush overview screenshot for this domain's "
+    body("Note - Please refer to the attached Semrush overview screenshot for this domain's "
          "Authority Score, organic traffic, organic keywords, referring domains and backlinks.")
 
     banner("Ahref Overview")
     da_pa = data.get("da_pa") or {}
-    da_val, dr_val, pa_val = da_pa.get("da", "—"), da_pa.get("dr", "—"), da_pa.get("pa", "—")
-    if da_val != "—" or dr_val != "—":
+    da_val, dr_val, pa_val = da_pa.get("da", "N/A"), da_pa.get("dr", "N/A"), da_pa.get("pa", "N/A")
+    if da_val != "N/A" or dr_val != "N/A":
         body(f"The domain {domain} currently has a Domain Authority (DA) of {da_val}, a Domain "
              f"Rating (DR) of {dr_val}, and a Page Authority (PA) of {pa_val}.")
         required_action(f"During the backlink profile analysis of {home}, the website shows a "
                          f"Domain Rating (DR) of {dr_val}. We recommend building high-quality "
                          "backlinks from authoritative domains to strengthen the backlink profile.")
     else:
-        body("Note — Domain Authority / Domain Rating could not be retrieved automatically for "
+        body("Note - Domain Authority / Domain Rating could not be retrieved automatically for "
              "this domain. Please check manually via a DA/DR checker tool.")
         required_action(f"During the backlink profile analysis of {home}, we recommend building "
                          "high-quality backlinks from authoritative domains to strengthen the "
@@ -4181,7 +4181,7 @@ def run_brief_analysis(domain, fmt="james", target_pages=None, out_dir=None, log
         out_dir = tempfile.mkdtemp(prefix="brief_analysis_")
     os.makedirs(out_dir, exist_ok=True)
 
-    # Build EXACTLY the selected format — never silently fall back to another one.
+    # Build EXACTLY the selected format - never silently fall back to another one.
     fmt = str(fmt or "").strip().lower()
     format_info = BRIEF_FORMATS.get(fmt)
     if not format_info:

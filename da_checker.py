@@ -1,5 +1,5 @@
 """
-DA/PA Checker — uses the Selenium browser to check DA/PA via free online tools.
+DA/PA Checker - uses the Selenium browser to check DA/PA via free online tools.
 Tries multiple tools in sequence, caches results per domain.
 """
 
@@ -54,7 +54,7 @@ def _try_rhinorank(driver, domain):
 
         if da is not None:
             return {"da": da,
-                    "pa": pa if pa is not None else "—",
+                    "pa": pa if pa is not None else "N/A",
                     "source": "rhinorank.io"}
     except Exception as e:
         logger.debug(f"rhinorank failed: {e}")
@@ -90,7 +90,7 @@ def _try_websiteseochecker(driver, domain):
         pa = _find_metric(src, ["page authority", "PA Score", "PA"], limit=100)
 
         if da is not None:
-            return {"da": da, "pa": pa if pa is not None else "—",
+            return {"da": da, "pa": pa if pa is not None else "N/A",
                     "source": "websiteseochecker.com"}
     except Exception as e:
         logger.debug(f"websiteseochecker failed: {e}")
@@ -126,7 +126,7 @@ def _try_dapa_checker(driver, domain):
         pa = _find_metric(src, ["page authority", "PA"], limit=100)
 
         if da is not None:
-            return {"da": da, "pa": pa if pa is not None else "—",
+            return {"da": da, "pa": pa if pa is not None else "N/A",
                     "source": "dapa-checker.com"}
     except Exception as e:
         logger.debug(f"dapa-checker failed: {e}")
@@ -162,7 +162,7 @@ def _try_da_checker_org(driver, domain):
         pa = _find_metric(src, ["page authority", "PA"], limit=100)
 
         if da is not None:
-            return {"da": da, "pa": pa if pa is not None else "—",
+            return {"da": da, "pa": pa if pa is not None else "N/A",
                     "source": "da-checker.org"}
     except Exception as e:
         logger.debug(f"da-checker.org failed: {e}")
@@ -198,7 +198,7 @@ def _try_teqtop(driver, domain):
         pa = _find_metric(src, ["page authority", "PA"], limit=100)
 
         if da is not None:
-            return {"da": da, "pa": pa if pa is not None else "—",
+            return {"da": da, "pa": pa if pa is not None else "N/A",
                     "source": "teqtop.com"}
     except Exception as e:
         logger.debug(f"teqtop failed: {e}")
@@ -243,14 +243,14 @@ def _find_metric(html, labels, limit=100):
 
 def check_domain_rating(domain, log_fn=None):
     """
-    Fetch Ahrefs Domain Rating (DR) via Ahrefs' free public API — no browser needed.
-    Cached per domain. Returns int (0-100) or "—" if unavailable.
+    Fetch Ahrefs Domain Rating (DR) via Ahrefs' free public API - no browser needed.
+    Cached per domain. Returns int (0-100) or "N/A" if unavailable.
     """
     domain = domain.strip().lower()
     if domain in _dr_cache:
         return _dr_cache[domain]
 
-    result = "—"
+    result = "N/A"
     try:
         resp = requests.get(
             "https://api.ahrefs.com/v3/public/domain-rating-free",
@@ -299,13 +299,13 @@ def check_da_pa(driver, url_or_domain, log_fn=None):
     if domain in _da_cache:
         cached = _da_cache[domain]
         if log_fn:
-            log_fn(f"  DA/PA for {domain}: cached — DA={cached.get('da','—')}, DR={cached.get('dr','—')}, PA={cached.get('pa','—')}")
+            log_fn(f"  DA/PA for {domain}: cached - DA={cached.get('da','N/A')}, DR={cached.get('dr','N/A')}, PA={cached.get('pa','N/A')}")
         return cached
 
     if log_fn:
         log_fn(f"  Checking DA/PA for {domain}...")
 
-    # DR comes straight from Ahrefs' free public API — no browser needed.
+    # DR comes straight from Ahrefs' free public API - no browser needed.
     dr_val = check_domain_rating(domain, log_fn=log_fn)
 
     # Save current URL to go back after
@@ -323,7 +323,7 @@ def check_da_pa(driver, url_or_domain, log_fn=None):
                 result["dr"] = dr_val
                 _da_cache[domain] = result
                 if log_fn:
-                    log_fn(f"  DA={result['da']}, DR={dr_val}, PA={result.get('pa','—')} (from {result['source']})")
+                    log_fn(f"  DA={result['da']}, DR={dr_val}, PA={result.get('pa','N/A')} (from {result['source']})")
                 # Navigate back to avoid interference
                 if original_url and original_url.startswith("http"):
                     try:
@@ -337,7 +337,7 @@ def check_da_pa(driver, url_or_domain, log_fn=None):
                 log_fn(f"  {name} failed: {e}")
         time.sleep(random.uniform(1, 2))
 
-    fallback = {"da": "—", "pa": "—", "dr": dr_val, "source": "—"}
+    fallback = {"da": "N/A", "pa": "N/A", "dr": dr_val, "source": "N/A"}
     _da_cache[domain] = fallback
     if log_fn:
         log_fn(f"  DA/PA: could not retrieve from any tool")

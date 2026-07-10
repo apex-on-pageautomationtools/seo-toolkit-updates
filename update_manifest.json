@@ -13,7 +13,7 @@
     },
     {
       "path": "engine.py",
-      "hash": "56df3d455840dad94c18ed4cee4c44f32dc0444b36749b1f060f53af828aa196",
+      "hash": "f897a8a624ab68fe040b46e22f4cb0ae78bd3f59130d3a65ef8b32ebd6538609",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/engine.py"
     },
     {
@@ -23,12 +23,12 @@
     },
     {
       "path": "health_audit.py",
-      "hash": "56d8145f8f07b65b118d4b09165a317061018c96284e32a9ee81a6e86b051437",
+      "hash": "3a57db04e762fa6185c7860420d682c45026d237a8cd965138f57b8e47036f0f",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/health_audit.py"
     },
     {
       "path": "web_app_batch.py",
-      "hash": "306f57ea3bd0313146b9bea56f6711a1635f7b6b952295c0b007559f357c16f8",
+      "hash": "4ce24a8dcbe1d8e79a16a622ebcad33b9be7256c39bdc53361321b9c305459ad",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -103,7 +103,7 @@
     },
     {
       "path": "scripts/generate_seo_onpage_phase2.py",
-      "hash": "feae897e93d1e994a2e4e3e2a43c724b590ed99f60a6d309402bd2961d71eba0",
+      "hash": "1bc655ae011b0745056f468c9dcd2ed7b12df88c9052f16d8ad261213a5e5481",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seo_onpage_phase2.py"
     },
     {
@@ -133,12 +133,12 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "2bfbfe017198e5859c0318667b4e838079df8a214d974b1196b065ee533fbeae",
+      "hash": "d274b4ed416661121d7191a6fe396e7920f1291acce2b3c99b072949b1e49d49",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {
       "path": "brief_analysis.py",
-      "hash": "98ac378c3786efb46280f742538d55ef39a8fb96eccf45b1a58b26ea83362e02",
+      "hash": "39f368308483401d32fa9cdac65b270787521456bb75acd2eb597de5da4cf8a4",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/brief_analysis.py"
     },
     {
@@ -163,7 +163,7 @@
     },
     {
       "path": "splash.ps1",
-      "hash": "373a1e646837924e347d8987cbd751030d0d23ebcd8e3a005a3e612c1d7964a1",
+      "hash": "2bba2a3b379c6c729bfc2b53047ec36da7c41f87089b992a51b36123920f61de",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/splash.ps1"
     }
   ]
