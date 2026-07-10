@@ -2169,16 +2169,198 @@ def build_neon(data, out_path, log_fn=None):
 # Format registry & main entry
 # ---------------------------------------------------------------------------
 
+def build_alpha(data, out_path, log_fn=None):
+    """Alpha — DOCX brief report, verified against the client reference
+    "Alpha.docx" (irishflighttraining.com): plain bold-black lettered/titled
+    sections (no shaded banners), flowing document style covering Meta
+    Optimization, Headings, Image Alt, Schema, Backlink Profile, DA/PA/Spam
+    Score, Broken Links, Indexing, PageSpeed (mobile+desktop), Robots.txt and
+    Sitemap. DA/PA/backlink/PageSpeed data isn't collected by run_brief_checks
+    today, so those sections point to the attached sheet/manual check, same
+    graceful-degradation convention the on-page formats use for data outside
+    what's computed inline."""
+    if log_fn is None:
+        log_fn = print
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+
+    domain = data["domain"]
+    doc = Document()
+    for sname in ("Normal", "List Paragraph"):
+        try:
+            st = doc.styles[sname]
+            st.font.name = "Calibri"
+            st.font.size = Pt(11)
+        except KeyError:
+            pass
+
+    BLACK = RGBColor(0x00, 0x00, 0x00)
+
+    def _run(p, text, bold=False, color=BLACK, size=11):
+        r = p.add_run(text)
+        r.font.name = "Calibri"
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        if color is not None:
+            r.font.color.rgb = color
+        return r
+
+    def section(text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(10)
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=True, color=BLACK, size=13)
+        return p
+
+    def body(text, bold=False):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=bold, color=BLACK, size=11)
+        return p
+
+    def labeled(label, text=""):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, label, bold=True, color=BLACK, size=11)
+        if text:
+            _run(p, text, bold=False, color=BLACK, size=11)
+        return p
+
+    home = f"https://{domain}/"
+
+    p = doc.add_paragraph()
+    _run(p, f"Brief Website Analysis — {domain}", bold=True, color=BLACK, size=18)
+    body(f"We analyzed your website ({home}) so please go through this doc to get a quick "
+         "overview of your website's SEO health.")
+
+    # ---- Meta Optimization ----
+    section("A) Meta Optimization")
+    body("Metadata plays a crucial role in SEO as it provides a clear summary of page content and "
+         "helps improve click-through rate from search results.")
+    titles = data.get("titles", []) or []
+    for t in titles[:3]:
+        labeled("Meta Title - ", f"During the audit of the website ({home}), we found the title "
+                                  f"\"{t.get('title', 'N/A')}\" ({t.get('chars', '?')} chars) — "
+                                  f"{t.get('status', 'N/A')}.")
+        labeled("URL: ", t.get("page", home))
+    metas = data.get("metas", []) or []
+    for m in metas[:3]:
+        labeled("Meta Description – ", f"During the audit of the website ({home}), we found the "
+                                        f"meta description is {m.get('chars', '?')} characters — "
+                                        f"{m.get('status', 'N/A')}.")
+        body("Long or duplicate meta descriptions can negatively impact search snippet quality, "
+             "reduce click-through rate and confuse search engines about page relevance.")
+        labeled("URL: ", m.get("page", home))
+
+    # ---- Headings ----
+    headers = data.get("headers", []) or []
+    for h in headers[:1]:
+        h1c = h.get("h1", 0)
+        labeled("Headings: ", f"During the audit of the website ({home}), we found {h1c} H1 "
+                              f"tag(s) on the page.")
+        body("We recommend adding a unique, keyword-focused H1 tag to all pages where it is "
+             "missing, ensuring a clear content hierarchy.")
+        labeled("URL: ", h.get("page", home))
+
+    # ---- Image Alt ----
+    section("Image Alt texts and title optimization:")
+    img_alts = data.get("img_alts", []) or []
+    missing = len([a for a in img_alts if a.get("present") != "Yes"])
+    labeled("Note: ", f"During the audit of the website ({home}), we found that {missing} of "
+                       f"{len(img_alts)} image(s) checked are missing descriptive ALT text.")
+    body("We recommend adding descriptive, keyword-relevant ALT text to all missing images, "
+         "compressing large images, and using meaningful file names.")
+
+    # ---- Schema ----
+    section("Note For Schema:")
+    body(f"During the audit of the homepage ({home}), we checked for structured data (schema "
+         "markup) implementation.")
+    body("We recommend implementing additional relevant schema types such as Organization Schema "
+         "to help search engines better understand your business.")
+
+    # ---- Backlink Profile ----
+    section("Backlink Profile Overview")
+    body("Note — Please refer to the attached backlink profile sheet (Ahrefs export) for full "
+         "details on referring domains and anchor text distribution.")
+
+    # ---- DA/PA/Spam Score ----
+    section("Domain authority, page authority & Spam Score:")
+    body("Note — Please refer to the attached sheet for the current Domain Authority (DA), Page "
+         "Authority (PA), and Spam Score for this domain.")
+
+    # ---- Broken Links ----
+    section("Broken Link")
+    bl_checked = data.get("broken_links_checked", 0)
+    broken = data.get("broken_links", []) or []
+    if broken:
+        body(f"During the audit, we performed a broken link analysis for the website ({home}) and "
+             f"checked {bl_checked} link(s) — {len(broken)} broken link(s) were found. Kindly "
+             "refer to the attached sheet for details.")
+    else:
+        body(f"During the audit, we performed a broken link analysis for the website ({home}) and "
+             f"checked {bl_checked} link(s) — no broken links were found.")
+
+    # ---- Indexing ----
+    section("Indexing Status:")
+    idx = data.get("indexing", {}) or {}
+    labeled("Status – ", f"During the audit, we performed a Google site search for {home} and "
+                          f"found approximately {idx.get('count', 'N/A')} indexed page(s). "
+                          f"{idx.get('status', '')}")
+    body("We recommend regularly reviewing index coverage through Google Search Console, "
+         "identifying and resolving any excluded or non-indexed pages.")
+
+    # ---- Page Speed ----
+    section("Page Speed Insights on Mobile:")
+    body("Note — Please refer to the attached PageSpeed Insights screenshot (mobile) for the "
+         "current performance score.")
+    section("Page Speed Insights on Desktop:")
+    body("Note — Please refer to the attached PageSpeed Insights screenshot (desktop) for the "
+         "current performance score.")
+
+    # ---- Robots.txt ----
+    robots = data.get("robots", {}) or {}
+    p = doc.add_paragraph()
+    _run(p, "•  Robot.txt Optimization: - ", bold=True, color=BLACK, size=11)
+    if robots.get("found"):
+        _run(p, f"During the technical SEO audit, we found that the website has a robots.txt "
+                f"file in place at https://{domain}/robots.txt.", bold=False, color=BLACK, size=11)
+    else:
+        _run(p, "During the technical SEO audit, we did not find a robots.txt file on the "
+                "website.", bold=False, color=BLACK, size=11)
+    body("We recommend regularly reviewing and updating the robots.txt file to ensure that "
+         "important pages are crawlable and irrelevant ones are excluded.")
+
+    # ---- Sitemap ----
+    sitemap = data.get("sitemap", {}) or {}
+    p = doc.add_paragraph()
+    _run(p, "Sitemap: ", bold=True, color=BLACK, size=11)
+    sm_url = sitemap.get("url_checked", f"https://{domain}/sitemap.xml")
+    if sitemap.get("found") or sitemap.get("ok"):
+        _run(p, f"During the technical SEO audit, we found the website's XML sitemap URL "
+                f"({sm_url}) is accessible and properly configured.", bold=False, color=BLACK,
+             size=11)
+    else:
+        _run(p, f"During the technical SEO audit, we did not find an accessible XML sitemap at "
+                f"{sm_url}.", bold=False, color=BLACK, size=11)
+    body("We recommend creating and properly configuring an XML sitemap, ensuring it is "
+         "accessible to search engines and submitted via Google Search Console.")
+
+    doc.save(out_path)
+    log_fn(f"  Alpha report saved: {os.path.basename(out_path)}")
+
+
 BRIEF_FORMATS = {
-    "james": {"label": "James (15 slides, table-based)", "builder": build_james},
-    "xenon": {"label": "Xenon (15 slides, badge-based)", "builder": build_xenon},
-    "omega": {"label": "Omega (16 slides, dark navy)", "builder": build_omega},
-    "neon": {"label": "Neon (19 slides, clean white)", "builder": build_neon},
+    "james": {"label": "James (15 slides, table-based)", "builder": build_james, "ext": "pptx"},
+    "xenon": {"label": "Xenon (15 slides, badge-based)", "builder": build_xenon, "ext": "pptx"},
+    "omega": {"label": "Omega (16 slides, dark navy)", "builder": build_omega, "ext": "pptx"},
+    "neon": {"label": "Neon (19 slides, clean white)", "builder": build_neon, "ext": "pptx"},
+    "alpha": {"label": "Alpha (DOCX, flowing document)", "builder": build_alpha, "ext": "docx"},
 }
 
 
 def run_brief_analysis(domain, fmt="james", target_pages=None, out_dir=None, log_fn=None):
-    """Run brief website analysis: collect data + build PPTX."""
+    """Run brief website analysis: collect data + build the selected report file
+    (PPTX or DOCX, per that format's registered "ext")."""
     if log_fn is None:
         log_fn = print
     domain = re.sub(r'^\s*https?://', '', str(domain or '')).strip().strip('/').split('/')[0] or str(domain)
@@ -2197,7 +2379,8 @@ def run_brief_analysis(domain, fmt="james", target_pages=None, out_dir=None, log
     data = run_brief_checks(domain, target_pages, log_fn)
 
     timestamp = datetime.now().strftime("%d-%B-%Y")
-    out_file = os.path.join(out_dir, f"Brief_Report_{domain}_{timestamp}.pptx")
+    ext = format_info.get("ext", "pptx")
+    out_file = os.path.join(out_dir, f"Brief_Report_{domain}_{timestamp}.{ext}")
 
     log_fn(f"Building {format_info['label']} report (format: {fmt})...")
     format_info["builder"](data, out_file, log_fn)
