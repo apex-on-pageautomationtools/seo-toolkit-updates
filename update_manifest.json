@@ -103,7 +103,7 @@
     },
     {
       "path": "scripts/generate_seo_onpage_phase2.py",
-      "hash": "114b3861ef277b2b7fc22ab5f2ae1ec5c5f4f5e10fac50334e965b5fece8a2f3",
+      "hash": "feae897e93d1e994a2e4e3e2a43c724b590ed99f60a6d309402bd2961d71eba0",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seo_onpage_phase2.py"
     },
     {
@@ -133,7 +133,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "2620b2f48c308fd0b54c6eff26d5f8808d8ee01f1c62fcc45ab392ec680b2695",
+      "hash": "d2b789ecff8d8288f85438dfbf6a6cf867b8151c9fef7be6c2bbce910f3a918d",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {
