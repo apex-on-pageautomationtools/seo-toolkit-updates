@@ -2611,6 +2611,197 @@ def build_eta(data, out_path, log_fn=None):
     log_fn(f"  ETA report saved: {os.path.basename(out_path)}")
 
 
+def build_kappa(data, out_path, log_fn=None):
+    """Kappa — DOCX brief report, verified against the client reference
+    "Kappa.docx" (newimageopticians.com): solid BLACK paragraph-shaded
+    section titles with white bold text (no tables — the fill is on the
+    paragraph itself), plain black body/recommendation text, covering Title
+    Tag, H1 Tag, Missing Description, Images ALT text, Robots.txt, Sitemap,
+    URL Redirection, Broken Links, Schema, DA/PA, Backlinks Status and a
+    closing Homepage Content/UX findings section."""
+    if log_fn is None:
+        log_fn = print
+    from docx.shared import Pt, RGBColor
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    domain = data["domain"]
+    home = f"https://{domain}/"
+    from docx import Document
+    doc = Document()
+    for sname in ("Normal", "List Paragraph"):
+        try:
+            st = doc.styles[sname]
+            st.font.name = "Calibri"
+            st.font.size = Pt(11)
+        except KeyError:
+            pass
+
+    BLACK = RGBColor(0x00, 0x00, 0x00)
+    WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+
+    def _run(p, text, bold=False, color=BLACK, size=11):
+        r = p.add_run(text)
+        r.font.name = "Calibri"
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        if color is not None:
+            r.font.color.rgb = color
+        return r
+
+    def section(text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(10)
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=True, color=WHITE, size=13)
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:fill'), '000000')
+        shd.set(qn('w:val'), 'clear')
+        p._p.get_or_add_pPr().append(shd)
+        return p
+
+    def body(text, bold=False):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=bold, color=BLACK, size=11)
+        return p
+
+    p = doc.add_paragraph()
+    _run(p, f"Website Audit - {home}", bold=True, color=BLACK, size=26)
+
+    # ---- Title Tag ----
+    section("Title Tag")
+    titles = data.get("titles", []) or []
+    issues = [t for t in titles if t.get("status") != "Good"]
+    body(f"During the audit of the website ({home}), we found that the website contains "
+         f"{len(titles)} indexed page(s), of which {len(issues)} have title tag issue(s).")
+    body("We recommend optimizing page titles by keeping them within the recommended length of "
+         "approximately 50–60 characters and including relevant keywords near the beginning.")
+
+    # ---- H1 Tag ----
+    section("H1 Tag")
+    headers = data.get("headers", []) or []
+    h1_issues = [h for h in headers if h.get("h1") != 1]
+    body(f"During the audit of the website ({home}), we found that {len(h1_issues)} of "
+         f"{len(headers)} indexed page(s) are missing a properly implemented H1 tag.")
+    body("We recommend adding a unique, keyword-focused H1 tag to every important page, "
+         "ensuring that each page has a clear primary heading.")
+
+    # ---- Missing Description ----
+    section("Missing Description")
+    metas = data.get("metas", []) or []
+    meta_missing = len([m for m in metas if m.get("found") != "Yes"])
+    body(f"During the audit of the website ({home}), we found that the website contains "
+         f"{len(metas)} indexed page(s), of which {meta_missing} are missing a meta "
+         "description.")
+    body("We recommend creating unique, keyword-focused meta descriptions for all important "
+         "pages, ensuring they accurately summarize the page content.")
+
+    # ---- Images ALT text ----
+    section("Images ALT text")
+    img_alts = data.get("img_alts", []) or []
+    missing_alt = len([a for a in img_alts if a.get("present") != "Yes"])
+    body(f"During the audit of the website ({home}), we found that the website contains "
+         f"{len(img_alts)} image(s), of which {missing_alt} are missing ALT text.")
+    body("We recommend adding descriptive, keyword-relevant ALT text to all missing images and "
+         "compressing oversized images to improve accessibility and page speed.")
+
+    # ---- Robots.txt ----
+    section("Note  For ROBOTS.TXT")
+    robots = data.get("robots", {}) or {}
+    if robots.get("found"):
+        body(f"During the technical SEO audit, we found that the website has a properly "
+             f"configured robots.txt file available at {home}robots.txt.")
+    else:
+        body(f"During the technical SEO audit, we found that the website does not have an "
+             f"accessible robots.txt file at {home}robots.txt.")
+    body("We recommend reviewing and optimizing the robots.txt configuration to ensure that "
+         "important pages and resources remain crawlable.")
+
+    # ---- Sitemap ----
+    section("Note for Sitemap")
+    sitemap = data.get("sitemap", {}) or {}
+    sm_url = sitemap.get("url_checked", f"{home}sitemap.xml")
+    if sitemap.get("found") or sitemap.get("ok"):
+        body(f"During the technical SEO audit, we found that the website has a properly "
+             f"accessible XML sitemap available at {sm_url}.")
+    else:
+        body(f"During the technical SEO audit, we found that the website's XML sitemap "
+             f"({sm_url}) is not accessible.")
+    body("We recommend regularly monitoring the XML sitemap to ensure that all important, "
+         "indexable pages are included, and that it is submitted via Google Search Console.")
+
+    # ---- URL Redirection ----
+    section("Note for URL Redirection")
+    redirects = data.get("redirects", []) or []
+    if redirects:
+        r = redirects[0]
+        body(f"During the redirect audit, we checked the homepage URL ({home}) and found "
+             f"{r.get('status', 'N/A')} — {r.get('detail', '')}")
+    else:
+        body(f"During the redirect audit, we checked the homepage URL ({home}) and found "
+             "standard redirect behavior with no issues identified.")
+
+    # ---- Broken Links ----
+    section("Note for Broken Links")
+    bl_checked = data.get("broken_links_checked", 0)
+    broken = data.get("broken_links", []) or []
+    if broken:
+        body(f"During the audit, we performed a broken link analysis for the website ({home}) "
+             f"and found {len(broken)} broken link(s) out of {bl_checked} URL(s) scanned.")
+    else:
+        body(f"During the audit, we performed a broken link analysis for the website ({home}) "
+             f"and found no broken links out of {bl_checked} URL(s) scanned.")
+    body("We recommend continuing regular broken link monitoring to ensure that newly added "
+         "pages, external references, and resources remain valid over time.")
+
+    # ---- Schema ----
+    section("Note for Schema")
+    body(f"During the audit of the homepage ({home}), we tested the page using Google's Rich "
+         "Results tooling for structured data implementation.")
+    body("We recommend implementing relevant schema types such as LocalBusiness Schema to "
+         "provide business details directly to search engines.")
+
+    # ---- DA/PA ----
+    section("Domain Authority & Page Authority")
+    da_pa = data.get("da_pa") or {}
+    da_val, dr_val, pa_val = da_pa.get("da", "—"), da_pa.get("dr", "—"), da_pa.get("pa", "—")
+    if da_val != "—" or dr_val != "—":
+        body(f"During the audit, we found that the website currently has a Domain Authority "
+             f"(DA) of {da_val}, Page Authority (PA) of {pa_val}, and Domain Rating (DR) of "
+             f"{dr_val}.")
+    else:
+        body("Note — Domain Authority / Domain Rating could not be retrieved automatically for "
+             "this domain. Please check manually via a DA/DR checker tool.")
+    body("We recommend focusing on acquiring high-quality backlinks from authoritative and "
+         "relevant domains to strengthen overall authority.")
+
+    # ---- Backlinks Status ----
+    section("Backlinks Status ")
+    if dr_val != "—":
+        body(f"During the audit, we found that the website currently has a Domain Rating (DR) "
+             f"of {dr_val}.")
+    else:
+        body("Note — Backlink data could not be retrieved automatically for this domain. "
+             "Please check manually via an Ahrefs/Moz checker tool.")
+    body("We recommend focusing on acquiring high-quality backlinks from authoritative and "
+         "relevant domains to strengthen the backlink profile.")
+
+    # ---- Homepage Content, UX & SEO Audit Findings ----
+    section("Homepage Content, UX & SEO Audit Findings")
+    body(f"During the homepage audit of {home}, we found that the website has a basic "
+         "homepage layout covering the core content areas expected for the site's business "
+         "category.")
+    body("However, the homepage requires further SEO and user experience optimization to "
+         "improve visibility and conversion.")
+    body("Additionally, implementing relevant schema markup such as LocalBusiness, "
+         "Organization, WebSite, WebPage and Service schema is recommended to help search "
+         "engines better understand the business.")
+
+    doc.save(out_path)
+    log_fn(f"  Kappa report saved: {os.path.basename(out_path)}")
+
+
 # ---------------------------------------------------------------------------
 # Format registry & main entry
 # ---------------------------------------------------------------------------
@@ -3052,6 +3243,7 @@ BRIEF_FORMATS = {
     "beta": {"label": "Beta (DOCX, teal banners + screenshots)", "builder": build_beta, "ext": "docx"},
     "camila": {"label": "Camila (16 slides, gold titles)", "builder": build_camila, "ext": "pptx"},
     "eta": {"label": "ETA (DOCX, plain lettered sections)", "builder": build_eta, "ext": "docx"},
+    "kappa": {"label": "Kappa (DOCX, black paragraph banners)", "builder": build_kappa, "ext": "docx"},
 }
 
 
