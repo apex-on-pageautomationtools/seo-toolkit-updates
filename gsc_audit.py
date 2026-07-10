@@ -1968,9 +1968,52 @@ GSC_FORMATS = {
     "neon":        {"label": "Neon (8 slides)",             "builder": build_neon},
 }
 
+# Status strings that mean "no problem" — everything else from
+# _detect_page_status counts as a real issue worth emailing about.
+_GSC_STATUS_OK = {"no issues detected", "no removals found", ""}
+_GSC_STATUS_LABELS = {
+    "manual": "Manual Action",
+    "security": "Security Issue",
+    "removals": "Removals",
+}
+
+
+def _send_gsc_alert(webapp_url, domain, statuses, email, log_fn=None):
+    """POST the Apps Script's send_alert action for any real GSC issue found
+    (manual action, security issue, removals) — handleSendAlert already
+    exists and works server-side, it just had no caller."""
+    if log_fn is None:
+        log_fn = print
+    issues = []
+    for key, label in _GSC_STATUS_LABELS.items():
+        status = (statuses.get(key) or "").strip()
+        if status and status.lower() not in _GSC_STATUS_OK:
+            issues.append({"type": label, "detail": status})
+    if not issues:
+        return
+    payload = {
+        "action": "send_alert",
+        "domain": domain,
+        "issues": issues,
+        "timestamp": datetime.now().isoformat(),
+        "accountEmail": email or "",
+    }
+    try:
+        req = urllib.request.Request(
+            webapp_url, data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "text/plain;charset=utf-8"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            result = json.loads(r.read().decode())
+        if result.get("sent"):
+            log_fn(f"  Alert email sent for {domain} ({len(issues)} issue(s)).")
+        else:
+            log_fn(f"  Alert email not sent: {result.get('error') or result.get('reason')}")
+    except Exception as e:
+        log_fn(f"  [warn] Alert email failed: {e}")
+
 
 def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
-                  period_days=28, end_offset=3, log_fn=None):
+                  period_days=28, end_offset=3, log_fn=None, webapp_url=None):
     """Run a complete GSC audit: fetch data, capture screenshots, build PPTX."""
     if log_fn is None:
         log_fn = print
@@ -2054,6 +2097,13 @@ def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
             log_fn("  Could not capture from any session — slides will show a 'check manually' note.")
     log_fn(f"  {len(screenshots)} screenshot(s) captured.")
     report_data["screenshots"] = screenshots
+
+    # Email the admin when a real issue is found (manual action, security
+    # issue, or removals) — the Apps Script's handleSendAlert already builds
+    # and sends this email, but nothing was ever calling it, so these alerts
+    # never went out.
+    if webapp_url:
+        _send_gsc_alert(webapp_url, domain, screenshots.get("_statuses", {}), email, log_fn)
 
     # Build PPTX
     format_info = GSC_FORMATS[fmt]   # validated above — build the selected format

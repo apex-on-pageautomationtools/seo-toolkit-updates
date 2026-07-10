@@ -3160,6 +3160,7 @@ def _run_gsc_audit(domain, email, fmt, headless, browser_name):
         _log("[1/2] Running GSC audit (API data + session screenshots)...")
         path = gsc_audit.run_gsc_audit(
             domain, email, fmt=fmt, out_dir=out_folder, log_fn=_log,
+            webapp_url=_gsc_webapp_url(),
         )
 
         with gsc_lock:
