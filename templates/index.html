@@ -2800,6 +2800,7 @@ async function admLoadKeysStatus(){
 
 /* ===================== crawl tracker ===================== */
 let crawlItems=[], crawlBatchId='', crawlIdx=0, crawlPaused=false, crawlStopped=false, crawlResults=[], crawlStartTime=null;
+let crawlInflight=new Set();
 
 function crawlSaveUrls(){try{localStorage.setItem('crawl_urls',$('crawl-urls').value);}catch(e){}}
 function crawlLoadUrls(){try{const v=localStorage.getItem('crawl_urls');if(v)$('crawl-urls').value=v;crawlUpdateCount();}catch(e){}}
@@ -2845,7 +2846,7 @@ async function crawlStart(){
   $('crawl-tbody').innerHTML='';
   $('btn-crawl-download').disabled=false;
   $('crawl-eta').textContent='';
-  crawlResults=[];crawlIdx=0;crawlPaused=false;crawlStopped=false;crawlStartTime=null;
+  crawlResults=[];crawlIdx=0;crawlPaused=false;crawlStopped=false;crawlStartTime=null;crawlInflight.clear();
   setButtons('running','crawl');
   $('crawl-progress').textContent='Validating...';
   $('crawl-progress').className='tag t-yes';
@@ -2884,7 +2885,7 @@ function extractDomain(url){
 function crawlRenderTable(){
   const tb=$('crawl-tbody');
   tb.innerHTML=crawlResults.map((r,i)=>{
-    const isCurrent=i===crawlIdx&&!crawlStopped&&!crawlPaused;
+    const isCurrent=crawlInflight.has(i)&&!crawlStopped&&!crawlPaused;
     const rowCls=r.status==='pending'?(isCurrent?'':'style="opacity:.55"'):'';
     let badge='',badgeCls='';
     if(r.status==='pending'){
@@ -2923,21 +2924,18 @@ function crawlUpdateProgress(){
   }
 }
 
-async function crawlProcessNext(){
+const CRAWL_CONCURRENCY=5; // property/account was already resolved once in the /api/crawl/validate
+                            // batch call -- each /api/crawl/inspect below is an independent,
+                            // unlocked API round-trip, so running several at once is safe.
+
+async function crawlWorker(){
   while(crawlIdx<crawlItems.length){
-    if(crawlStopped){
-      $('crawl-progress').textContent='Stopped';$('crawl-progress').className='tag t-unknown';
-      setButtons('stopped','crawl');$('btn-crawl-download').disabled=crawlResults.filter(r=>r.status!=='pending').length===0;
-      crawlUpdateProgress();$('crawl-eta').textContent='';crawlRenderTable();return;
-    }
-    if(crawlPaused){
-      $('crawl-progress').textContent='Paused';$('crawl-progress').className='tag t-unknown';
-      setButtons('paused','crawl');crawlUpdateProgress();$('crawl-eta').textContent='';crawlRenderTable();return;
-    }
-    const it=crawlItems[crawlIdx];
-    if(!it.ready){crawlIdx++;continue;}
-    const i=crawlIdx;
-    $('crawl-progress').textContent='Checking URL '+(i+1)+' of '+crawlItems.length;
+    if(crawlStopped||crawlPaused)return;
+    const i=crawlIdx++;
+    const it=crawlItems[i];
+    if(!it.ready)continue;
+    crawlInflight.add(i);
+    $('crawl-progress').textContent='Checking '+crawlInflight.size+' URL(s) in parallel ('+Math.min(crawlIdx,crawlItems.length)+' of '+crawlItems.length+' dispatched)';
     crawlRenderTable();
     crawlUpdateProgress();
     const t0=Date.now();
@@ -2957,9 +2955,23 @@ async function crawlProcessNext(){
       crawlResults[i].lastCrawlDate='Error';crawlResults[i].indexStatus='Network error';crawlResults[i].status='error';
       crawlLog('  -> Network error: '+e.message+' ('+secs+'s)');
     }
+    crawlInflight.delete(i);
     crawlRenderTable();crawlUpdateProgress();
-    crawlIdx++;
-    await new Promise(r=>setTimeout(r,300));
+  }
+}
+
+async function crawlProcessNext(){
+  const workers=[];
+  for(let w=0;w<CRAWL_CONCURRENCY;w++)workers.push(crawlWorker());
+  await Promise.all(workers);
+  if(crawlStopped){
+    $('crawl-progress').textContent='Stopped';$('crawl-progress').className='tag t-unknown';
+    setButtons('stopped','crawl');$('btn-crawl-download').disabled=crawlResults.filter(r=>r.status!=='pending').length===0;
+    crawlUpdateProgress();$('crawl-eta').textContent='';crawlRenderTable();return;
+  }
+  if(crawlPaused){
+    $('crawl-progress').textContent='Paused';$('crawl-progress').className='tag t-unknown';
+    setButtons('paused','crawl');crawlUpdateProgress();$('crawl-eta').textContent='';crawlRenderTable();return;
   }
   $('crawl-progress').textContent='Completed';
   $('crawl-progress').className='tag t-yes';
@@ -2978,7 +2990,7 @@ function crawlReset(){
   $('empty-crawl').style.display='block';
   $('crawl-active').classList.add('hidden');
   $('crawl-tbody').innerHTML='';
-  crawlItems=[];crawlResults=[];crawlIdx=0;crawlPaused=false;crawlStopped=false;crawlStartTime=null;
+  crawlItems=[];crawlResults=[];crawlIdx=0;crawlPaused=false;crawlStopped=false;crawlStartTime=null;crawlInflight.clear();
   $('btn-crawl-download').disabled=true;
   $('crawl-eta').textContent='';
   setButtons('idle','crawl');
