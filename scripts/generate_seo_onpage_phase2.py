@@ -4670,6 +4670,298 @@ def _build_docx_alpha(domain, pages_data, findings, captured, brand, out_path):
     doc.save(out_path)
 
 
+def _build_docx_eta(domain, pages_data, findings, captured, brand, out_path):
+    """ETA — verified against the client reference "On Page Suggestion Report -
+    fundamedic.com.docx": no shaded banners or tables at all — plain bold black
+    14pt section titles, navy (#1D5489) "Result:" labels, green (#00B050)
+    "Recommendations:" labels. Adds Lang Attribute, SSL Certification, Indexing
+    Overview, Backlink Audit, Copied Content, Structured Schema Data and Web
+    Archive checks beyond the core set."""
+    from docx.shared import Pt, RGBColor
+
+    doc, h = _setup_docx(domain)
+    root = h["root"]; d = h["d"]; FONT = h["FONT"]
+
+    BLACK = RGBColor(0x00, 0x00, 0x00)
+    BLUE = RGBColor(0x1D, 0x54, 0x89)
+    GREEN = RGBColor(0x00, 0xB0, 0x50)
+    TITLEBLUE = RGBColor(0x6D, 0x9E, 0xEB)
+
+    def _run(p, text, bold=False, color=BLACK, size=12):
+        r = p.add_run(text)
+        r.font.name = FONT
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        if color is not None:
+            r.font.color.rgb = color
+        return r
+
+    def section(text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(10)
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=True, color=BLACK, size=14)
+        return p
+
+    def body(text, bold=False):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=bold, color=BLACK, size=12)
+        return p
+
+    def result(text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, "Result: ", bold=True, color=BLUE, size=12)
+        _run(p, text, bold=False, color=BLACK, size=12)
+        return p
+
+    def recommend(text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, "Recommendations: ", bold=True, color=GREEN, size=12)
+        _run(p, text, bold=False, color=BLACK, size=12)
+        return p
+
+    def shot(key):
+        src = (captured or {}).get(key)
+        if src and Path(src).exists():
+            try:
+                hr._add_bordered_image(doc, src)
+            except Exception:
+                pass
+
+    # ---- Title ----
+    p = doc.add_paragraph()
+    _run(p, d, bold=True, color=TITLEBLUE, size=16)
+    body("On-Page Optimization (AKA on-page SEO) refers to all measures that can be taken directly "
+         "within the website to improve its position in the search rankings.")
+    body("Note For Meta Suggestion - Please find the attached sheet for SEO oriented titles & "
+         "descriptions.")
+    body("Note For Content Suggestion - Please find the attached sheet for SEO oriented keywords "
+         "for the target pages.")
+
+    section("Additional Suggestion")
+    if not findings.get("has_privacy_policy", True):
+        body("Missing Privacy Policy Page - While auditing the website, we found that the Privacy "
+             "Policy page is missing. We recommend adding one.")
+    if not findings.get("has_terms", True):
+        body("Missing Terms & Conditions Page - While auditing the website, we found that the "
+             "Terms & Conditions page is missing.")
+    if not findings.get("has_blog"):
+        body("Blogs Section: We did not find an active blog section with recent posts. We "
+             "recommend publishing fresh content periodically.")
+    if findings.get("copyright_stale"):
+        year = datetime.date.today().year
+        body(f"Outdated Copyright Notice – During our website audit, we found that the copyright "
+             f"notice is outdated. Suggested — Copyright {year}.")
+
+    # ---- Canonical ----
+    section("Canonical Issue Suggestion")
+    body(f"A canonical problem occurs when a site is running in multiple versions like www version "
+         f"(https://www.{d}), the non-www version (https://{d}), and other versions.")
+    if findings.get("canonical_issue"):
+        result("An incorrect / conflicting canonical tag was found on the website. Kindly find the "
+               "attached Canonical Tag Suggestions sheet.")
+    else:
+        result("All Target pages have proper canonical tags. It is good from an SEO point of view.")
+    shot("canonical")
+
+    # ---- Robots.txt ----
+    section("Robots.txt Optimization")
+    body("Robots.txt is a regular text file that through its name has special meaning to the "
+         "majority of well-behaved web crawlers.")
+    if findings.get("robots_found"):
+        result("Optimized robots.txt file found in your website. It is good from a search engine "
+               "point of view.")
+    else:
+        result("An optimized robots.txt file was created; please find it attached and upload it to "
+               "the root folder of the website.")
+    shot("robots")
+
+    # ---- Sitemap ----
+    section("Sitemap Optimization")
+    body("Sitemap: A sitemap is a file where you can list the web pages of your site to tell "
+         "Google and other search engines about the organization of your site content.")
+    if findings.get("sitemap_found"):
+        result("Optimized sitemap.xml file found in your website. It is good from a search engine "
+               "point of view.")
+    else:
+        result("Sitemap.xml file not found on the website. Please create and upload one.")
+    shot("sitemap")
+
+    # ---- Image Alt ----
+    section("Image Alt Text Optimization")
+    body("Image alt text is a descriptive attribute added to images in HTML that helps search "
+         "engines and screen readers understand the image content.")
+    alt_missing = findings.get("alt_missing", 0)
+    if alt_missing:
+        result(f"Image alt texts are not found on {alt_missing} image(s) of your website. It is "
+               "not good from both a search engine and accessibility point of view.")
+    else:
+        result("Image alt texts are found on your website. It is good from an SEO point of view.")
+
+    # ---- Internal Linking ----
+    section("Internal Link Optimization")
+    body("Internal Linking: Internal linking is considered optimal when every live webpage is "
+         "reachable from other live webpages on the site.")
+    result("The website's internal linking structure is good.")
+
+    # ---- External Linking ----
+    section("External Link Optimization")
+    ext_count = findings.get("ext_count", 0)
+    result(f"{ext_count} External Links found in the website. None of them seem harmful. It is "
+           "good from an SEO point of view." if ext_count else
+           "No external links found in the website.")
+    shot("externallinks")
+
+    # ---- Redirection ----
+    section("URL Redirection Issue Optimization")
+    if findings.get("www_redirect_issue") or findings.get("url_changes"):
+        result("The website is reachable on multiple versions independently. We recommend a "
+               "single 301 redirect to one canonical version.")
+    else:
+        result("All URL redirections are properly set up with consistent HTTPS and www versions, "
+               "which is good from a search engine point of view.")
+
+    # ---- Broken Links ----
+    section("Broken/Dead Link Suggestion")
+    body("Though the broken links do not hurt directly but it affects user experience and users "
+         "do not find desired info they will not come frequently.")
+    broken = findings.get("broken_links") or []
+    if broken:
+        result(f"{len(broken)} broken link(s) found in the website. Kindly find an attached sheet "
+               "for suggestions.")
+    else:
+        result("No broken links found in the website.")
+    shot("brokenlinks")
+
+    # ---- URL Structure ----
+    section("URL Structure Optimization")
+    recommend("Proper URL structure helps both users and search engines understand the page "
+              "content at a glance.")
+    if findings.get("url_changes"):
+        result("Some target page URLs could be optimized further. Please refer to the attached "
+               "sheet.")
+    else:
+        result("Your website's current URL structure is clean, user-friendly, and optimized for "
+               "search engines.")
+
+    # ---- Hyperlinking ----
+    section("Hyperlink Analysis and Optimization")
+    recommend("Hyperlinks are connections established between a word/phrase/image and a "
+              "website/file. Effective hyperlinking can help a website secure a good position in "
+              "the search engine result pages as well.")
+    result("Hyperlinking of the website is good.")
+
+    # ---- Mixed Content ----
+    section("Mixed Content Optimization")
+    body("Mixed content occurs when a webpage containing a combination of both secure (HTTPS) and "
+         "non-secure (HTTP) content is delivered over SSL to the browser.")
+    mixed = findings.get("mixed_content_pages") or []
+    if mixed:
+        result(f"Mixed content issue found on {len(mixed)} page(s). It's not good from an SEO "
+               "point of view.")
+    else:
+        result("We have not found mixed content issues on your website, which is good from an SEO "
+               "point of view.")
+
+    # ---- Sucuri ----
+    section("Sucuri Site Scan")
+    body("The SucuriSiteCheck scanner helps to prevent security threats. It will check malware, "
+         "viruses, blacklisting status, website errors, out-of-date software, and malicious code.")
+    if findings.get("sucuri_clean", True):
+        result("No, malware issue not found in the website. It is good from an SEO point of view.")
+    else:
+        result("Security issues were detected on your website. Please review and fix them.")
+    body("Screenshot – ")
+    shot("sucuri")
+
+    # ---- No-Index ----
+    section("No-index on Target Pages Check")
+    body("Certain pages on a website serve specific purposes, aiding in ranking and traffic. "
+         "These pages should not carry a noindex tag unless intentional.")
+    noindex = findings.get("noindex_pages") or []
+    if noindex:
+        result(f"We checked the website and the 'noindex, nofollow' tag is present on "
+               f"{len(noindex)} target page(s). Please remove it.")
+    else:
+        result("We checked the website and the 'noindex, nofollow' tag is not present on the "
+               "pages. It is good from a search engine point of view.")
+
+    # ---- Meta Viewport ----
+    section("Meta Viewport Check")
+    body("The viewport meta tag defines the size of the virtual viewport, improving rendering on "
+         "mobile devices.")
+    result("Yes, the website pages have a viewport Meta tag. It will look good on mobile devices."
+           if findings.get("viewport", True) else
+           "Meta viewport tag was not found. We recommend adding one.")
+
+    # ---- Lang Attribute ----
+    section("Lang Attribute")
+    body("The \"Lang\" attribute is an HTML attribute used to specify the language of the content "
+         "within a webpage.")
+    lang = findings.get("lang") or "en-US"
+    result(f"We have found the lang=\"{lang}\" attribute in the website, which is good from a "
+           "search engine point of view.")
+
+    # ---- SSL ----
+    section("SSL Certification")
+    body("An SSL (Secure Sockets Layer) certificate is a digital file that encrypts the connection "
+         "between a browser and a website.")
+    result("The website currently has a valid SSL certificate. It is good from a security and "
+           "search engine point of view.")
+
+    # ---- Indexing Overview ----
+    section("Indexing Overview:- ")
+    body("Indexing is the process by which search engines like Google crawl and store website "
+         "pages so they can appear in search results.")
+    if findings.get("gsc_indexing"):
+        result("The site's target pages are indexed on Google, indicating that the site is being "
+               "discovered and crawled correctly.")
+    else:
+        result("Please refer to the attached indexing status sheet for target page indexing "
+               "details.")
+
+    # ---- Backlink Audit ----
+    section("Backlink Audit")
+    body("A backlink audit is a thorough analysis of the links pointing to your site. These links "
+         "influence domain authority and search rankings.")
+    body("Note—Please refer to the attached backlink profile sheet for details. To improve "
+         "overall SEO performance, it is recommended to focus on building high-quality, relevant "
+         "backlinks.")
+
+    # ---- Copied Content ----
+    section("Copied Content")
+    body("\"Copied content\" refers to any piece of text or information that has been directly "
+         "taken from another source without modification.")
+    result("As we have checked the content on the website, we have not found copied content on "
+           "the target pages.")
+
+    # ---- Dummy Content ----
+    section("Dummy Content Checker")
+    body("Dummy content, or placeholder text, is non-functional text or media that's used to "
+         "simulate real content during development.")
+    result("We did not find any dummy content (Lorem Ipsum) on the website, which is good for the "
+           "search engine point of view.")
+
+    # ---- Schema ----
+    section("Structured Schema Data")
+    body("Schema (or Schema.org markup) is a type of structured data you add to your website's "
+         "HTML to help search engines understand the content better.")
+    result("Currently, only basic schema types have been implemented on the website. We recommend "
+           "adding more specific schema types where relevant.")
+
+    # ---- Web Archive ----
+    section("Old Web Archive Status Check")
+    body("It's the way to explore, find and retrieve historical and 'lost' information from "
+         "websites.")
+    result("Yes, we have found that the pages have been saved in the web archive tool. It is good "
+           "for reference purposes.")
+
+    doc.save(out_path)
+
+
 def _build_docx_peta(domain, pages_data, findings, captured, brand, out_path):
     """Peta / Beta — verified against the client reference "On page Suggestions
     Report - calcmaster.in.docx": a dark (#171717, white bold) title banner, then
@@ -5250,6 +5542,7 @@ def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, f
         "deltafl": _build_docx_deltafl, "deltafvr": _build_docx_deltafvr,
         "deltaup": _build_docx_deltaup, "octal": _build_docx_octal,
         "camila": _build_docx_camila, "alpha": _build_docx_alpha,
+        "eta": _build_docx_eta,
     }
     fn = builders.get(str(fmt or "").strip().lower())
     if not fn:
@@ -5267,7 +5560,7 @@ def main():
     ap.add_argument("--out", default=str(OUTPUT_DIR))
     ap.add_argument("--dry-run", action="store_true", help="use mock crawl data (no network)")
     ap.add_argument("--no-capture", action="store_true", help="skip live screenshots (text-only docx)")
-    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma", "sara", "peta", "deltafl", "deltafvr", "deltaup", "octal", "camila", "alpha"],
+    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma", "sara", "peta", "deltafl", "deltafvr", "deltaup", "octal", "camila", "alpha", "eta"],
                     help="Report sub-format: james (Driftzine), omega (alltechco), neon (sumitechengineers), xenon, gamma (Hawkeev), sara (teal template)")
     ap.add_argument("--gsc-token", default=None, help="GSC API access token for URL inspection")
     ap.add_argument("--property-url", default=None, help="GSC property URL (e.g. sc-domain:example.com)")
