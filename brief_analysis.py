@@ -2427,6 +2427,190 @@ def build_camila(data, out_path, log_fn=None):
     return out_path
 
 
+def build_eta(data, out_path, log_fn=None):
+    """ETA — DOCX brief report, verified against the client reference
+    "ETA.docx" (shoreteldepot.com): plain bold-black 14pt lettered/labeled
+    sections (no shaded banners, same convention as Alpha), covering Meta
+    Optimization, Headings, Image Optimization, Schema, Backlink Profile
+    Overview, DA/PA/Spam Score, Indexing, Robots.txt, Sitemap, Broken Links,
+    and separate "Website performance according to Semrush/Ahrefs" sections
+    (Ahrefs uses the real DA/DR data; Semrush isn't integrated so it stays a
+    manual-attach note, same convention as Beta)."""
+    if log_fn is None:
+        log_fn = print
+    from docx.shared import Pt, RGBColor
+
+    domain = data["domain"]
+    home = f"https://{domain}/"
+    from docx import Document
+    doc = Document()
+    for sname in ("Normal", "List Paragraph"):
+        try:
+            st = doc.styles[sname]
+            st.font.name = "Calibri"
+            st.font.size = Pt(11)
+        except KeyError:
+            pass
+
+    BLACK = RGBColor(0x00, 0x00, 0x00)
+
+    def _run(p, text, bold=False, color=BLACK, size=11):
+        r = p.add_run(text)
+        r.font.name = "Calibri"
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        if color is not None:
+            r.font.color.rgb = color
+        return r
+
+    def section(text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(10)
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=True, color=BLACK, size=14)
+        return p
+
+    def body(text, bold=False):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=bold, color=BLACK, size=11)
+        return p
+
+    def labeled(label, text=""):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, label, bold=True, color=BLACK, size=11)
+        if text:
+            _run(p, text, bold=False, color=BLACK, size=11)
+        return p
+
+    p = doc.add_paragraph()
+    _run(p, f"Brief Website Analysis — {domain}", bold=True, color=BLACK, size=18)
+    body(f"We analyzed your website ({home}) so please go through this doc to get a quick "
+         "overview of your website optimization.")
+
+    # ---- Meta Optimization ----
+    section("A) Meta Optimization")
+    body("Metadata is an effective and important factor for SEO, and it is a summary of the "
+         "content on that page shown in search results.")
+    titles = data.get("titles", []) or []
+    title_issues = [t for t in titles if t.get("status") != "Good"]
+    if titles:
+        labeled("Meta Title - ", f"A total of {len(title_issues)} page title issue(s) were "
+                                  f"identified across {len(titles)} URL(s) audited.")
+        t = titles[0]
+        body("For example:")
+        labeled("URL: ", t.get("page", home))
+        body(f"\"{t.get('title', 'N/A')}\" ({t.get('chars', '?')} chars) — {t.get('status', 'N/A')}.")
+    metas = data.get("metas", []) or []
+    meta_issues = [m for m in metas if m.get("status") != "Good"]
+    if metas:
+        m = metas[0]
+        labeled("Meta Description – ", f"The audit identified {len(meta_issues)} meta "
+                                        f"description issue(s) across {len(metas)} page(s) "
+                                        "audited.")
+        labeled("URL: ", m.get("page", home))
+
+    # ---- Headings ----
+    headers = data.get("headers", []) or []
+    h1_issues = [h for h in headers if h.get("h1") != 1]
+    if headers:
+        h = headers[0]
+        labeled("Headings: ", f"The audit found {len(h1_issues)} H1 tag issue(s) across "
+                               f"{len(headers)} page(s) audited.")
+        labeled("URL: ", h.get("page", home))
+
+    # ---- Image Optimization ----
+    p = doc.add_paragraph()
+    _run(p, "Image Optimization Issue :", bold=True, color=BLACK, size=14)
+    img_alts = data.get("img_alts", []) or []
+    missing = len([a for a in img_alts if a.get("present") != "Yes"])
+    labeled("Note: ", f"The audit identified {missing} of {len(img_alts)} image(s) checked "
+                       "with missing ALT text.")
+
+    # ---- Schema ----
+    p = doc.add_paragraph()
+    _run(p, "Note For Schema:", bold=True, color=BLACK, size=14)
+    body(f"During the audit of {home}, we checked for structured data (Schema Markup) "
+         "implementation. We recommend implementing relevant schema types to help search "
+         "engines better understand your business.")
+
+    # ---- Backlink Profile Overview ----
+    da_pa = data.get("da_pa") or {}
+    da_val, dr_val, pa_val = da_pa.get("da", "—"), da_pa.get("dr", "—"), da_pa.get("pa", "—")
+    labeled("Backlink Profile Overview: ", f"The website currently has a Domain Rating (DR) of "
+                                            f"{dr_val}, indicating its current backlink authority.")
+
+    # ---- DA/PA/Spam Score ----
+    section("Domain authority, page authority & Spam Score:")
+    if da_val != "—" or dr_val != "—":
+        body(f"The website currently has a Domain Authority (DA) of {da_val}, Page Authority "
+             f"(PA) of {pa_val}, and Domain Rating (DR) of {dr_val}.")
+    else:
+        body("Note — Domain Authority / Domain Rating could not be retrieved automatically for "
+             "this domain. Please check manually via a DA/DR checker tool.")
+
+    # ---- Indexing Status ----
+    idx = data.get("indexing", {}) or {}
+    labeled("Indexing Status: – ", f"The website has approximately {idx.get('count', 'N/A')} "
+                                    f"page(s) indexed by Google. {idx.get('status', '')}")
+
+    # ---- Robots.txt ----
+    robots = data.get("robots", {}) or {}
+    p = doc.add_paragraph()
+    _run(p, "•  Robot.txt Optimization: - ", bold=True, color=BLACK, size=14)
+    if robots.get("found"):
+        _run(p, f"The website has a properly configured robots.txt file at {home}robots.txt "
+                "that allows search engines to crawl important pages.", bold=False, color=BLACK,
+             size=11)
+    else:
+        _run(p, f"The website does not currently have an accessible robots.txt file at "
+                f"{home}robots.txt.", bold=False, color=BLACK, size=11)
+
+    # ---- Sitemap ----
+    sitemap = data.get("sitemap", {}) or {}
+    p = doc.add_paragraph()
+    _run(p, "Sitemap: ", bold=True, color=BLACK, size=14)
+    sm_url = sitemap.get("url_checked", f"{home}sitemap.xml")
+    if sitemap.get("found") or sitemap.get("ok"):
+        _run(p, f"The website has a properly configured XML sitemap ({sm_url}) accessible to "
+                "search engines.", bold=False, color=BLACK, size=11)
+    else:
+        _run(p, f"The website does not have an accessible XML sitemap at {sm_url}.",
+             bold=False, color=BLACK, size=11)
+
+    # ---- Broken Links ----
+    p = doc.add_paragraph()
+    _run(p, "Broken Links", bold=True, color=BLACK, size=14)
+    bl_checked = data.get("broken_links_checked", 0)
+    broken = data.get("broken_links", []) or []
+    if broken:
+        body(f"During the audit, we performed a broken link analysis for the website and found "
+             f"that {bl_checked} URL(s) were scanned, and {len(broken)} broken link(s) were "
+             "identified. Kindly refer to the attached sheet for details.")
+    else:
+        body(f"During the audit, we performed a broken link analysis for the website and found "
+             f"that {bl_checked} URL(s) were scanned, and no broken links were found.")
+
+    # ---- Semrush / Ahrefs performance ----
+    p = doc.add_paragraph()
+    _run(p, "Website performance according to Semrush: - ", bold=True, color=BLACK, size=14)
+    body("Note — Please refer to the attached Semrush overview screenshot for this domain's "
+         "Authority Score, organic keywords, organic traffic and referring domains.")
+
+    p = doc.add_paragraph()
+    _run(p, "Website performance according to Ahrefs: - ", bold=True, color=BLACK, size=14)
+    if da_val != "—" or dr_val != "—":
+        body(f"During the audit, we found that the website has a Domain Rating (DR) of "
+             f"{dr_val} according to Ahrefs.")
+    else:
+        body("Note — Ahrefs data could not be retrieved automatically for this domain. Please "
+             "check manually via Ahrefs.")
+
+    doc.save(out_path)
+    log_fn(f"  ETA report saved: {os.path.basename(out_path)}")
+
+
 # ---------------------------------------------------------------------------
 # Format registry & main entry
 # ---------------------------------------------------------------------------
@@ -2867,6 +3051,7 @@ BRIEF_FORMATS = {
     "alpha": {"label": "Alpha (DOCX, flowing document)", "builder": build_alpha, "ext": "docx"},
     "beta": {"label": "Beta (DOCX, teal banners + screenshots)", "builder": build_beta, "ext": "docx"},
     "camila": {"label": "Camila (16 slides, gold titles)", "builder": build_camila, "ext": "pptx"},
+    "eta": {"label": "ETA (DOCX, plain lettered sections)", "builder": build_eta, "ext": "docx"},
 }
 
 
