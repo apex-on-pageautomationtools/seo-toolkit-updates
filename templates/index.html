@@ -2811,6 +2811,19 @@ function crawlUpdateCount(){
   crawlSaveUrls();
 }
 
+function crawlLog(msg){
+  // Crawl Tracker is a pure client-side loop (no backend job/status polling),
+  // so it never fed the shared Activity Log panel -- write to it directly,
+  // same convention as the other tools (only while Crawl Tracker is the
+  // active tab).
+  if(mode!=='crawl')return;
+  const el=$('log');
+  if(!el)return;
+  const ts=new Date().toTimeString().slice(0,8);
+  el.textContent+=(el.textContent?'\n':'')+'['+ts+'] '+msg;
+  el.scrollTop=el.scrollHeight;
+}
+
 async function crawlStart(){
   const rawLines=$('crawl-urls').value.split('\n').map(u=>u.trim()).filter(u=>u);
   if(!rawLines.length){toast('Enter at least one URL');return;}
@@ -2828,9 +2841,11 @@ async function crawlStart(){
   setButtons('running','crawl');
   $('crawl-progress').textContent='Validating...';
   $('crawl-progress').className='tag t-yes';
+  $('log').textContent='';
+  crawlLog('Validating '+urls.length+' URL(s) against the master domain list...');
   try{
     const r=await(await fetch('/api/crawl/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls})})).json();
-    if(!r.success){toast(r.error||'Validation failed');setButtons('stopped','crawl');return;}
+    if(!r.success){crawlLog('Validation failed: '+(r.error||'Unknown error'));toast(r.error||'Validation failed');setButtons('stopped','crawl');return;}
     crawlBatchId=r.batchId||'';
     crawlItems=r.items;
     crawlResults=r.items.map(it=>({
@@ -2844,12 +2859,13 @@ async function crawlStart(){
     }));
     crawlRenderTable();
     $('crawl-stats').textContent=r.readyCount+' of '+r.totalUrls+' ready';
+    crawlLog(r.readyCount+' of '+r.totalUrls+' URL(s) ready to check ('+(r.totalUrls-r.readyCount)+' skipped -- domain not in master list or account not authorised).');
     document.getElementById('resultsCard')||0;
     crawlIdx=0;
     crawlStartTime=Date.now();
     setButtons('running','crawl');
     crawlProcessNext();
-  }catch(e){toast('Error: '+e.message);setButtons('stopped','crawl');}
+  }catch(e){crawlLog('Validation request failed: '+e.message);toast('Error: '+e.message);setButtons('stopped','crawl');}
 }
 
 function extractDomain(url){
@@ -2916,15 +2932,22 @@ async function crawlProcessNext(){
     $('crawl-progress').textContent='Checking URL '+(i+1)+' of '+crawlItems.length;
     crawlRenderTable();
     crawlUpdateProgress();
+    const t0=Date.now();
+    crawlLog('['+(i+1)+'/'+crawlItems.length+'] Checking '+it.url+'...');
     try{
       const r=await(await fetch('/api/crawl/inspect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:it.url,domain:it.domain,accountKey:it.accountKey,batchId:crawlBatchId})})).json();
+      const secs=((Date.now()-t0)/1000).toFixed(1);
       if(r.success){
         crawlResults[i]={url:r.url||it.url,domain:r.domain||crawlResults[i].domain,accountKey:r.accountKey||'',lastCrawlDate:r.lastCrawlDate,indexStatus:r.indexStatus,property:r.property||'',status:'ok'};
+        crawlLog('  -> '+r.lastCrawlDate+' / '+r.indexStatus+' ('+secs+'s)');
       }else{
         crawlResults[i].lastCrawlDate='Error';crawlResults[i].indexStatus=r.error||'Unknown error';crawlResults[i].status='error';
+        crawlLog('  -> Error: '+(r.error||'Unknown error')+' ('+secs+'s)');
       }
     }catch(e){
+      const secs=((Date.now()-t0)/1000).toFixed(1);
       crawlResults[i].lastCrawlDate='Error';crawlResults[i].indexStatus='Network error';crawlResults[i].status='error';
+      crawlLog('  -> Network error: '+e.message+' ('+secs+'s)');
     }
     crawlRenderTable();crawlUpdateProgress();
     crawlIdx++;
@@ -2936,12 +2959,13 @@ async function crawlProcessNext(){
   $('btn-crawl-download').disabled=false;
   $('crawl-eta').textContent='';
   setButtons('completed','crawl');
+  crawlLog('Completed -- '+crawlResults.filter(r=>r.status==='ok').length+' ok, '+crawlResults.filter(r=>r.status==='error').length+' error(s).');
   toast('Crawl check completed');
 }
 
-function crawlPause(){crawlPaused=true;}
-function crawlResume(){crawlPaused=false;setButtons('running','crawl');crawlProcessNext();}
-function crawlStop(){if(!confirm('Stop? Already-fetched results will be kept for download.'))return;crawlStopped=true;}
+function crawlPause(){crawlPaused=true;crawlLog('Paused.');}
+function crawlResume(){crawlPaused=false;crawlLog('Resumed.');setButtons('running','crawl');crawlProcessNext();}
+function crawlStop(){if(!confirm('Stop? Already-fetched results will be kept for download.'))return;crawlStopped=true;crawlLog('Stopped by user.');}
 function crawlReset(){
   $('empty-crawl').style.display='block';
   $('crawl-active').classList.add('hidden');
