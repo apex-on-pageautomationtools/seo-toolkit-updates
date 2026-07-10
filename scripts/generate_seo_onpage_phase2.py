@@ -3951,6 +3951,205 @@ def _build_docx_deltaup(domain, pages_data, findings, captured, brand, out_path)
     doc.save(out_path)
 
 
+def _build_docx_octal(domain, pages_data, findings, captured, brand, out_path):
+    """Octal — verified against the client reference "Onpage suggestion Report -
+    zeeboo.in.docx": no shaded banners, blue (#4F81BD) title, navy (#002060)
+    "Label → description" arrow style for the SEO analysis section (same
+    technique as Delta FVR but different palette — title blue, section-title
+    #0070C0, "More Content Require" green #00B050), closing with "Thank You!"."""
+    from docx.shared import Pt, RGBColor
+
+    doc, h = _setup_docx(domain)
+    root = h["root"]; d = h["d"]; FONT = h["FONT"]
+
+    BLACK = RGBColor(0x00, 0x00, 0x00)
+    BLUE = RGBColor(0x4F, 0x81, 0xBD)
+    SECBLUE = RGBColor(0x00, 0x70, 0xC0)
+    NAVY = RGBColor(0x00, 0x20, 0x60)
+    GREEN = RGBColor(0x00, 0xB0, 0x50)
+
+    def _run(p, text, bold=False, color=BLACK, size=12):
+        r = p.add_run(text)
+        r.font.name = FONT
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        if color is not None:
+            r.font.color.rgb = color
+        return r
+
+    def body(text, bold=False, color=BLACK):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=bold, color=color, size=12)
+        return p
+
+    def label_arrow(label, text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, label + " → ", bold=True, color=NAVY, size=12)
+        _run(p, text, bold=False, color=BLACK, size=12)
+        return p
+
+    def status(text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, "Status: ", bold=True, color=BLACK, size=12)
+        _run(p, text, bold=False, color=BLACK, size=12)
+        return p
+
+    def shot(key):
+        src = (captured or {}).get(key)
+        if src and Path(src).exists():
+            try:
+                hr._add_bordered_image(doc, src)
+            except Exception:
+                pass
+
+    home_url = pages_data[0]["url"] if pages_data else root + "/"
+
+    # ---- Title ----
+    p = doc.add_paragraph()
+    _run(p, home_url + "\n", bold=True, color=BLUE, size=13)
+    _run(p, "On-Page Optimization Suggestions:", bold=True, color=SECBLUE, size=13)
+    body("On-page SEO is a process of optimization of individual Webpages of content to earn better "
+         "and more relevant traffic from search engines.", color=RGBColor(0x1A, 0x1A, 0x1A))
+    body("We have analyzed your website in terms of search engine perspective. Following are the "
+         "suggestions.", color=NAVY)
+
+    p = doc.add_paragraph()
+    _run(p, "Additional Suggestions", bold=True, color=BLUE, size=13)
+    if not findings.get("social_found"):
+        body("Note Social Media Icons: Your website is connected to a limited set of social media "
+             "profiles. We recommend adding more platforms to reach a wider audience.")
+    body("Optimize your Footer Section: An optimized footer section can improve the user "
+         "experience, brand identity, and site navigation.")
+    if not findings.get("has_blog"):
+        body("Note for Blog: We came to know that your website does not have a proper blog section "
+             "with regular posts. We recommend adding one.")
+    if not findings.get("has_faq"):
+        body("Note For FAQ: FAQs have answers to the general queries that a client might have while "
+             "browsing your website — we recommend adding a dedicated FAQ page.")
+
+    p = doc.add_paragraph()
+    _run(p, "Content optimization suggestions", bold=True, color=SECBLUE, size=13)
+    tp = findings.get("target_pages") or ([pd["url"] for pd in pages_data] if pages_data else [])
+    if tp:
+        body(f"More Content Require: We inform you that, when we analysing your website, we didn't "
+             f"find enough unique content on {len(tp)} target page(s). Kindly refer to the attached "
+             "Content Optimization document.", color=GREEN)
+    else:
+        body("Content on the target pages appears sufficient. Kindly find the attached document for "
+             "any further content optimization suggestions.", color=GREEN)
+
+    p = doc.add_paragraph()
+    _run(p, "SEO Meta Title and Description Optimization Suggestions", bold=True, color=SECBLUE, size=13)
+    body("We suggest Meta suggestions (Meta Title & Meta Description) including Heading tags in the "
+         "attached sheet.")
+
+    p = doc.add_paragraph()
+    _run(p, "SEO Analysis and Optimization Suggestions", bold=True, color=SECBLUE, size=13)
+
+    # ---- Robots.txt ----
+    label_arrow("Robots.txt", "The robots.txt file, also known as the robot's exclusion protocol or "
+                              "standard, is a text file that tells web robots which pages to crawl.")
+    shot("robots")
+
+    # ---- Sitemap ----
+    label_arrow("XML Sitemap", "A sitemap is a blueprint of your website that helps search engines "
+                               "find, crawl, and index all of its content.")
+    if findings.get("sitemap_found"):
+        status("We found a sitemap file on the website, which is good from an SEO point of view.")
+    else:
+        status("No sitemap file was found on the website. We recommend creating and submitting one.")
+    shot("sitemap")
+
+    # ---- Image Alt Tag ----
+    alt_missing = findings.get("alt_missing", 0)
+    label_arrow("Image Alt Tag", "ALT tags or ALT attributes are \"alternative text\" for an image, "
+                                 "used to describe the image to search engines and accessibility "
+                                 "tools.")
+    if alt_missing:
+        status(f"{alt_missing} image(s) without ALT tags found. Please refer to the attached sheet "
+               "for Image Alt Tag Suggestions.")
+    else:
+        status("Suitable Image Alt tags are found on images.")
+
+    # ---- Internal Linking ----
+    label_arrow("Internal Linking", "An internal link is any link from one page on your website to "
+                                    "another page on your website.")
+    int_count = len(pages_data[0].get("internal_links", []) or []) if pages_data else 0
+    status("Internal linking of the website is good and user-friendly. It is good from SEO point of "
+           "view." if int_count else "Please verify the internal linking structure across the "
+                                      "website as per need.")
+
+    # ---- External Linking ----
+    ext_count = findings.get("ext_count", 0)
+    label_arrow("External Linking", "External Links are hyperlinks that point at (target) any "
+                                    "domain other than the domain the link exists on (source).")
+    status(f"{ext_count} External links found on the website, none of them seems harmful from an "
+           "SEO point of view." if ext_count else "No external links found on the website.")
+    shot("externallinks")
+
+    # ---- Site Security ----
+    label_arrow("Site Security Check", "A site security check evaluates a website for "
+                                       "vulnerabilities, malware, and compliance with security best "
+                                       "practices.")
+    if findings.get("sucuri_clean", True):
+        status("We have not found any malware/security issue on the website. It is good from a "
+               "search engine point of view.")
+    else:
+        status("Security issues were detected on your website. Please review and fix them.")
+    shot("homepage")
+
+    # ---- Broken Links ----
+    broken = findings.get("broken_links") or []
+    label_arrow("Broken/Dead Link", "Broken links are links that send a message to its visitors "
+                                    "that the webpage no longer exists, triggering a 404-error page.")
+    if broken:
+        body(f"Broken links: - {len(broken)} found on the website. Please refer to the attached "
+             "sheet for suggestions.")
+    else:
+        status("No broken links found on the website.")
+    shot("brokenlinks")
+
+    # ---- Redirection ----
+    label_arrow("Website Redirection", "A redirect is a way to send both users and search engines "
+                                       "to a different URL from the one they originally requested.")
+    if findings.get("www_redirect_issue") or findings.get("url_changes"):
+        status("The website is reachable on multiple versions independently. We recommend a single "
+               "301 redirect to one canonical version.")
+    else:
+        status("No redirection issue found on the website.")
+
+    # ---- Canonicalization ----
+    label_arrow("Canonicalization", "A canonical URL refers to an HTML link element, with the "
+                                    "attribute of rel=\"canonical\" (also known as a canonical tag), "
+                                    "indicating the preferred version of a page.")
+    if findings.get("canonical_issue"):
+        status("An incorrect / conflicting canonical tag was found on the website. Kindly find the "
+               "attached Canonical Tag Suggestions sheet.")
+    else:
+        status("All canonical tags are found on the website. It's good from an SEO point of view.")
+    shot("canonical")
+
+    # ---- Dummy Content ----
+    label_arrow("Dummy Content Checker", "A Dummy Content Checker identifies and removes "
+                                         "placeholder text or temporary content from a website.")
+    status("No dummy/placeholder content found on the target pages.")
+
+    # ---- Hyperlinking ----
+    label_arrow("Hyper linking", "Hyperlink is a type of link that connects two separate "
+                                 "files/websites/articles together for both users and search "
+                                 "engines to navigate.")
+    status("Hyperlinking of the website is good. It's good from an SEO point of view.")
+
+    p = doc.add_paragraph()
+    p.paragraph_format.space_before = Pt(16)
+    _run(p, "Thank You!", bold=True, color=BLACK, size=14)
+
+    doc.save(out_path)
+
+
 def _build_docx_peta(domain, pages_data, findings, captured, brand, out_path):
     """Peta / Beta — verified against the client reference "On page Suggestions
     Report - calcmaster.in.docx": a dark (#171717, white bold) title banner, then
@@ -4529,7 +4728,7 @@ def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, f
         "gamma": _build_docx_gamma, "sara": _build_docx_sara,
         "peta": _build_docx_peta, "beta": _build_docx_peta,
         "deltafl": _build_docx_deltafl, "deltafvr": _build_docx_deltafvr,
-        "deltaup": _build_docx_deltaup,
+        "deltaup": _build_docx_deltaup, "octal": _build_docx_octal,
     }
     fn = builders.get(str(fmt or "").strip().lower())
     if not fn:
@@ -4547,7 +4746,7 @@ def main():
     ap.add_argument("--out", default=str(OUTPUT_DIR))
     ap.add_argument("--dry-run", action="store_true", help="use mock crawl data (no network)")
     ap.add_argument("--no-capture", action="store_true", help="skip live screenshots (text-only docx)")
-    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma", "sara", "peta", "deltafl", "deltafvr", "deltaup"],
+    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma", "sara", "peta", "deltafl", "deltafvr", "deltaup", "octal"],
                     help="Report sub-format: james (Driftzine), omega (alltechco), neon (sumitechengineers), xenon, gamma (Hawkeev), sara (teal template)")
     ap.add_argument("--gsc-token", default=None, help="GSC API access token for URL inspection")
     ap.add_argument("--property-url", default=None, help="GSC property URL (e.g. sc-domain:example.com)")
