@@ -729,6 +729,27 @@ def _detect_page_status(driver, key):
     return ""
 
 
+def _looks_like_signin(driver):
+    """True if the current page is a Google sign-in / account-chooser screen
+    rather than real GSC content. The browser can pass the ONE upfront login
+    check (in capture_gsc_with_session) and still bounce to sign-in on a
+    LATER page — e.g. when the active Google account in a multi-login
+    profile isn't the one with access to this specific property. Without
+    this check that sign-in screenshot gets saved and reported as a normal
+    capture, which is exactly the "screenshots not captured correctly" bug."""
+    try:
+        cur = (driver.current_url or "").lower()
+        if "accounts.google.com" in cur or "/signin" in cur or "servicelogin" in cur:
+            return True
+        body = driver.find_element("tag name", "body").text.lower()
+        if "sign in" in body and ("to continue to google search console" in body
+                                   or "choose an account" in body):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def capture_gsc_screenshots(driver, property_url, email, out_dir, pages=None, log_fn=None):
     """Capture GSC page screenshots using the existing Selenium browser.
     The browser must already be logged into a Google account with GSC access.
@@ -754,6 +775,10 @@ def capture_gsc_screenshots(driver, property_url, email, out_dir, pages=None, lo
         try:
             driver.get(url)
             time.sleep(p["wait"])
+            if _looks_like_signin(driver):
+                log_fn(f"  [warn] {p['key']} bounced to sign-in mid-capture — "
+                       f"skipping (would be a misleading screenshot).")
+                continue
             # Normalise the health-audit key names ("manual_action"/"security_issues")
             # to the status detector's base keys ("manual"/"security").
             status_key = {"manual_action": "manual",
@@ -1328,6 +1353,8 @@ def build_james_full(data, out_path, log_fn=None):
                 fh = target_h; fw = int(target_h * aspect)
             cx = Inches(0.5) + (target_w - fw) // 2
             cy = Inches(img_top) + (target_h - fh) // 2
+            _EMU = 914400
+            _rect(s, cx / _EMU - 0.03, cy / _EMU - 0.03, fw / _EMU + 0.06, fh / _EMU + 0.06, "#000000")
             s.shapes.add_picture(img_path, cx, cy, fw, fh)
         else:
             _text(s, "Please check this manually in Google Search Console.",
@@ -1395,6 +1422,8 @@ def build_james_short(data, out_path, log_fn=None):
                 fh = target_h; fw = int(target_h * aspect)
             cx = Inches(0.5) + (target_w - fw) // 2
             cy = Inches(2.7) + (target_h - fh) // 2
+            _EMU = 914400
+            _rect(s, cx / _EMU - 0.03, cy / _EMU - 0.03, fw / _EMU + 0.06, fh / _EMU + 0.06, "#000000")
             s.shapes.add_picture(img_path, cx, cy, fw, fh)
         else:
             _text(s, "Please check this manually", 3, 4.5, 7, 0.5, 18, "Calibri",

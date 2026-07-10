@@ -18,17 +18,17 @@
     },
     {
       "path": "gsc_audit.py",
-      "hash": "f4da92c24145f5f8543897e6bb1d22686440d4043cdbe73d6f206c7b10f51854",
+      "hash": "327d9cfc77f75c372b934dba262c6034e995a68513309c7f1a2218cdbed8df52",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/gsc_audit.py"
     },
     {
       "path": "health_audit.py",
-      "hash": "84c62cef50ec19b58c232f04157ad1f48e774eb281cc74700d0357717d552bf6",
+      "hash": "56d8145f8f07b65b118d4b09165a317061018c96284e32a9ee81a6e86b051437",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/health_audit.py"
     },
     {
       "path": "web_app_batch.py",
-      "hash": "adbe48b208ace1e20c8e5f24704e737dc759930eaac6421649fa392ebfeac7d8",
+      "hash": "9be435ff8a361e8738c1f4ff0f0c29b4ac23434eeaf4a8729a29fef607555a87",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -133,7 +133,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "9669790889c1a594d5dd70fa0aaf39279838cae92c6b955ea69f5ac21a8f602c",
+      "hash": "e91868259de02219032e30867637a277d37c3bc60ef5fd812916f84a0a203547",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {

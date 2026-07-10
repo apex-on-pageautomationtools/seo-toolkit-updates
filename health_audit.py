@@ -204,6 +204,32 @@ def check_double_meta(target_pages, domain, driver=None):
     return results
 
 
+def check_meta_suggestions(target_pages, domain, driver=None):
+    """Extract the actual title + meta description per page, instead of
+    screenshotting the raw page source."""
+    pages = list(target_pages) if target_pages else []
+    if not pages:
+        pages = [f"https://{domain}/"]
+    results = []
+    for url in pages:
+        url = url.strip()
+        if not url:
+            continue
+        if not url.startswith("http"):
+            url = "https://" + url
+        html = _render_html(url, driver)
+        if html is None:
+            results.append({"url": url, "title": "—", "description": "—",
+                            "ok": False, "note": "Could not fetch"})
+            continue
+        meta = _parse_meta(html)
+        title = meta["title"][0] if meta["title"] else "Missing"
+        desc = meta["description"][0] if meta["description"] else "Missing"
+        ok = bool(meta["title"]) and bool(meta["description"])
+        results.append({"url": url, "title": title, "description": desc, "ok": ok})
+    return results
+
+
 def check_meta_robots(target_pages, domain, driver=None):
     pages = list(target_pages) if target_pages else []
     if not pages:
@@ -815,7 +841,7 @@ CHECKPOINTS = [
              "page or site that are mostly attempts to manipulate our search "
              "index, but are not necessarily dangerous for users.",
      "status": ("Status –", " Not found"),
-     "capture": "gsc", "red": True},
+     "capture": "gsc"},
 
     {"key": "security_issues", "label": "Security Issues:",
      "body": " The Security Issues report lists indications that your site was "
@@ -823,7 +849,7 @@ CHECKPOINTS = [
              "visitor or their computer: for example, phishing attacks or "
              "installing malware or unwanted software on the user's computer.",
      "status": ("Status:  ", "Not Found"),
-     "capture": "gsc", "red": True},
+     "capture": "gsc"},
 
     {"key": "robots", "label": "Robots.txt:",
      "body": " Robots.txt file has pages that needs to be blocked and are not "
@@ -844,9 +870,8 @@ CHECKPOINTS = [
     {"key": "versions", "label": "The website is running with multiple versions: - ",
      "body": "{versions_result}", "capture": "computed"},
 
-    {"key": "meta_source", "label": "Meta Suggestions is visible in the source code (Also on Top):- ",
-     "body": "Meta suggestion are visible in the source code of the pages.",
-     "capture": "url"},
+    {"key": "meta_source", "label": "Meta Suggestions:- ",
+     "body": "{meta_source_result}", "capture": "url"},
 
     {"key": "canonical", "label": "Right Canonical tag: - ",
      "body": "{canonical_result}", "capture": "computed"},
@@ -878,7 +903,7 @@ CHECKPOINTS = [
      "capture": "url"},
 
     {"key": "pagespeed", "label": "Website Page speed:- ",
-     "body": "{pagespeed_result}", "capture": "url"},
+     "body": "{pagespeed_result}", "capture": "computed"},
 ]
 
 CHECKPOINT_BY_KEY = {cp["key"]: cp for cp in CHECKPOINTS}
@@ -920,7 +945,6 @@ SCREENSHOT_URLS = {
     "dummy": "https://www.google.com/search?q=site:{domain}+lorem",
     "serp": "https://www.google.com/search?q=site:{domain}",
     "blank_page": "https://{domain}/",
-    "pagespeed": "https://pagespeed.web.dev/analysis?url=https%3A%2F%2F{domain}%2F",
 }
 
 
@@ -943,16 +967,19 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
         path = os.path.join(out_dir, f"{key}.png")
 
         try:
-            if key == "meta_source":
-                url = f"view-source:https://{domain}/"
-
             log_fn(f"  Capturing [{key}]...")
-            driver.get(url)
             import time
+            try:
+                driver.get(url)
+            except Exception as e:
+                # A slow/redirecting page (archive.org's Wayback lookup is the
+                # worst offender) can throw a page-load timeout. Retry once
+                # instead of abandoning this checkpoint's screenshot entirely.
+                log_fn(f"  [warn] {key} navigation failed ({e}), retrying once...")
+                time.sleep(2)
+                driver.get(url)
             if key == "sucuri":
                 time.sleep(15)
-            elif key == "pagespeed":
-                time.sleep(35)
             elif key == "layout":
                 time.sleep(8)
             else:
@@ -981,27 +1008,46 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
                     "window.scrollTo(0, 0);"
                 )
                 time.sleep(0.6)
+            elif key == "meta_source":
+                # Scroll the view-source page to the meta description (or title)
+                # tag so the screenshot is a tight crop of the relevant lines,
+                # not just the top of the file.
+                try:
+                    driver.execute_script("""
+                        var targets = ['meta name="description"', "meta name='description'",
+                                       '<title', 'meta name="description"'.toLowerCase()];
+                        var w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                        var n, found = null;
+                        while ((n = w.nextNode())) {
+                            var v = n.nodeValue || '';
+                            var low = v.toLowerCase();
+                            if (low.indexOf('name="description"') !== -1 || low.indexOf("name='description'") !== -1) {
+                                found = n; break;
+                            }
+                        }
+                        if (!found) {
+                            var w2 = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                            while ((n = w2.nextNode())) {
+                                if ((n.nodeValue || '').toLowerCase().indexOf('<title') !== -1) { found = n; break; }
+                            }
+                        }
+                        if (found) {
+                            (found.parentElement || document.body).scrollIntoView({block: 'center'});
+                            window.scrollBy(0, -120);
+                        }
+                    """)
+                    time.sleep(1)
+                except Exception:
+                    pass
             else:
                 driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(0.5)
 
-            # Use CDP for the screenshot. Sucuri's scan verdict sits at the very
-            # top of the page, so capture a fixed top region of the *document*
-            # (captureBeyondViewport + clip anchored at 0,0). This is immune to
-            # wherever the page happened to be scrolled — which previously
-            # produced a useless bottom-of-page ("Check another URL") shot.
+            # Use CDP for the screenshot — a plain viewport-only capture (no
+            # captureBeyondViewport/clip), so every checkpoint gets a tight
+            # crop of what's actually on screen after scrolling, not an
+            # oversized capture of the full document.
             cdp_params = {"format": "png", "captureBeyondViewport": False}
-            if key == "sucuri":
-                try:
-                    _w = driver.execute_script(
-                        "return Math.max(document.documentElement.clientWidth||0, window.innerWidth||0, 1280);")
-                except Exception:
-                    _w = 1280
-                cdp_params = {
-                    "format": "png",
-                    "captureBeyondViewport": True,
-                    "clip": {"x": 0, "y": 0, "width": float(_w or 1280), "height": 1300.0, "scale": 1},
-                }
             try:
                 result = driver.execute_cdp_cmd("Page.captureScreenshot", cdp_params)
                 import base64
@@ -1092,24 +1138,8 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
     _prog("Checking blank pages...")
     blank_results, blank_count = check_blank_pages(target_pages, domain, driver=driver)
 
-    _prog("Checking meta source code...")
-    homepage_html = _render_html(f"https://{domain}/", driver)
-    if homepage_html:
-        hp_meta = _parse_meta(homepage_html)
-        has_title = bool(hp_meta["title"])
-        has_desc = bool(hp_meta["description"])
-        meta_src_parts = []
-        if has_title:
-            meta_src_parts.append(f"Title found: \"{hp_meta['title'][0][:80]}\"")
-        else:
-            meta_src_parts.append("Title tag is MISSING")
-        if has_desc:
-            meta_src_parts.append(f"Meta description found ({len(hp_meta['description'][0])} chars)")
-        else:
-            meta_src_parts.append("Meta description is MISSING")
-        meta_source_result = ". ".join(meta_src_parts) + "."
-    else:
-        meta_source_result = "Could not fetch homepage source code."
+    _prog("Checking meta suggestions...")
+    meta_sugg = check_meta_suggestions(target_pages, domain, driver=driver)
 
     # --- Collect slow checks ---
     if fut_psi:
@@ -1133,12 +1163,27 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
 
     if canon:
         p = _tmp / f"ha_canonical_{domain}.png"
-        rows = [(r["url"].replace("https://", "").replace("http://", ""),
+        rows = [(r["url"],
                  r["canonical"][:60] + "…" if len(r["canonical"]) > 60 else r["canonical"],
                  r["note"], r["ok"]) for r in canon]
         _render_table_image(f"Canonical Tag Check — {domain}", ["Page URL", "Canonical", "Result"],
                             rows, [540, 360, 180], p)
         captured["canonical"] = str(p)
+
+    if psi.get("scores"):
+        p = _tmp / f"ha_pagespeed_{domain}.png"
+        rows = []
+        for strategy in ("mobile", "desktop"):
+            sc = psi["scores"].get(strategy)
+            if sc:
+                rows.append((strategy.title(), f"{sc['performance']}/100", f"{sc['seo']}/100",
+                            f"{sc['best_practices']}/100", f"{sc['accessibility']}/100",
+                            sc['performance'] >= 50))
+        if rows:
+            _render_table_image(f"PageSpeed Insights — {domain}",
+                                ["Device", "Performance", "SEO", "Best Practices", "Accessibility"],
+                                rows, [180, 220, 180, 260, 220], p)
+            captured["pagespeed"] = str(p)
 
     if dmeta:
         p = _tmp / f"ha_doublemeta_{domain}.png"
@@ -1233,6 +1278,14 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
             return f"All {len(blank_results)} target page(s) have content — no blank pages found."
         return f"{blank_count} of {len(blank_results)} target page(s) appear blank (less than 100 chars of text)."
 
+    def _meta_sugg_summary():
+        if not meta_sugg:
+            return "No pages checked."
+        bad = [r for r in meta_sugg if not r["ok"]]
+        if not bad:
+            return f"All {len(meta_sugg)} page(s) have a title and meta description. See screenshot below."
+        return f"{len(bad)} of {len(meta_sugg)} page(s) are missing a title or meta description."
+
     computed = {
         "sucuri_result": sucuri["summary"] + (" Details: " + "; ".join(sucuri["details"]) if sucuri.get("details") else ""),
         "robots_result": robots["summary"],
@@ -1242,7 +1295,7 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
         "canonical_result": _canon_summary(),
         "double_meta_result": _dmeta_summary(),
         "meta_robots_result": _mrobots_summary(),
-        "meta_source_result": meta_source_result,
+        "meta_source_result": _meta_sugg_summary(),
         "broken_links_result": _bl_summary(),
         "dummy_content_result": dummy_result,
         "serp_result": serp["summary"],
@@ -1271,13 +1324,81 @@ def _safe_save_path(base_path):
 def build_health_docx(domain, captured, computed, out_dir, include_keys=None, voice="we", page_border=False, header_fill=None):
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml import parse_xml
-    from docx.oxml.ns import nsdecls
+    from docx.oxml import parse_xml, OxmlElement
+    from docx.oxml.ns import nsdecls, qn
     from docx.shared import Inches, Pt, RGBColor
 
     FONT_NAME = "Candara"
     IMAGE_WIDTH_IN = 6.3
     IMAGE_MAX_H_IN = 4.6
+
+    def _set_cell_border(cell, sz=24, color="111111"):
+        """Solid border on all 4 sides of a table cell. `sz` is in EIGHTHS of a point
+        (3pt = 24). A bordered INLINE picture gets its top edge clipped by Word's line
+        box until the image is resized by hand — a table cell grows to fit its image,
+        so the border is never clipped."""
+        tcPr = cell._tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:tcBorders')):
+            tcPr.remove(old)
+        borders = OxmlElement('w:tcBorders')
+        for edge in ('top', 'left', 'bottom', 'right'):
+            el = OxmlElement('w:' + edge)
+            el.set(qn('w:val'), 'single')
+            el.set(qn('w:sz'), str(sz))
+            el.set(qn('w:space'), '0')
+            el.set(qn('w:color'), color)
+            borders.append(el)
+        tcPr.append(borders)
+
+    def _zero_cell_margins(cell):
+        tcPr = cell._tc.get_or_add_tcPr()
+        mar = OxmlElement('w:tcMar')
+        for edge in ('top', 'start', 'bottom', 'end'):
+            el = OxmlElement('w:' + edge)
+            el.set(qn('w:w'), '0')
+            el.set(qn('w:type'), 'dxa')
+            mar.append(el)
+        tcPr.append(mar)
+
+    def _add_bordered_picture(img_path):
+        """Screenshot framed with a 3pt border via a single-cell table (matches the
+        reference report exactly) — a bordered inline picture gets clipped by Word
+        until resized by hand, so we frame with a table cell border instead."""
+        from docx.enum.table import WD_TABLE_ALIGNMENT
+        from PIL import Image as PILImage
+        with PILImage.open(img_path) as im:
+            iw, ih = im.size
+        if (IMAGE_WIDTH_IN * ih / iw) > IMAGE_MAX_H_IN:
+            disp_w = IMAGE_MAX_H_IN * iw / ih
+            pic_kwargs = {"height": Inches(IMAGE_MAX_H_IN)}
+        else:
+            disp_w = IMAGE_WIDTH_IN
+            pic_kwargs = {"width": Inches(IMAGE_WIDTH_IN)}
+
+        table = doc.add_table(rows=1, cols=1)
+        table.alignment = WD_TABLE_ALIGNMENT.LEFT
+        table.autofit = False
+        table.allow_autofit = False
+        col_w = Inches(disp_w)
+        table.columns[0].width = col_w
+        cell = table.cell(0, 0)
+        cell.width = col_w
+        _zero_cell_margins(cell)
+        _set_cell_border(cell, sz=24, color="111111")
+
+        cp = cell.paragraphs[0]
+        cp.paragraph_format.space_before = Pt(0)
+        cp.paragraph_format.space_after = Pt(0)
+        cp.paragraph_format.line_spacing = 1.0
+        run = cp.add_run()
+        run.add_picture(img_path, **pic_kwargs)
+
+        # Small gap after the framed image — also gives Word the paragraph it
+        # needs to render cleanly after a table.
+        spacer = doc.add_paragraph()
+        spacer.add_run("").font.size = Pt(6)
+        spacer.paragraph_format.space_after = Pt(6)
+        spacer.paragraph_format.space_before = Pt(0)
 
     use_keys = include_keys or JAMES_KEYS
     cps = [CHECKPOINT_BY_KEY[k] for k in use_keys if k in CHECKPOINT_BY_KEY]
@@ -1424,24 +1545,14 @@ def build_health_docx(domain, captured, computed, out_dir, include_keys=None, vo
         img = captured.get(cp["key"])
         if img and os.path.exists(img):
             try:
-                from PIL import Image as PILImage
-                with PILImage.open(img) as im:
-                    iw, ih = im.size
-                p = doc.add_paragraph()
-                p.paragraph_format.space_before = Pt(4)
-                p.paragraph_format.space_after = Pt(4)
-                run = p.add_run()
-                if (IMAGE_WIDTH_IN * ih / iw) > IMAGE_MAX_H_IN:
-                    run.add_picture(img, height=Inches(IMAGE_MAX_H_IN))
-                else:
-                    run.add_picture(img, width=Inches(IMAGE_WIDTH_IN))
+                _add_bordered_picture(img)
                 placed += 1
             except Exception:
                 missing += 1
         else:
             missing += 1
 
-        if cp["key"] == "layout":
+        if cp["key"] == "layout" and img and os.path.exists(img):
             p = doc.add_paragraph()
             r = p.add_run("Compare this archived snapshot with the current live site.")
             r.font.name = FONT_NAME
@@ -1643,6 +1754,18 @@ def build_health_pptx_omega(domain, captured, computed, out_dir):
     prs.slide_height = PInches(7.5)
     blank = prs.slide_layouts[6]
 
+    def rect(slide, x, y, w, h, rgb, line_rgb=None):
+        shp = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, PInches(x), PInches(y), PInches(w), PInches(h))
+        shp.fill.solid()
+        shp.fill.fore_color.rgb = rgb
+        if line_rgb is None:
+            shp.line.fill.background()
+        else:
+            shp.line.color.rgb = line_rgb
+            shp.line.width = PPt(1)
+        shp.shadow.inherit = False
+        return shp
+
     def text(slide, runs, x, y, w, h, size, rgb=INK, bold=False, align=PP_ALIGN.LEFT,
              anchor=MSO_ANCHOR.TOP):
         tb = slide.shapes.add_textbox(PInches(x), PInches(y), PInches(w), PInches(h))
@@ -1683,6 +1806,7 @@ def build_health_pptx_omega(domain, captured, computed, out_dir):
             w = bh * ar
         x = bx + (bw - w) / 2.0
         y = by + (bh - h) / 2.0
+        rect(slide, x - 0.03, y - 0.03, w + 0.06, h + 0.06, BLUE)
         try:
             slide.shapes.add_picture(str(img_path), PInches(x), PInches(y),
                                      width=PInches(w), height=PInches(h))

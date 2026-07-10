@@ -2409,6 +2409,13 @@ def api_admin_add_city():
     if not display or not canonical:
         return jsonify({"error": "Display name and canonical name are required"})
     custom = CONFIG.setdefault("custom_cities", {})
+    # Never silently overwrite an existing location (built-in or custom) — a
+    # re-add with different coordinates would corrupt the lat/lng already
+    # in use for that city.
+    existing = next((k for k in list(custom.keys()) + list(engine.CITY_CANONICAL.keys())
+                     if k.strip().lower() == display.lower()), None)
+    if existing:
+        return jsonify({"error": f'"{existing}" is already added — skipped to avoid overwriting its coordinates.'})
     custom[display] = canonical
     # Register in engine dicts so ranking/UULE work immediately
     engine.CITY_CANONICAL[display] = canonical
@@ -3611,6 +3618,29 @@ def api_gsc_domain_check():
 # --------------------------------------------------------------------------- #
 # Crawl Tracker — proxy to Apps Script Web App
 # --------------------------------------------------------------------------- #
+def _crawl_apps_script_post(webapp_url, payload, timeout=180, retries=1):
+    """POST to the Apps Script web app the same way the known-working
+    last-gsc-crawl-date-check frontend does: Content-Type: text/plain
+    (requests.post(json=...) sends application/json instead, which some
+    doPost(e) handlers branch on) and a generous timeout — that frontend
+    uses no timeout at all, since the URL Inspection API can genuinely take
+    well over 30-60s per URL. One retry, since a slow/cold Apps Script
+    execution is transient, not a hard failure."""
+    import json as _json
+    body = _json.dumps(payload).encode("utf-8")
+    headers = {"Content-Type": "text/plain;charset=utf-8"}
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            return http_requests.post(webapp_url, data=body, headers=headers, timeout=timeout)
+        except http_requests.exceptions.Timeout as e:
+            last_err = e
+            continue
+        except Exception as e:
+            last_err = e
+            break
+    raise last_err
+
 @app.route("/api/crawl/validate", methods=["POST"])
 def api_crawl_validate():
     webapp_url = _gsc_webapp_url()
@@ -3618,8 +3648,10 @@ def api_crawl_validate():
         return jsonify({"error": "GSC accounts not configured. Set Apps Script URL in Admin."}), 400
     data = request.get_json(silent=True) or {}
     try:
-        resp = http_requests.post(webapp_url, json={"action": "validate_batch", "urls": data.get("urls", [])}, timeout=30)
+        resp = _crawl_apps_script_post(webapp_url, {"action": "validate_batch", "urls": data.get("urls", [])})
         return jsonify(resp.json())
+    except http_requests.exceptions.Timeout:
+        return jsonify({"error": "The Google Sheet is taking too long to respond. Please try again."}), 504
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3630,14 +3662,16 @@ def api_crawl_inspect():
         return jsonify({"error": "GSC accounts not configured. Set Apps Script URL in Admin."}), 400
     data = request.get_json(silent=True) or {}
     try:
-        resp = http_requests.post(webapp_url, json={
+        resp = _crawl_apps_script_post(webapp_url, {
             "action": "inspect_single",
             "url": data.get("url", ""),
             "domain": data.get("domain", ""),
             "accountKey": data.get("accountKey", ""),
             "batchId": data.get("batchId", "")
-        }, timeout=30)
+        })
         return jsonify(resp.json())
+    except http_requests.exceptions.Timeout:
+        return jsonify({"error": "URL Inspection API is taking too long to respond. Please try again."}), 504
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
