@@ -3026,6 +3026,289 @@ def build_w3era_g(data, out_path, log_fn=None):
     log_fn(f"  W3era Quick FVR G report saved: {os.path.basename(out_path)}")
 
 
+def build_beta_bhargu_fvr(data, out_path, log_fn=None):
+    """Beta Bhargu FVR — 16-slide PPTX, verified against the client reference
+    "Beta Bhargu FVR.pptx" (expatcares.ae): navy (#002060) ALL-CAPS cover
+    title, an "INDEX:" status slide with bright red (#FF0000, needs
+    attention) or green (#00B050, optimized) labels, then 14 topic slides —
+    dark brown-grey (#433835) ALL-CAPS section title + a per-topic
+    "Issue:"/"Result:"/"Results:" label (matching the reference's own varied
+    wording) followed by the finding. Distinct from Camila's gold/red-C00000
+    title-case scheme, matching this reference's own colors exactly."""
+    if log_fn is None:
+        log_fn = print
+    Presentation, Inches, Pt, Emu, RGBColor, PP_ALIGN, MSO_ANCHOR = _init_pptx()
+
+    prs = Presentation()
+    prs.slide_width = Inches(13.33)
+    prs.slide_height = Inches(7.5)
+
+    NAVY = "#002060"
+    TITLE_CLR = "#433835"
+    BLACK = "#000000"
+    RED = "#FF0000"
+    GREEN = "#00B050"
+
+    domain = data["domain"]
+    date_str = data["date"]
+    home = f"https://{domain}/"
+
+    idx = data.get("indexing", {}) or {}
+    titles = data.get("titles", []) or []
+    metas = data.get("metas", []) or []
+    headers = data.get("headers", []) or []
+    sitemap = data.get("sitemap", {}) or {}
+    canonicals = data.get("canonicals", []) or []
+    robots = data.get("robots", {}) or {}
+    img_alts = data.get("img_alts", []) or []
+    broken_links = data.get("broken_links", []) or []
+    bl_checked = data.get("broken_links_checked", 0)
+    redirects = data.get("redirects", []) or []
+    da_pa = data.get("da_pa") or {}
+
+    title_ok = bool(titles) and all(t.get("status") == "Good" for t in titles)
+    meta_ok = bool(metas) and all(m.get("status") == "Good" for m in metas)
+    h1_ok = bool(headers) and all(h.get("h1") == 1 for h in headers)
+    h2_ok = bool(headers) and all(h.get("h2", 0) >= 1 for h in headers)
+    idx_ok = not _is_empty(idx.get("count"))
+    da_ok = (da_pa.get("da") not in (None, "—"))
+    canon_ok = bool(canonicals) and all(c.get("status") == "Good" for c in canonicals)
+    img_ok = bool(img_alts) and all(a.get("present") == "Yes" for a in img_alts)
+    sm_ok = bool(sitemap.get("found") or sitemap.get("ok"))
+    redirect_ok = bool(redirects)
+    robots_ok = bool(robots.get("found"))
+    bl_ok = bl_checked > 0 and not broken_links
+
+    # ---- Slide 1: Cover ----
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    _text(s, home, 1.6, 3.4, 8.0, 0.5, 18, "Calibri", BLACK, bold=True)
+    _text(s, f"DATE: {date_str}", 1.6, 3.9, 8.0, 0.5, 16, "Calibri", BLACK, bold=True)
+    _text(s, "WEBSITE ANALYSIS REPORT", 1.6, 1.8, 9.5, 0.9, 44, "Calibri", NAVY)
+
+    # ---- Slide 2: Index ----
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    _text(s, "INDEX:", 1.5, 0.6, 9.0, 0.9, 44, "Calibri", NAVY)
+    index_items = [
+        ("Meta Title: ", title_ok),
+        ("Meta Description: ", meta_ok),
+        ("H1 Heading Tags: ", h1_ok),
+        ("H2 Heading Tags: ", h2_ok),
+        ("Website Indexing: ", idx_ok),
+        ("Domain Authority & Page Authority: ", da_ok),
+        ("Canonical Tag: ", canon_ok),
+        ("Image Alt Tags: ", img_ok),
+        ("Schema Markup: ", False),
+        ("XML Sitemap: ", sm_ok),
+        ("Redirection: ", redirect_ok),
+        ("Robots.txt: ", robots_ok),
+        ("Broken Link: ", bl_ok),
+        ("Backlinks Status from Ahreaf: ", da_ok),
+    ]
+    box = prs.slides[-1].shapes.add_textbox(Inches(1.2), Inches(1.7), Inches(10.1), Inches(4.65))
+    tf = box.text_frame
+    tf.word_wrap = True
+    for i, (label, ok) in enumerate(index_items):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        r1 = p.add_run(); r1.text = label
+        r1.font.size = Pt(18); r1.font.name = "Arial"; r1.font.bold = True
+        r1.font.color.rgb = _C(BLACK)
+        r2 = p.add_run(); r2.text = "Optimized" if ok else "Not Optimized"
+        r2.font.size = Pt(18); r2.font.name = "Arial"; r2.font.bold = True
+        r2.font.color.rgb = _C(GREEN if ok else RED)
+
+    # ---- Slides 3-16: topics ----
+    shots = data.get("screenshots", {}) or {}
+
+    def topic_slide(title, result_text, shot_key=None, label="Result", intro=None):
+        s = prs.slides.add_slide(prs.slide_layouts[6])
+        _text(s, title.upper(), 1.2, 0.35, 10.8, 0.9, 44, "Calibri", TITLE_CLR)
+        y = 1.65
+        if intro:
+            _text(s, intro, 1.2, y, 10.9, 1.0, 14, "Calibri", BLACK)
+            y += 1.05
+        if shot_key and shots.get(shot_key):
+            has_shot = _place_image(s, shots.get(shot_key), 1.2, y, 10.9, 2.4)
+            if has_shot:
+                y += 2.65
+        box = s.shapes.add_textbox(Inches(1.2), Inches(y), Inches(10.9), Inches(2.6))
+        tf = box.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        r1 = p.add_run(); r1.text = label
+        r1.font.size = Pt(18); r1.font.name = "Calibri"; r1.font.bold = True
+        r1.font.color.rgb = _C(BLACK)
+        r2 = p.add_run(); r2.text = ": "
+        r2.font.size = Pt(18); r2.font.name = "Calibri"; r2.font.bold = True
+        r2.font.color.rgb = _C(BLACK)
+        r3 = p.add_run(); r3.text = result_text
+        r3.font.size = Pt(16); r3.font.name = "Calibri"; r3.font.bold = False
+        r3.font.color.rgb = _C(BLACK)
+        return s
+
+    # Meta Title
+    if titles:
+        t = titles[0]
+        topic_slide("Meta Title",
+                     f"The SEO audit for {home} shows the page title is {t.get('chars', '?')} "
+                     f"character(s) — {t.get('status', 'N/A')}.",
+                     "viewsource", label="Issue")
+    else:
+        topic_slide("Meta Title", UNVERIFIED, "viewsource", label="Issue")
+
+    # Meta Description
+    if metas:
+        m = metas[0]
+        topic_slide("Meta Description",
+                     f"The SEO audit for {home} shows the page meta description is "
+                     f"{m.get('chars', '?')} character(s) — {m.get('status', 'N/A')}.",
+                     "viewsource", label="Issue")
+    else:
+        topic_slide("Meta Description", UNVERIFIED, "viewsource", label="Issue")
+
+    # H1 Tag
+    if headers:
+        h = headers[0]
+        topic_slide("H1 Tag",
+                     f"The SEO audit for {home} shows the page contains {h.get('h1', 0)} H1 "
+                     "tag(s), whereas SEO best practices recommend using only one H1 tag per "
+                     "page.",
+                     "homepage", label="Issue")
+    else:
+        topic_slide("H1 Tag", UNVERIFIED, "homepage", label="Issue")
+
+    # H2 Tag
+    if headers:
+        h = headers[0]
+        topic_slide("H2 Tag",
+                     f"The SEO audit for {home} shows the page contains {h.get('h2', 0)} H2 "
+                     "tag(s). A clear H2 structure helps establish content hierarchy.",
+                     "homepage", label="Result")
+    else:
+        topic_slide("H2 Tag", UNVERIFIED, "homepage", label="Result")
+
+    # Website Indexing
+    topic_slide("Website Indexing",
+                 f"A site search (site:{home}) indicates that approximately "
+                 f"{idx.get('count', 'N/A')} page(s) are indexed by Google. "
+                 f"{idx.get('status', '')}",
+                 "serp", label="Issue")
+
+    # Domain Authority & Page Authority
+    da_val, dr_val, pa_val = da_pa.get("da", "—"), da_pa.get("dr", "—"), da_pa.get("pa", "—")
+    if da_ok:
+        topic_slide("Domain Authority & Page Authority",
+                     f"The SEO audit for {home} indicates that the website has a Domain "
+                     f"Authority (DA) of {da_val} and Page Authority (PA) of {pa_val}, "
+                     "reflecting its current backlink profile.",
+                     label="Result")
+    else:
+        topic_slide("Domain Authority & Page Authority", UNVERIFIED, label="Result")
+
+    # Canonical Tag
+    canon_intro = ("Canonical tag is always telling search engines that a only one URL "
+                   "represents the master copy of a our page. We can remove issues based on "
+                   "duplicate content by defining the correct canonical URL.")
+    if canon_ok:
+        topic_slide("Canonical Tag",
+                     f"The SEO audit for {home} indicates that a properly implemented "
+                     "self-referencing canonical URL has been defined for the page.",
+                     label="Result", intro=canon_intro)
+    else:
+        topic_slide("Canonical Tag",
+                     f"The SEO audit for {home} indicates that no canonical URL has been "
+                     "defined for the page. A canonical tag helps search engines identify the "
+                     "preferred version of a page.",
+                     label="Result", intro=canon_intro)
+
+    # Image Alt Tag
+    missing_alt = len([a for a in img_alts if a.get("present") != "Yes"])
+    img_intro = ("Image Alt Tag - Alt tags/title provide context to what an image is "
+                 "displaying, informing search engine crawlers and allowing them to index an "
+                 "image correctly.")
+    if img_alts:
+        topic_slide("Image Alt Tag",
+                     f"The SEO audit for {home} shows the page contains {len(img_alts)} "
+                     f"image(s), and {missing_alt} of them are missing ALT text.",
+                     label="Issue", intro=img_intro)
+    else:
+        topic_slide("Image Alt Tag", UNVERIFIED, label="Issue", intro=img_intro)
+
+    # Schema Markup
+    topic_slide("Schema Markup",
+                 f"The structured data analysis for {home} shows the current Schema markup "
+                 "status. We recommend implementing relevant schema types to help search "
+                 "engines better understand the business.",
+                 label="Results")
+
+    # Sitemap.xml
+    sm_url = sitemap.get("url_checked", f"{home}sitemap.xml")
+    sm_intro = ("Sitemap informs search engine about available for crawling. A Sitemap is an "
+                "XML file that lists URLs for a site along with additional metadata about each "
+                "URL.")
+    if sm_ok:
+        topic_slide("Sitemap.xml",
+                     f"The SEO audit for {home} indicates that the website's XML sitemap "
+                     f"({sm_url}) is accessible.",
+                     "sitemap", label="Results", intro=sm_intro)
+    else:
+        topic_slide("Sitemap.xml",
+                     f"The SEO audit for {home} indicates that the website's XML sitemap is not "
+                     f"accessible, as the {sm_url} URL returns an error.",
+                     "sitemap", label="Results", intro=sm_intro)
+
+    # Redirection
+    if redirects:
+        r = redirects[0]
+        topic_slide("Redirection",
+                     f"The SEO audit for {home} shows redirect status: {r.get('status', 'N/A')} "
+                     f"— {r.get('detail', '')}",
+                     label="Results")
+    else:
+        topic_slide("Redirection", UNVERIFIED, label="Results")
+
+    # Robots.txt
+    rb_intro = ("The robots.txt file, when present and accessible at the root level of a "
+                "website, contains crawl directives for search engines.")
+    if robots_ok:
+        topic_slide("Robots.txt",
+                     f"The SEO audit for {home} indicates that the website's robots.txt file "
+                     f"is accessible at {home}robots.txt.",
+                     "robots", label="Results", intro=rb_intro)
+    else:
+        topic_slide("Robots.txt",
+                     f"The SEO audit for {home} indicates that the website's robots.txt file "
+                     f"is not accessible, as the {home}robots.txt URL returns an error.",
+                     "robots", label="Results", intro=rb_intro)
+
+    # Broken Link
+    if broken_links:
+        topic_slide("Broken Link",
+                     f"The SEO audit for {home} shows that a full website scan found "
+                     f"{len(broken_links)} broken link(s) out of {bl_checked} URL(s) crawled.",
+                     label="Result")
+    else:
+        topic_slide("Broken Link",
+                     f"The SEO audit for {home} shows that a full website scan was completed "
+                     f"successfully with {bl_checked} URL(s) crawled and no broken links found.",
+                     label="Result")
+
+    # Backlinks Status from Ahreaf
+    bl_intro = ("Backlink status refers to the overall condition of a website's backlinks, "
+                "including the number, quality, authority, and relevance of the links pointing "
+                "to it.")
+    if da_ok:
+        topic_slide("Backlinks Status from Ahreaf",
+                     f"The SEO audit for {home} indicates that the website currently has a "
+                     f"Domain Rating (DR) of {dr_val} according to Ahrefs.",
+                     label="Results", intro=bl_intro)
+    else:
+        topic_slide("Backlinks Status from Ahreaf", UNVERIFIED, label="Results", intro=bl_intro)
+
+    prs.save(out_path)
+    log_fn(f"  Beta Bhargu FVR report saved: {os.path.basename(out_path)}")
+    return out_path
+
+
 # ---------------------------------------------------------------------------
 # Format registry & main entry
 # ---------------------------------------------------------------------------
@@ -3469,6 +3752,7 @@ BRIEF_FORMATS = {
     "eta": {"label": "ETA (DOCX, plain lettered sections)", "builder": build_eta, "ext": "docx"},
     "kappa": {"label": "Kappa (DOCX, black paragraph banners)", "builder": build_kappa, "ext": "docx"},
     "w3era_g": {"label": "W3era Quick FVR G (DOCX, teal banners)", "builder": build_w3era_g, "ext": "docx"},
+    "beta_bhargu": {"label": "Beta Bhargu FVR (16 slides, ALL-CAPS)", "builder": build_beta_bhargu_fvr, "ext": "pptx"},
 }
 
 
