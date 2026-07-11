@@ -3122,6 +3122,119 @@ def api_onpage_download():
 
 
 # --------------------------------------------------------------------------- #
+# Wayback Machine Submitter - standalone tool. Pure HTTP (no Selenium session
+# needed), so it's a lightweight background job like Brief Analysis rather than
+# a full checker Session.
+# --------------------------------------------------------------------------- #
+wayback_state = {"status": "idle", "log": [], "results": [], "error_msg": ""}
+wayback_lock = threading.Lock()
+wayback_stop = threading.Event()
+
+
+def _wayback_proxy_url(p):
+    auth = f"{p['user']}:{p['pass']}@" if p.get("user") else ""
+    return f"{p.get('type', 'http')}://{auth}{p['host']}:{p['port']}"
+
+
+def _submit_wayback_url(url, max_tries=3, timeout=45):
+    """Submit `url` to the Wayback Machine's Save Page Now, rotating through a
+    different proxy each attempt (archive.org blocks/limits by IP, so retrying on
+    the SAME IP would just fail the same way). Capped at max_tries so a slow/blocked
+    archive.org can never hang the job - returns None on exhausted retries."""
+    import re as _re
+    proxies_pool = list(CONFIG.get("proxies", [])) + _shared_proxies()
+    attempts = (random.sample(proxies_pool, min(max_tries, len(proxies_pool)))
+                if proxies_pool else [None] * max_tries)
+    save_url = "https://web.archive.org/save/" + url
+    for proxy in attempts:
+        try:
+            kwargs = {}
+            if proxy:
+                pu = _wayback_proxy_url(proxy)
+                kwargs["proxies"] = {"http": pu, "https": pu}
+            r = http_requests.get(save_url, headers={"User-Agent": "Mozilla/5.0 SEOToolkitPro"},
+                                  timeout=timeout, allow_redirects=True, **kwargs)
+            loc = r.headers.get("Content-Location", "")
+            m = _re.search(r'(/web/\d{10,}/https?://[^\s"\'<>]+)', loc or r.text)
+            if m:
+                return "https://web.archive.org" + m.group(1)
+        except Exception:
+            continue
+    return None
+
+
+def _run_wayback_submit(urls):
+    with wayback_lock:
+        wayback_state.update({"status": "running", "log": [], "results": [], "error_msg": ""})
+    wayback_stop.clear()
+    activity(f"Wayback submission started for {len(urls)} URL(s)")
+    for i, u in enumerate(urls):
+        if wayback_stop.is_set():
+            with wayback_lock:
+                wayback_state["log"].append("Stopped by user.")
+                wayback_state["status"] = "stopped"
+            return
+        with wayback_lock:
+            wayback_state["log"].append(f"[{i+1}/{len(urls)}] Submitting {u}...")
+        archived = _submit_wayback_url(u)
+        with wayback_lock:
+            wayback_state["results"].append({
+                "url": u, "archived_url": archived or "",
+                "status": "submitted" if archived else "failed",
+                "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+            wayback_state["log"].append(
+                "  -> " + (f"Archived: {archived}" if archived else "Failed after retries"))
+    with wayback_lock:
+        ok = sum(1 for r in wayback_state["results"] if r["status"] == "submitted")
+        wayback_state["log"].append(f"Completed -- {ok} ok, {len(wayback_state['results']) - ok} error(s).")
+        wayback_state["status"] = "completed"
+
+
+@app.route("/api/wayback/start", methods=["POST"])
+def api_wayback_start():
+    with wayback_lock:
+        if wayback_state["status"] == "running":
+            return jsonify({"error": "Wayback submission already running."}), 400
+    data = request.get_json(silent=True) or {}
+    raw = (data.get("urls") or "").strip()
+    urls = [u.strip() for u in raw.splitlines() if u.strip()]
+    if not urls:
+        return jsonify({"error": "At least one URL required."}), 400
+    t = threading.Thread(target=_run_wayback_submit, args=(urls,), daemon=True)
+    t.start()
+    return jsonify({"status": "started", "count": len(urls)})
+
+
+@app.route("/api/wayback/status")
+def api_wayback_status():
+    with wayback_lock:
+        return jsonify({
+            "status": wayback_state["status"],
+            "log": wayback_state["log"][-200:],
+            "results": wayback_state["results"],
+            "error_msg": wayback_state["error_msg"],
+        })
+
+
+@app.route("/api/wayback/stop", methods=["POST"])
+def api_wayback_stop():
+    wayback_stop.set()
+    return jsonify({"status": "stopping"})
+
+
+@app.route("/api/wayback/export")
+def api_wayback_export():
+    with wayback_lock:
+        results = list(wayback_state["results"])
+    out = io.StringIO()
+    w = csv.DictWriter(out, fieldnames=["url", "archived_url", "status", "checked_at"])
+    w.writeheader(); w.writerows(results)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return Response(out.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename=wayback_submissions_{ts}.csv"})
+
+
+# --------------------------------------------------------------------------- #
 # Health Audit - runs checks + optional Selenium screenshots, builds report
 # --------------------------------------------------------------------------- #
 ha_state = {
