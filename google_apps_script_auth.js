@@ -93,6 +93,17 @@ function doPost(e) {
 /* =====================================================
    AUTH — Login, User Management
    ===================================================== */
+// An approved user may log in from up to this many of their OWN devices - Device
+// ID (column C) is a comma-separated list, not a single value. First login on a new
+// device auto-claims a free slot; once all slots are used, a new device is rejected
+// until an admin frees one (Admin -> Settings -> Device ID, or admin_update_mac).
+var MAX_DEVICES_PER_USER = 3;
+
+function _parseDeviceList(raw) {
+  return (raw || '').toString().split(',').map(function(m) { return m.trim().toUpperCase(); })
+    .filter(function(m) { return m; });
+}
+
 function _login(p) {
   var email = (p.email || '').trim().toLowerCase();
   var password = p.password || '';
@@ -106,12 +117,16 @@ function _login(p) {
   for (var i = 1; i < data.length; i++) {
     var rowEmail = (data[i][0] || '').toString().trim().toLowerCase();
     var rowPass = (data[i][1] || '').toString();
-    var rowMac = (data[i][2] || '').toString().trim().toUpperCase();
+    var devices = _parseDeviceList(data[i][2]);
     var rowApproved = data[i][3];
 
     if (rowEmail === email && rowPass === password) {
-      if (rowMac === '' || rowMac === mac) {
-        sheet.getRange(i + 1, 3).setValue(mac);
+      var known = devices.indexOf(mac) !== -1;
+      if (known || devices.length < MAX_DEVICES_PER_USER) {
+        if (!known) {
+          devices.push(mac);
+          sheet.getRange(i + 1, 3).setValue(devices.join(', '));
+        }
         sheet.getRange(i + 1, 7).setValue(new Date());
 
         if (rowApproved === true || rowApproved === 'TRUE' || rowApproved === 'Yes') {
@@ -123,8 +138,9 @@ function _login(p) {
                         message: 'Your account is pending admin approval. Contact your administrator.'});
         }
       } else {
-        return _json({status: 'mac_mismatch', email: email, registered_mac: rowMac, current_mac: mac,
-                      message: 'This account is registered on another device. Contact admin to transfer.'});
+        return _json({status: 'mac_mismatch', email: email, registered_mac: devices.join(', '), current_mac: mac,
+                      message: 'This account is already registered on ' + MAX_DEVICES_PER_USER +
+                        ' device(s). Contact admin to free up a device.'});
       }
     }
   }
