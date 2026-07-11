@@ -1651,7 +1651,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
   </div>
   <div class="sheet-foot">
     <button class="btn btn-tonal" style="flex:1" onclick="admCloseBuildingModal()">Cancel</button>
-    <button class="btn btn-primary" style="flex:2" onclick="admSaveBuilding()">Save Building</button>
+    <button class="btn btn-primary" style="flex:2" id="bm-save-btn" onclick="admSaveBuilding()">Save Building</button>
   </div>
 </div>
 
@@ -2873,6 +2873,8 @@ async function admSaveUser(){
   if(mac)body.mac=mac; else body.clear_mac=true;
   const pass=$('um-pass').value;
   if(pass)body.password=pass;
+  const btn=$('um-save-btn');const orig=btn.textContent;
+  btn.disabled=true;btn.innerHTML='<span class="auth-spin"></span>Saving...';
   try{
     const r=await(await fetch('/api/admin/add_user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error);return;}
@@ -2880,17 +2882,21 @@ async function admSaveUser(){
     admCloseUserModal();
     admLoadUsers();
   }catch(e){toast('Failed to save user');}
+  finally{btn.disabled=false;btn.textContent=orig;}
 }
 async function admApprove(email){
   if(!confirm('Approve '+email+'?'))return;
+  toast('Approving...');
   try{await fetch('/api/admin/approve_user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});toast('Approved');admLoadUsers();}catch(e){toast('Failed');}
 }
 async function admReject(email){
   if(!confirm('Reject '+email+'?'))return;
+  toast('Rejecting...');
   try{await fetch('/api/admin/reject_user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});toast('Rejected');admLoadUsers();}catch(e){toast('Failed');}
 }
 async function admRemoveUser(email){
   if(!confirm('Remove user '+email+'? This cannot be undone.'))return;
+  toast('Removing...');
   try{await fetch('/api/admin/remove_user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});toast('Removed');admLoadUsers();}catch(e){toast('Failed');}
 }
 
@@ -2925,6 +2931,8 @@ async function admSaveBuilding(){
   const building=$('bm-name').value.trim();
   if(!building){toast('Enter a building name');return;}
   const body={building,building_sheet_id:$('bm-sheet-id').value.trim(),gsc_script_url:$('bm-gsc-url').value.trim()};
+  const btn=$('bm-save-btn');const orig=btn.textContent;
+  btn.disabled=true;btn.innerHTML='<span class="auth-spin"></span>Saving...';
   try{
     const r=await(await fetch('/api/admin/save_building',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error);return;}
@@ -2932,6 +2940,7 @@ async function admSaveBuilding(){
     admCloseBuildingModal();
     admLoadBuildings();
   }catch(e){toast('Failed to save building');}
+  finally{btn.disabled=false;btn.textContent=orig;}
 }
 
 /* ----- bulk add users ----- */
