@@ -1348,7 +1348,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
               <button class="btn btn-primary" style="font-size:12px;padding:6px 16px" onclick="admOpenUserModal()">+ Add User</button>
             </span>
           </div>
-          <input type="text" id="adm-user-search" placeholder="Search by email or name..." oninput="admRenderUsersTable()" autocomplete="off" style="width:100%;padding:8px 10px;margin-bottom:10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
+          <input type="text" id="adm-user-search" placeholder="Search by email or name..." oninput="admRenderUsersTable()" autocomplete="off" style="width:100%;padding:8px 10px;margin-bottom:10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
           <div id="adm-users-list" style="font-size:13px">Loading users...</div>
         </div>
 
@@ -1367,12 +1367,12 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
           <div style="margin-bottom:14px;padding:12px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border)">
             <div style="font-weight:700;font-size:13px;margin-bottom:10px">Add Single City</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px">
-              <input type="text" id="adm-city-display" placeholder="Display name (e.g. Perth, AU)" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
-              <input type="text" id="adm-city-canonical" placeholder="Canonical (e.g. Perth,Western Australia,Australia)" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
+              <input type="text" id="adm-city-display" placeholder="Display name (e.g. Perth, AU)" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+              <input type="text" id="adm-city-canonical" placeholder="Canonical (e.g. Perth,Western Australia,Australia)" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-              <input type="text" id="adm-city-lat" placeholder="Latitude (e.g. -31.9505)" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
-              <input type="text" id="adm-city-lng" placeholder="Longitude (e.g. 115.8605)" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
+              <input type="text" id="adm-city-lat" placeholder="Latitude (e.g. -31.9505)" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+              <input type="text" id="adm-city-lng" placeholder="Longitude (e.g. 115.8605)" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
             </div>
             <button class="btn btn-primary" style="font-size:12px;padding:6px 18px" onclick="admAddCity()">Add City</button>
           </div>
@@ -1382,7 +1382,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
               <a href="/api/admin/sample_cities_csv" download="sample_cities.csv" style="font-size:11px;color:var(--primary);text-decoration:none;cursor:pointer">Download sample CSV</a>
             </div>
             <div style="font-size:11px;color:var(--text-3);margin-bottom:8px">Columns: City, Country, Latitude, Longitude, Canonical (optional). One city per row.</div>
-            <textarea id="adm-city-csv" rows="5" placeholder="City,Country,Latitude,Longitude&#10;Perth,AU,-31.9505,115.8605&#10;Sydney,AU,-33.8688,151.2093" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:12px;font-family:monospace;resize:vertical;box-sizing:border-box"></textarea>
+            <textarea id="adm-city-csv" rows="5" placeholder="City,Country,Latitude,Longitude&#10;Perth,AU,-31.9505,115.8605&#10;Sydney,AU,-33.8688,151.2093" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px;font-family:monospace;resize:vertical;box-sizing:border-box"></textarea>
             <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
               <button class="btn btn-primary" style="font-size:12px;padding:6px 18px" onclick="admUploadCityCsv()">Upload CSV</button>
               <span id="adm-csv-status" style="font-size:12px;color:var(--text-3)"></span>
@@ -1404,7 +1404,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
               <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Default GSC/Sync URL <span style="font-weight:400;color:var(--text-3)">(fallback only)</span></label>
               <div class="note" style="margin-bottom:4px">Each user's GSC/Crawl Tracker requests already route automatically to their own building's Apps Script (returned at login) - you only need this if a user has no building assigned yet (e.g. a super admin) and needs a default to fall back to.</div>
               <div style="display:flex;gap:8px;align-items:center">
-                <input type="text" id="adm-script-url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
+                <input type="text" id="adm-script-url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
                 <span id="adm-url-status" style="font-size:18px" title=""></span>
               </div>
             </div>
@@ -1550,13 +1550,13 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
 
     <div class="sec-t" style="margin-top:22px">Downloads Folder</div>
     <div class="note" style="margin-bottom:8px">All reports, CSVs, and screenshots save here. Leave blank for system Downloads folder.</div>
-    <input type="text" id="s-downloads-folder" placeholder="e.g. C:\Users\You\Downloads" autocomplete="off" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:14px">
+    <input type="text" id="s-downloads-folder" placeholder="e.g. C:\Users\You\Downloads" autocomplete="off" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px">
 
     <div class="sec-t" style="margin-top:22px">Change Password</div>
     <div class="note" style="margin-bottom:8px">Update your account password - saved to your account immediately.</div>
-    <input type="password" id="cp-old" placeholder="Current password" autocomplete="current-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:14px;margin-bottom:8px;box-sizing:border-box">
-    <input type="password" id="cp-new" placeholder="New password (min 6 characters)" autocomplete="new-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:14px;margin-bottom:8px;box-sizing:border-box">
-    <input type="password" id="cp-confirm" placeholder="Confirm new password" autocomplete="new-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:14px;margin-bottom:8px;box-sizing:border-box">
+    <input type="password" id="cp-old" placeholder="Current password" autocomplete="current-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
+    <input type="password" id="cp-new" placeholder="New password (min 6 characters)" autocomplete="new-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
+    <input type="password" id="cp-confirm" placeholder="Confirm new password" autocomplete="new-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
     <button class="btn btn-tonal" style="width:100%" onclick="changePassword()">Change Password</button>
 
     <div class="sec-t" style="margin-top:22px;color:var(--text-3)">API Keys & Credentials</div>
@@ -1587,26 +1587,26 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
   <div class="sheet-body">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
       <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Email</label>
-        <input type="text" id="um-email" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+        <input type="text" id="um-email" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
       <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Name</label>
-        <input type="text" id="um-name" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+        <input type="text" id="um-name" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
     </div>
     <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Password <span style="font-weight:400;color:var(--text-3)" id="um-pass-hint"></span></label>
-      <input type="password" id="um-pass" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+      <input type="password" id="um-pass" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
     <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:8px;align-items:end">
       <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Device ID</label>
-        <input type="text" id="um-mac" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+        <input type="text" id="um-mac" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
       <button class="btn btn-tonal" style="font-size:12px;padding:8px 14px" onclick="$('um-mac').value=''">Clear</button>
     </div>
     <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Notes</label>
-      <textarea id="um-notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px;resize:vertical"></textarea></div>
+      <textarea id="um-notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;resize:vertical"></textarea></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px" id="um-role-building-row">
       <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Role</label>
-        <select id="um-role" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
+        <select id="um-role" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
           <option value="user">User</option><option value="admin">Admin</option><option value="superadmin">Super Admin</option>
         </select></div>
       <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Building</label>
-        <input type="text" id="um-building" list="um-building-list" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
+        <input type="text" id="um-building" list="um-building-list" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
         <datalist id="um-building-list"></datalist></div>
     </div>
     <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:13px;cursor:pointer">
@@ -1643,11 +1643,11 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
   </div>
   <div class="sheet-body">
     <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Building name</label>
-      <input type="text" id="bm-name" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+      <input type="text" id="bm-name" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
     <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Users Sheet ID <span style="font-weight:400;color:var(--text-3)">(that building's GSC_Building sheet)</span></label>
-      <input type="text" id="bm-sheet-id" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+      <input type="text" id="bm-sheet-id" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
     <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">GSC script URL <span style="font-weight:400;color:var(--text-3)">(that building's GSC /exec URL)</span></label>
-      <input type="text" id="bm-gsc-url" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+      <input type="text" id="bm-gsc-url" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
   </div>
   <div class="sheet-foot">
     <button class="btn btn-tonal" style="flex:1" onclick="admCloseBuildingModal()">Cancel</button>
@@ -1668,14 +1668,14 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
   <div class="sheet-body">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px" id="bulk-role-building-row">
       <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Role (applies to all rows)</label>
-        <select id="bulk-role" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
+        <select id="bulk-role" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
           <option value="user">User</option><option value="admin">Admin</option>
         </select></div>
       <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Building (applies to all rows)</label>
-        <input type="text" id="bulk-building" list="um-building-list" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+        <input type="text" id="bulk-building" list="um-building-list" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
     </div>
     <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">One user per line: <code>email, password, name (optional), device ID (optional)</code></label>
-    <textarea id="bulk-rows" rows="10" placeholder="jane@example.com, Passw0rd!, Jane Doe&#10;john@example.com, Passw0rd!" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px;font-family:monospace;resize:vertical"></textarea>
+    <textarea id="bulk-rows" rows="10" placeholder="jane@example.com, Passw0rd!, Jane Doe&#10;john@example.com, Passw0rd!" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;font-family:monospace;resize:vertical"></textarea>
     <div id="bulk-result" style="font-size:12px;margin-top:10px;white-space:pre-wrap"></div>
   </div>
   <div class="sheet-foot">
@@ -2779,7 +2779,7 @@ function admSentenceCase(s){
   return t.charAt(0).toUpperCase()+t.slice(1);
 }
 function admFmtChip(key,label){
-  return '<label class="fmt-chip" style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);font-size:12px;cursor:pointer">'+
+  return '<label class="fmt-chip" style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:8px;border:1px solid var(--border);font-size:12px;cursor:pointer">'+
     '<input type="checkbox" value="'+esc(key)+'" style="width:14px;height:14px"> '+esc(admSentenceCase(label))+'</label>';
 }
 function admCheckAll(gridId,checked){
