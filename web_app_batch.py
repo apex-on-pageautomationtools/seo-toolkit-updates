@@ -3522,10 +3522,10 @@ def api_auth_is_admin():
     return jsonify({"is_admin": is_admin, "role": role, "building": building})
 
 # --------------------------------------------------------------------------- #
-# Admin config (Apps Script URL, admin key, API key sync)
+# Admin config (Apps Script URL, API key sync)
 # --------------------------------------------------------------------------- #
 SENSITIVE_KEYS = {"psi_api_key", "gemini_api_key", "gsc_client_id", "gsc_client_secret",
-                  "admin_key", "auth_api_url", "user_auth_url", "gsc_projects"}
+                  "auth_api_url", "user_auth_url", "gsc_projects"}
 
 @app.route("/api/admin/save_config", methods=["POST"])
 def api_admin_save_config():
@@ -3535,8 +3535,6 @@ def api_admin_save_config():
         CONFIG["auth_api_url"] = data["auth_api_url"].strip()
     if "user_auth_url" in data:
         CONFIG["user_auth_url"] = data["user_auth_url"].strip()
-    if "admin_key" in data:
-        CONFIG["admin_key"] = data["admin_key"].strip()
     save_config(CONFIG)
     return jsonify({"saved": True})
 
@@ -3590,28 +3588,23 @@ def api_admin_keys_status():
 # Admin user management - proxies to central_gateway_apps_script.js (the live
 # multi-tenant backend: a central "users" sheet for super admins + one users sheet
 # per building, roles user/admin/superadmin). Every call is authorized as WHOEVER
-# IS ALREADY LOGGED INTO THE EXE AS AN ADMIN - their email+password are already
-# saved locally for periodic re-validation (auth.get_admin_credentials()), so no
-# separate admin_key needs configuring for the common case. A configured admin_key
-# (Admin -> Settings) still works too, as a superadmin-equivalent override/fallback
-# for machines with no admin logged in locally.
+# IS ALREADY LOGGED INTO THE EXE AS AN ADMIN, using their own email+password
+# (already saved locally for periodic re-validation). No shared admin_key - a
+# single bypass secret shared across every admin is a materially weaker model
+# than per-account credentials, and this app's admin_key had already leaked once.
 # --------------------------------------------------------------------------- #
 def _admin_auth_params():
     """{'admin_email':..., 'admin_password':...} for the locally-logged-in admin,
-    else {'admin_key':...} if one's configured, else None if neither is available."""
+    or None if no admin is logged in on this device."""
     email, password = auth.get_admin_credentials()
     if email:
         return {"admin_email": email, "admin_password": password}
-    key = CONFIG.get("admin_key", "").strip()
-    if key:
-        return {"admin_key": key}
     return None
 
 def _admin_call(action, **params):
     auth_params = _admin_auth_params()
     if auth_params is None:
-        return {"error": "Not logged in as an admin, and no admin key configured "
-                          "(Admin -> Settings) as a fallback."}
+        return {"error": "You're not logged in as an approved admin on this device."}
     return auth._api_call({"action": action, **auth_params, **params})
 
 @app.route("/api/admin/users")

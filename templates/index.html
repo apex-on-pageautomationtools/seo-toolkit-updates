@@ -1400,24 +1400,12 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
           <div class="card-t" style="margin-bottom:12px">App Configuration</div>
           <div style="display:grid;gap:10px">
             <div>
-              <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Tools & Sync URL <span style="font-weight:400;color:var(--text-3)">(GSC, API Keys, Crawl Tracker)</span></label>
-              <div class="note" style="margin-bottom:4px">Google Apps Script that handles GSC accounts, API keys, domain mapping, and crawl tracking.</div>
+              <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Default GSC/Sync URL <span style="font-weight:400;color:var(--text-3)">(fallback only)</span></label>
+              <div class="note" style="margin-bottom:4px">Each user's GSC/Crawl Tracker requests already route automatically to their own building's Apps Script (returned at login) - you only need this if a user has no building assigned yet (e.g. a super admin) and needs a default to fall back to.</div>
               <div style="display:flex;gap:8px;align-items:center">
                 <input type="text" id="adm-script-url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
                 <span id="adm-url-status" style="font-size:18px" title=""></span>
               </div>
-            </div>
-            <div>
-              <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">User Auth URL <span style="font-weight:400;color:var(--text-3)">(Login, Registration, Licensing)</span></label>
-              <div class="note" style="margin-bottom:4px">Google Apps Script that handles user login, registration, Device ID verification, and admin checks.</div>
-              <div style="display:flex;gap:8px;align-items:center">
-                <input type="text" id="adm-auth-url" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
-                <span id="adm-auth-url-status" style="font-size:18px" title=""></span>
-              </div>
-            </div>
-            <div>
-              <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Admin Key</label>
-              <input type="password" id="adm-admin-key" placeholder="Admin secret key" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <button class="btn btn-primary" style="font-size:12px;padding:6px 18px" onclick="admSaveConfig()">Save Config</button>
@@ -1623,9 +1611,17 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
     <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:13px;cursor:pointer">
       <input type="checkbox" id="um-approved" checked style="width:16px;height:16px"> Approved
     </label>
-    <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:6px;display:block">Allowed Formats <span style="font-weight:400;color:var(--text-3)">(none checked = all allowed)</span></label>
+    <div style="margin-bottom:8px">
+      <label style="font-size:12px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between">
+        <span>Allowed Formats <span style="font-weight:400;color:var(--text-3)">(none checked = all allowed)</span></span>
+        <span><button type="button" class="btn btn-tonal" style="font-size:10px;padding:2px 10px;margin-right:4px" onclick="admCheckAll('um-formats-grid',true)">All</button><button type="button" class="btn btn-tonal" style="font-size:10px;padding:2px 10px" onclick="admCheckAll('um-formats-grid',false)">None</button></span>
+      </label>
       <div id="um-formats-grid" style="display:flex;flex-wrap:wrap;gap:6px"></div></div>
-    <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:6px;display:block">Allowed Tools <span style="font-weight:400;color:var(--text-3)">(none checked = all allowed)</span></label>
+    <div style="margin-bottom:8px">
+      <label style="font-size:12px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between">
+        <span>Allowed Tools <span style="font-weight:400;color:var(--text-3)">(none checked = all allowed)</span></span>
+        <span><button type="button" class="btn btn-tonal" style="font-size:10px;padding:2px 10px;margin-right:4px" onclick="admCheckAll('um-tools-grid',true)">All</button><button type="button" class="btn btn-tonal" style="font-size:10px;padding:2px 10px" onclick="admCheckAll('um-tools-grid',false)">None</button></span>
+      </label>
       <div id="um-tools-grid" style="display:flex;flex-wrap:wrap;gap:6px"></div></div>
   </div>
   <div class="sheet-foot">
@@ -2777,9 +2773,16 @@ async function admCheckAdmin(){
   }catch(e){}
 }
 
+function admSentenceCase(s){
+  const t=(s||'').replace(/_/g,' ');
+  return t.charAt(0).toUpperCase()+t.slice(1);
+}
 function admFmtChip(key,label){
   return '<label class="fmt-chip" style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);font-size:12px;cursor:pointer">'+
-    '<input type="checkbox" value="'+esc(key)+'" style="width:14px;height:14px"> '+esc(label)+'</label>';
+    '<input type="checkbox" value="'+esc(key)+'" style="width:14px;height:14px"> '+esc(admSentenceCase(label))+'</label>';
+}
+function admCheckAll(gridId,checked){
+  $(gridId).querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked=checked);
 }
 
 const ADM_USERS_PAGE_SIZE=10;
@@ -3014,28 +3017,19 @@ async function admRemoveCity(display){
 async function admLoadConfig(){
   try{const c=await(await fetch('/api/config')).json();
     $('adm-script-url').value=c.auth_api_url||'';
-    $('adm-auth-url').value=c.user_auth_url||'';
-    $('adm-admin-key').value=c.admin_key||'';
     const urlEl=$('adm-url-status');
     if(c.auth_api_url){urlEl.textContent='✅';urlEl.title='URL configured';}
-    else{urlEl.textContent='⚠️';urlEl.title='Not configured - add URL and click Save, then Sync';}
-    const authEl=$('adm-auth-url-status');
-    if(c.user_auth_url){authEl.textContent='✅';authEl.title='URL configured';}
-    else{authEl.textContent='⚠️';authEl.title='Not configured - login will not work without this';}
+    else{urlEl.textContent='⚠️';urlEl.title='Not configured (fine for most users - only needed as a fallback)';}
   }catch(e){}
 }
 async function admSaveConfig(){
   try{
-    const r=await fetch('/api/admin/save_config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({auth_api_url:$('adm-script-url').value.trim(),user_auth_url:$('adm-auth-url').value.trim(),admin_key:$('adm-admin-key').value.trim()})});
+    const r=await fetch('/api/admin/save_config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({auth_api_url:$('adm-script-url').value.trim()})});
     const d=await r.json();toast(d.error||'Config saved');
     const url=$('adm-script-url').value.trim();
     const urlEl=$('adm-url-status');
     if(url){urlEl.textContent='✅';urlEl.title='URL saved - click Sync API Keys to activate';}
     else{urlEl.textContent='⚠️';urlEl.title='Not configured';}
-    const authUrl=$('adm-auth-url').value.trim();
-    const authEl=$('adm-auth-url-status');
-    if(authUrl){authEl.textContent='✅';authEl.title='URL saved';}
-    else{authEl.textContent='⚠️';authEl.title='Not configured - login will not work';}
   }catch(e){toast('Failed to save config');}
 }
 async function admSyncKeys(){
