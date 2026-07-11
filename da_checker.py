@@ -4,7 +4,6 @@ Tries multiple tools in sequence, caches results per domain.
 """
 
 import re
-import json
 import time
 import random
 import logging
@@ -25,46 +24,62 @@ def _extract_domain(url_or_domain):
     return parsed.netloc.replace("www.", "").lower()
 
 
-_WPB_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
-
-
 def _try_wpblogging101(driver, domain):
-    """wpblogging101.com's public DA/PA Checker tool (tools/da-pa-checker/). A plain
-    HTTP flow - load the page for a fresh nonce, then submit via the page's own
-    admin-ajax.php - the exact interaction a visitor performs; no bypassed access
-    control, no browser needed, so it's both faster and less fragile than the
-    Selenium scrapers below. Tried first since it returns clean JSON rather than a
-    number that has to be regexed out of rendered HTML."""
+    """wpblogging101.com's public DA/PA Checker tool (tools/da-pa-checker/). Drives
+    the page the same way a visitor does: type the domain, click Check, and if the
+    "Security Verification" modal appears, read the 4-digit code the page itself
+    displays in <span id="atools101_dapa_captcha_code"> and type it back into the
+    confirm box - the code is shown in plain text to any visitor, so this isn't
+    solving anything, just clicking through the same confirmation a human would.
+    Selenium is required (not plain HTTP) because the check now runs client-side
+    through this modal rather than returning JSON directly."""
     try:
-        s = requests.Session()
-        r = s.get("https://wpblogging101.com/tools/da-pa-checker/", headers=_WPB_HEADERS, timeout=15)
-        # No generic _is_blocked() check here - the page always ships a hidden
-        # (display:none) CAPTCHA modal container in its markup even on a normal
-        # load, which false-positives that check; a captcha-gated state comes back
-        # as an explicit "error" in the AJAX JSON response below instead, which IS
-        # checked, so a real block still can't produce a fabricated DA/PA value.
-        if r.status_code != 200:
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+
+        driver.get("https://wpblogging101.com/tools/da-pa-checker/")
+        wait = WebDriverWait(driver, 15)
+        box = wait.until(EC.presence_of_element_located((By.ID, "atools101_dapa_domains")))
+        box.clear()
+        box.send_keys(domain)
+        driver.find_element(By.ID, "atools101_dapa_check").click()
+
+        # Either the captcha modal or the results table shows up next.
+        wait.until(lambda d: d.find_element(By.ID, "atools101_dapa_captcha_container")
+                   .value_of_css_property("display") != "none"
+                   or d.find_elements(By.CSS_SELECTOR, "#atools101_tableBody tr"))
+
+        captcha = driver.find_element(By.ID, "atools101_dapa_captcha_container")
+        if captcha.value_of_css_property("display") != "none":
+            code = driver.find_element(By.ID, "atools101_dapa_captcha_code").text.strip()
+            if not code:
+                return None
+            inp = driver.find_element(By.ID, "atools101_dapa_captcha_input")
+            inp.clear()
+            inp.send_keys(code)
+            driver.find_element(By.ID, "atools101_dapa_captcha_submit").click()
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "#atools101_tableBody tr")))
+
+        row = driver.find_element(By.CSS_SELECTOR, "#atools101_tableBody tr")
+        cells = row.find_elements(By.TAG_NAME, "td")
+        if len(cells) < 5:
             return None
-        m = re.search(r"atools101DapaSecure\s*=\s*(\{[^}]*\})", r.text)
-        if not m:
+        row_domain = cells[0].text.strip().lower()
+        if domain.lower() not in row_domain and row_domain not in domain.lower():
             return None
-        cfg = json.loads(m.group(1))
-        nonce, ajax = cfg.get("nonce"), cfg.get("ajax")
-        if not nonce or not ajax:
-            return None
-        r2 = s.post(ajax, headers=_WPB_HEADERS, timeout=15,
-                     data={"action": "atools101_dapa_check", "url": domain, "_ajax_nonce": nonce})
-        if r2.status_code != 200:
-            return None
-        data = r2.json()
-        if data.get("error") or str(data.get("domain_name", "")).lower() != domain.lower():
-            return None
-        da_raw, pa_raw = str(data.get("da", "")).strip(), str(data.get("pa", "")).strip()
+        da_raw = cells[1].find_element(By.CLASS_NAME, "atools101-metric-value").text.strip()
+        pa_raw = cells[2].find_element(By.CLASS_NAME, "atools101-metric-value").text.strip()
         if not da_raw.isdigit():
             return None
         pa = int(pa_raw) if pa_raw.isdigit() else "N/A"
-        return {"da": int(da_raw), "pa": pa, "source": "wpblogging101.com"}
+        result = {"da": int(da_raw), "pa": pa, "source": "wpblogging101.com"}
+        try:
+            result["spam_score"] = cells[3].text.strip()
+            result["dr"] = cells[4].find_element(By.CLASS_NAME, "atools101-metric-value").text.strip()
+        except Exception:
+            pass
+        return result
     except Exception as e:
         logger.debug(f"wpblogging101 failed: {e}")
     return None

@@ -1202,6 +1202,24 @@ def _save_full_page_screenshot(driver, path):
         driver.save_screenshot(path)
 
 
+def _upload_ranking_screenshot(path):
+    """Upload a ranking SERP screenshot to catbox.moe (free, no signup, permanent
+    public hosting) so the exported CSV/sheet can carry a real shareable URL
+    instead of the /api/screenshot/<file> link, which only resolves while this
+    app's local server is running."""
+    try:
+        with open(path, "rb") as f:
+            r = http_requests.post("https://catbox.moe/user/api.php",
+                                    data={"reqtype": "fileupload"},
+                                    files={"fileToUpload": f}, timeout=30)
+        url = r.text.strip()
+        if r.status_code == 200 and url.startswith("http"):
+            return url
+    except Exception as e:
+        add_log(f"Screenshot upload failed: {e}")
+    return ""
+
+
 # --------------------------------------------------------------------------- #
 # Keyword ranking - hardened
 # --------------------------------------------------------------------------- #
@@ -1285,8 +1303,13 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                 ss_path = os.path.join(_domain_folder(domain, "ranking"), ss_name)
                 _save_full_page_screenshot(sess.driver, ss_path)
                 add_log(f"SERP screenshot saved: {ss_name}")
+                ss_url = _upload_ranking_screenshot(ss_path)
+                if ss_url:
+                    add_log(f"Screenshot URL: {ss_url}")
                 for m in page_matches:
                     m["screenshot"] = ss_name
+                    if ss_url:
+                        m["screenshot_url"] = ss_url
             except Exception as e:
                 add_log(f"Screenshot failed: {e}")
 

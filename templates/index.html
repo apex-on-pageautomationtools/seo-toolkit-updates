@@ -2218,7 +2218,8 @@ function appendRow(row,num,m){
       :'<span style="color:var(--text-3)">N/A</span>';
     const tr=document.createElement('tr');
     const ss=row.screenshot||'';
-    const ssCell=ss?'<a class="lnk" href="/api/screenshot/'+esc(ss)+'" target="_blank" title="View SERP screenshot">📷</a>':'<span style="color:var(--text-3)">N/A</span>';
+    const ssUrl=row.screenshot_url||(ss?'/api/screenshot/'+esc(ss):'');
+    const ssCell=ssUrl?'<a class="lnk" href="'+esc(ssUrl)+'" target="_blank" title="View SERP screenshot">📷</a>':'<span style="color:var(--text-3)">N/A</span>';
     const tp=row.target_page||'';
     const tpCell=tp?'<a class="lnk" href="'+esc(tp)+'" target="_blank" rel="noopener" title="'+esc(tp)+'">'+esc(tp.replace(/https?:\/\/(www\.)?/,''))+'</a>':'<span style="color:var(--text-3)">N/A</span>';
     if(tp){document.querySelectorAll('.col-target').forEach(el=>el.classList.remove('hidden'));}
