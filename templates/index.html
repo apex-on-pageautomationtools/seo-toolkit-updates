@@ -2374,7 +2374,13 @@ async function opPoll(){
     }
   }catch(e){}
 }
-function opDownload(){window.location.href='/api/onpage/download';}
+async function opDownload(){
+  try{
+    const r=await fetch('/api/onpage/download',{method:'HEAD'});
+    if(!r.ok){toast('Report file not found - it may have been moved/deleted, or the run failed. Try New Report.');return;}
+  }catch(e){toast('Could not reach the server. Try again.');return;}
+  window.location.href='/api/onpage/download';
+}
 async function opStop(){await fetch('/api/onpage/stop',{method:'POST'});toast('Stopping...');}
 function opFileUpload(input){
   const f=input.files[0];if(!f)return;

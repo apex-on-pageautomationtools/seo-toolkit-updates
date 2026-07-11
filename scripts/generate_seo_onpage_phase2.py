@@ -522,11 +522,29 @@ _GENERIC_TITLES = {
 }
 
 
+def _keyword_covered(text, keyword):
+    """True if every significant word of `keyword` appears somewhere in `text` - NOT
+    an exact contiguous-phrase match. A title like "Packing Services Adelaide" already
+    covers the keyword "packing adelaide" (both words present), even though the exact
+    phrase "packing adelaide" never appears as a substring - flagging that as
+    unoptimized was a false positive. Short stopwords are ignored so they can't force
+    a false "not covered".
+    """
+    if not keyword:
+        return True
+    words = [w for w in re.findall(r"[a-z0-9]+", keyword.lower()) if len(w) > 2]
+    if not words:
+        return keyword.lower() in text
+    return all(w in text for w in words)
+
+
 def _title_needs_suggestion(title, keywords=None):
     """Missing, a short generic nav-label title ('Home' / 'About' / 'Service'), or
     missing its target keyword entirely (not optimized for what the page is meant to
-    rank for). Length on its own is NOT a reason to flag a title - a long title (even
-    100-120 chars) is fine and is left alone."""
+    rank for - checked by word coverage, not an exact phrase match, so a title that
+    already contains every keyword word just phrased differently is left alone).
+    Length on its own is NOT a reason to flag a title - a long title (even 100-120
+    chars) is fine and is left alone."""
     if not title or title == MISSING:
         return True
     t = title.strip().lower()
@@ -534,25 +552,21 @@ def _title_needs_suggestion(title, keywords=None):
         return True
     if len(title.strip()) < 15:
         return True
-    if keywords:
-        primary = keywords[0].strip().lower()
-        if primary and primary not in t:
-            return True
+    if keywords and not _keyword_covered(t, keywords[0].strip()):
+        return True
     return False
 
 
 def _desc_needs_suggestion(desc, keywords=None):
     """Missing, too short to say anything useful, or missing its target keyword
-    entirely (not optimized)."""
+    entirely (not optimized) - checked by word coverage, not an exact phrase match."""
     if not desc or desc == MISSING:
         return True
     d = desc.strip().lower()
     if len(desc.strip()) < 50:
         return True
-    if keywords:
-        primary = keywords[0].strip().lower()
-        if primary and primary not in d:
-            return True
+    if keywords and not _keyword_covered(d, keywords[0].strip()):
+        return True
     return False
 
 
@@ -823,14 +837,22 @@ def write_meta_xlsx(metas, out_path):
     # 6=existing H1.
     existing_cols = {2, 4, 6}
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=ws.max_column):
+        max_len = 1
         for cell in row:
             cell.alignment = left
+            max_len = max(max_len, len(str(cell.value or "")))
             if cell.column in existing_cols:
                 val = str(cell.value or "").strip()
                 flagged = (not val) or val == MISSING
                 f = copy(cell.font)
                 cell.font = Font(name=f.name, size=f.size, bold=f.bold, italic=f.italic,
                                  color=("FFC00000" if flagged else "FF000000"))
+        # openpyxl never auto-computes row height for wrapped text (Excel only does
+        # that on open, and inconsistently) - without this, long suggested title/desc
+        # text overflowed into the row below and visually overlapped it. ~45 chars/line
+        # at this template's column widths, 15pt per wrapped line, floor of 30pt.
+        lines = max(1, -(-max_len // 45))
+        ws.row_dimensions[row[0].row].height = max(30, lines * 15)
     wb.save(out_path)
 
 
@@ -973,6 +995,54 @@ def _http(url, method="GET", timeout=20):
         return e.code, "", url
     except Exception:
         return 0, "", url
+
+
+def _wayback_proxies():
+    """Proxy pool passed through from web_app_batch.py's subprocess env (the user's
+    own configured proxies + the shared admin-managed pool) - Wayback's Save Page Now
+    blocks/rate-limits by IP fast, so this deliberately never submits from the app's
+    own direct connection."""
+    raw = os.environ.get("ONPAGE_PROXIES", "")
+    if not raw:
+        return []
+    try:
+        return [p for p in json.loads(raw) if p.get("host") and p.get("port")]
+    except Exception:
+        return []
+
+
+def _proxy_url(p):
+    auth = f"{p['user']}:{p['pass']}@" if p.get("user") else ""
+    return f"{p.get('type', 'http')}://{auth}{p['host']}:{p['port']}"
+
+
+def submit_wayback_page(url, max_tries=3, timeout=45):
+    """Submit `url` to the Wayback Machine's Save Page Now (web.archive.org/save),
+    rotating through a different proxy each attempt (archive.org blocks/limits by IP,
+    so retrying on the SAME IP would just fail the same way). Capped at `max_tries` so
+    a slow/blocked archive.org can never hang or fail the whole report - on exhausted
+    retries this just returns None and the report shows a manual-check note instead."""
+    import random
+    import requests
+    proxies_pool = _wayback_proxies()
+    attempts = (random.sample(proxies_pool, min(max_tries, len(proxies_pool)))
+                if proxies_pool else [None] * max_tries)
+    save_url = "https://web.archive.org/save/" + url
+    for proxy in attempts:
+        try:
+            kwargs = {}
+            if proxy:
+                pu = _proxy_url(proxy)
+                kwargs["proxies"] = {"http": pu, "https": pu}
+            r = requests.get(save_url, headers={"User-Agent": "Mozilla/5.0 SEOPhase2Bot"},
+                             timeout=timeout, allow_redirects=True, **kwargs)
+            loc = r.headers.get("Content-Location", "")
+            m = re.search(r'(/web/\d{10,}/https?://[^\s"\'<>]+)', loc or r.text)
+            if m:
+                return "https://web.archive.org" + m.group(1)
+        except Exception:
+            continue
+    return None
 
 
 def _resolve_gsc_creds(domain, account=None):
@@ -1144,9 +1214,29 @@ def audit_site(domain, pages_data, dry_run=False):
     # then look for any logo-like element within a window after it.
     f["has_footer_logo"] = _detect_footer_logo(home_html)
 
-    f["ext_count"] = len(home.get("external_links", []))
+    # Which external links, and on which page - across every target page, not just
+    # the homepage. Every report format's copy already says "found on the target
+    # pages checked" (plural), so ext_count itself is corrected to match that claim
+    # instead of secretly only ever counting the homepage's links.
+    f["external_links_detail"] = [
+        {"page": pd["url"], "link": u}
+        for pd in pages_data for u in pd.get("external_links", [])
+    ]
+    f["ext_count"] = len(f["external_links_detail"])
     f["lang"] = home.get("lang", "") or ""
     f["viewport"] = any(pd.get("viewport") for pd in pages_data)
+
+    # Wayback Machine "Save Page Now" submission - actually archives each target page
+    # (not just checking if an old snapshot already exists, like the site-level web
+    # archive note above) and records the resulting snapshot URL. Best-effort: a page
+    # that fails after its retries just gets a manual-check note in the report.
+    if dry_run:
+        f["wayback_submissions"] = []
+    else:
+        f["wayback_submissions"] = [
+            {"page": pd["url"], "archived_url": submit_wayback_page(pd["url"])}
+            for pd in pages_data
+        ]
 
     m = re.search(r'href="([^"]+)"', home.get("canonical", "") or "")
     f["home_canonical"] = m.group(1) if m else None
@@ -1310,7 +1400,10 @@ def capture_onpage_screenshots(domain, sitemap_url=None):
                     _w = 1366
                 # Sucuri's verdict sits at the very top - clip a fixed top region of
                 # the document so we never grab a scrolled 'check another URL' view.
-                h = 1300.0 if sucuri else float(height)
+                # 700 (not the full ~1300px page) keeps this to the verdict/summary
+                # card itself instead of also pulling in the Malware & Security /
+                # Blacklist Status detail cards further down.
+                h = 700.0 if sucuri else float(height)
                 cdp = {"format": "png", "captureBeyondViewport": True,
                        "clip": {"x": 0, "y": 0, "width": float(_w or 1366), "height": h, "scale": 1}}
             result = driver.execute_cdp_cmd("Page.captureScreenshot", cdp)
@@ -1330,12 +1423,19 @@ def capture_onpage_screenshots(domain, sitemap_url=None):
     _shot("homepage",  root + "/", height=900)
     _shot("robots",    root + "/robots.txt", height=700)
     _shot("canonical", root + "/", view_source=True)
+    _shot("lang",      root + "/", view_source=True)
     if sitemap_url:                                # only shoot a sitemap that exists
         _shot("sitemap", sitemap_url, height=760)
     _shot("serp",      f"https://www.google.com/search?q=site:{domain}", height=900)
     _shot("wayback",   f"https://web.archive.org/web/2/https://{domain}/", height=900)
     _shot("viewport",  root + "/", height=900)
     _shot("sucuri",    f"https://sitecheck.sucuri.net/results/https/{domain}", sucuri=True)
+    # Same URL the www_redirect_issue / has_custom_404 findings themselves check
+    # (audit_site()) - the alt www/non-www version, and a deliberately-nonexistent
+    # path - so the report can actually SHOW what was checked, not just claim it.
+    _alt_host = domain[4:] if domain.startswith("www.") else f"www.{domain}"
+    _shot("redirect",  f"https://{_alt_host}/", height=900)
+    _shot("the404",    root + "/sos-404-probe-zzz", height=900)
 
     # Broken-links image - reuse health_audit's pure (non-patchright) helpers.
     try:
@@ -1753,15 +1853,16 @@ def _sec_sitemap(h, findings, captured):
                       "- Custom/Static sites: Create a static sitemap.xml and upload to root folder\n"
                       "- Other CMS: Check your platform's documentation for sitemap generation")
 
-def _sec_redirection(h, findings):
+def _sec_redirection(h, findings, captured):
     h["ribbon"]("URL Redirection Issue Optimization")
     if findings.get("www_redirect_issue"):
         h["result"]("Redirection: The website runs with both www and non-www versions. We suggest redirecting "
                     "the www version to the non-www version using a 301 permanent redirect.")
     else:
         h["result"]("No redirection issue found on the website. It is good from a search engine point of view.")
+    h["shot"]("redirect", captured)
 
-def _sec_404(h, findings, root):
+def _sec_404(h, findings, root, captured):
     h["ribbon"]("Custom 404 Page Optimization")
     if not findings.get("has_custom_404"):
         h["label_body"]("404 Custom Page Suggestion:")
@@ -1769,6 +1870,7 @@ def _sec_404(h, findings, root):
                   "to the default page instead of a 404 page. We recommend creating a custom 404 page.")
     else:
         h["result"]("Result: A custom 404 page is present. It is good from an SEO point of view.")
+    h["shot"]("the404", captured)
 
 def _sec_canonical(h, findings, captured):
     d = h["d"]
@@ -1786,10 +1888,14 @@ def _sec_canonical(h, findings, captured):
 
 def _sec_external_links(h, findings, captured):
     h["ribbon"]("External Link Optimization")
-    h["result"](f"{findings.get('ext_count', 0)} external links found on the target pages checked.")
-    if findings.get('ext_count', 0) > 0:
+    detail = findings.get("external_links_detail") or []
+    h["result"](f"{findings.get('ext_count', len(detail))} external links found on the target pages checked.")
+    if detail:
         h["para_red"]("Please verify whether any external links are harmful or beneficial as per need.")
-    h["shot"]("externallinks", captured)
+        for item in detail[:30]:            # cap the listing - large sites can have hundreds
+            h["para"](f"  {item['link']}   (on {item['page']})")
+        if len(detail) > 30:
+            h["para"](f"  ...and {len(detail) - 30} more.")
 
 def _sec_broken_links(h, findings, captured):
     h["ribbon"]("Broken/Dead Link Optimization")
@@ -1909,6 +2015,24 @@ def _sec_web_archive(h, captured):
               "websites, to serve as evidence that something existed online, and was modified over time.")
     h["para_red"](f"Please check the web archive status at: "
                   f"https://web.archive.org/web/*/{root}/")
+    h["shot"]("wayback", captured)
+
+def _sec_wayback_submission(h, findings):
+    h["ribbon"]("Wayback Machine Submission")
+    h["para"]("Each target page was submitted to the Wayback Machine's Save Page Now "
+              "to create a fresh, dated snapshot as a trusted citation/backup of the "
+              "page's current state.")
+    subs = findings.get("wayback_submissions") or []
+    if not subs:
+        h["para_red"]("Not submitted (dry run or no target pages).")
+        return
+    for s in subs:
+        if s.get("archived_url"):
+            h["result"](f"{s['page']}")
+            h["green"](f"Archived: {s['archived_url']}")
+        else:
+            h["para_red"](f"{s['page']} - could not be archived after retries. "
+                          f"Please submit manually at https://web.archive.org/save")
 
 def _sec_viewport(h, findings, captured):
     h["ribbon"]("Meta viewport")
@@ -1974,8 +2098,8 @@ def _build_docx_james(domain, pages_data, findings, captured, brand, out_path):
     _sec_robots(h, findings, captured)
     _sec_indexing(h, findings, captured)
     _sec_sitemap(h, findings, captured)
-    _sec_redirection(h, findings)
-    _sec_404(h, findings, root)
+    _sec_redirection(h, findings, captured)
+    _sec_404(h, findings, root, captured)
     _sec_canonical(h, findings, captured)
     _sec_external_links(h, findings, captured)
     _sec_broken_links(h, findings, captured)
@@ -1987,6 +2111,7 @@ def _build_docx_james(domain, pages_data, findings, captured, brand, out_path):
     _sec_sucuri(h, findings, captured)
     _sec_noindex(h, findings, captured)
     _sec_web_archive(h, captured)
+    _sec_wayback_submission(h, findings)
     _sec_viewport(h, findings, captured)
     _sec_lang(h, findings, captured)
 

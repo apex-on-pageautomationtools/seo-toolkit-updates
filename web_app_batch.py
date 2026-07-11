@@ -87,11 +87,17 @@ WINDSCRIBE_DIR = os.path.join(BUNDLE_DIR, "extensions", "windscribe")
 SERPCOUNTER_DIR = os.path.join(BUNDLE_DIR, "extensions", "serpcounter")
 
 SCREENSHOTS_DIR = os.path.join(DATA_DIR, "screenshots")
+# A durable copy of each report's output, kept OUTSIDE the user-facing Downloads
+# folder - so "Download Report"/"Download ZIP" keeps working even if the user
+# deletes/moves the folder those reports were saved into. Only the latest report per
+# (category, domain) is kept - each new run overwrites the last, no manual cleanup
+# needed.
+REPORT_BACKUPS_DIR = os.path.join(DATA_DIR, "report_backups")
 
 PROFILE_POOL_SIZE = 5
 PROFILE_MAX_AGE_H = 168   # 7 days - keep (Google) cookies for human-like sessions; only wipe truly stale profiles
 
-for d in (UPLOADS_DIR, DOWNLOADS_DIR, SCREENSHOTS_DIR, PROFILES_DIR):
+for d in (UPLOADS_DIR, DOWNLOADS_DIR, SCREENSHOTS_DIR, PROFILES_DIR, REPORT_BACKUPS_DIR):
     os.makedirs(d, exist_ok=True)
 
 
@@ -281,6 +287,28 @@ def _domain_folder(domain, mode="ranking"):
     folder = os.path.join(DOWNLOADS_DIR, folder_name)
     os.makedirs(folder, exist_ok=True)
     return folder
+
+
+def _backup_report_path(category, domain, ext=".zip"):
+    """Where a durable backup copy of a report lives (outside the user-facing
+    Downloads folder) - see REPORT_BACKUPS_DIR."""
+    import re as _re
+    slug = _re.sub(r"[^a-z0-9._-]+", "_", (domain or "unknown").lower())
+    folder = os.path.join(REPORT_BACKUPS_DIR, category)
+    os.makedirs(folder, exist_ok=True)
+    return os.path.join(folder, f"{slug}{ext}")
+
+
+def _backup_report(category, domain, src_path):
+    """Copy a finished report into REPORT_BACKUPS_DIR so 'Download' keeps working
+    even if the user deletes/moves the folder it was originally saved into. Best
+    effort - a failed backup never breaks the actual report generation."""
+    try:
+        dest = _backup_report_path(category, domain, os.path.splitext(src_path)[1] or ".zip")
+        shutil.copy2(src_path, dest)
+        return dest
+    except Exception:
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -2899,8 +2927,10 @@ def _run_onpage_report(domain, targets_json, fmt, no_capture):
     """Run the on-page phase2 script as a subprocess, stream logs."""
     with onpage_lock:
         onpage_state.update({"status": "running", "log": [], "domain": to_domain(domain),
-                             "output_zip": "", "error_msg": "", "progress": "Checking working version..."})
+                             "output_zip": "", "output_zip_backup": "", "error_msg": "",
+                             "progress": "Checking working version..."})
     onpage_stop.clear()
+    activity(f"SEO On-Page report started for {to_domain(domain)} ({fmt})")
 
     def _log0(msg):
         with onpage_lock:
@@ -2957,6 +2987,14 @@ def _run_onpage_report(domain, targets_json, fmt, no_capture):
         gemini_key = CONFIG.get("gemini_api_key", "").strip()
         if gemini_key:
             proc_env["GEMINI_API_KEY"] = gemini_key
+        # Wayback Machine submission needs a proxy (archive.org blocks/limits by IP) -
+        # pass through the user's own saved proxies plus the shared admin-managed pool.
+        try:
+            wb_proxies = list(CONFIG.get("proxies", [])) + _shared_proxies()
+        except Exception:
+            wb_proxies = list(CONFIG.get("proxies", []))
+        if wb_proxies:
+            proc_env["ONPAGE_PROXIES"] = json.dumps(wb_proxies)
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1, cwd=SCRIPTS_DIR,
@@ -2990,9 +3028,11 @@ def _run_onpage_report(domain, targets_json, fmt, no_capture):
                           key=os.path.getmtime, reverse=True)
 
         if zips:
+            backup_path = _backup_report("onpage", domain, zips[0])
             with onpage_lock:
                 onpage_state["status"] = "completed"
                 onpage_state["output_zip"] = zips[0]
+                onpage_state["output_zip_backup"] = backup_path or ""
                 onpage_state["progress"] = "Report ready for download"
             _log(f"Report generated: {os.path.basename(zips[0])}")
         else:
@@ -3071,10 +3111,22 @@ def api_onpage_stop():
 def api_onpage_download():
     with onpage_lock:
         zip_path = onpage_state.get("output_zip", "")
+        backup_path = onpage_state.get("output_zip_backup", "")
+        domain = onpage_state.get("domain", "")
     if not zip_path or not os.path.exists(zip_path):
+        # Falls back to the durable backup copy (REPORT_BACKUPS_DIR) if the user
+        # deleted/moved the folder the report was originally saved into.
+        zip_path = backup_path if backup_path and os.path.exists(backup_path) else ""
+        if not zip_path and domain:
+            candidate = _backup_report_path("onpage", domain)
+            if os.path.exists(candidate):
+                zip_path = candidate
+    if not zip_path:
         return jsonify({"error": "No report available for download."}), 404
-    return send_file(zip_path, as_attachment=True,
+    resp = send_file(zip_path, as_attachment=True,
                      download_name=os.path.basename(zip_path))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 # --------------------------------------------------------------------------- #
