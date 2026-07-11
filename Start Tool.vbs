@@ -61,27 +61,45 @@ appUrl = "http://127.0.0.1:" & port
 ' Small wait for Flask to be fully ready
 WScript.Sleep 1000
 
-' Open in Edge app mode (clean window, no address bar)
-Dim edgePath
-edgePath = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-If Not FSO.FileExists(edgePath) Then
-    edgePath = "C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+' Open the UI in a real native window (pywebview + Windows' built-in WebView2 runtime -
+' same rendering engine as Edge, but its own taskbar icon/grouping, no address bar, no
+' Edge branding). Nothing new to install: WebView2 already ships with Edge on every
+' Windows 10/11 machine this app already requires. Runs SYNCHRONOUSLY (waits here for
+' the window to close) so its exit code tells us whether it actually opened - a
+' non-zero/fast exit falls back to the previous Edge --app launch so a machine with an
+' unusual .NET/WebView2 setup can still always open the tool.
+Dim nativeScript, nativeResult
+nativeScript = strDir & "\native_window.py"
+nativeResult = 1
+Dim nativeIcon
+nativeIcon = strDir & "\icon.ico"
+If FSO.FileExists(nativeScript) Then
+    nativeResult = WshShell.Run("""" & strDir & "\python\python.exe"" -s """ & nativeScript & """ """ & appUrl & """ """ & nativeIcon & """", 0, True)
 End If
 
-If FSO.FileExists(edgePath) Then
-    Dim appProfile
-    appProfile = WshShell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\SEO Toolkit Pro\edge_app"
-    ' Clear Edge favicon cache so the current app icon is always picked up
-    Dim iconCache
-    iconCache = appProfile & "\Default\Platform Notifications"
-    If FSO.FolderExists(iconCache) Then FSO.DeleteFolder iconCache, True
-    WshShell.Run "cmd /c del /q """ & appProfile & "\Default\Favicons*"" 2>nul & del /q """ & appProfile & "\Default\Web Applications\Manifest Resources\*\Icons\*"" 2>nul", 0, True
+If nativeResult <> 0 Then
+    ' Fall back to Edge app mode (clean window, no address bar)
+    Dim edgePath
+    edgePath = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+    If Not FSO.FileExists(edgePath) Then
+        edgePath = "C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+    End If
 
-    ' Open the app window DIRECTLY in Edge (no PowerShell helper). One antivirus
-    ' (Quick Heal) flagged app_launch.ps1's window-icon code as a threat and quarantined
-    ' it, which broke launching. The title bar + favicon already show the app icon; the
-    ' taskbar button groups under Edge, a harmless cosmetic Edge --app limitation.
-    WshShell.Run """" & edgePath & """ --app=" & appUrl & " --user-data-dir=""" & appProfile & """ --window-size=1100,820 --no-first-run --no-default-browser-check", 1, False
-Else
-    WshShell.Run appUrl, 1, False
+    If FSO.FileExists(edgePath) Then
+        Dim appProfile
+        appProfile = WshShell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\SEO Toolkit Pro\edge_app"
+        ' Clear Edge favicon cache so the current app icon is always picked up
+        Dim iconCache
+        iconCache = appProfile & "\Default\Platform Notifications"
+        If FSO.FolderExists(iconCache) Then FSO.DeleteFolder iconCache, True
+        WshShell.Run "cmd /c del /q """ & appProfile & "\Default\Favicons*"" 2>nul & del /q """ & appProfile & "\Default\Web Applications\Manifest Resources\*\Icons\*"" 2>nul", 0, True
+
+        ' Open the app window DIRECTLY in Edge (no PowerShell helper). One antivirus
+        ' (Quick Heal) flagged app_launch.ps1's window-icon code as a threat and quarantined
+        ' it, which broke launching. The title bar + favicon already show the app icon; the
+        ' taskbar button groups under Edge, a harmless cosmetic Edge --app limitation.
+        WshShell.Run """" & edgePath & """ --app=" & appUrl & " --user-data-dir=""" & appProfile & """ --window-size=1100,820 --no-first-run --no-default-browser-check", 1, False
+    Else
+        WshShell.Run appUrl, 1, False
+    End If
 End If
