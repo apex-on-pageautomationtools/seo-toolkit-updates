@@ -1347,6 +1347,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
               <button class="btn btn-primary" style="font-size:12px;padding:6px 16px" onclick="admOpenUserModal()">+ Add User</button>
             </span>
           </div>
+          <input type="text" id="adm-user-search" placeholder="Search by email or name..." oninput="admRenderUsersTable()" autocomplete="off" style="width:100%;padding:8px 10px;margin-bottom:10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
           <div id="adm-users-list" style="font-size:13px">Loading users...</div>
         </div>
 
@@ -2781,25 +2782,44 @@ function admFmtChip(key,label){
     '<input type="checkbox" value="'+esc(key)+'" style="width:14px;height:14px"> '+esc(label)+'</label>';
 }
 
+const ADM_USERS_PAGE_SIZE=10;
+let admUsersPage=1;
 async function admLoadUsers(){
   try{
     const r=await(await fetch('/api/admin/users')).json();
     if(r.error){$('adm-users-list').textContent=r.error;return;}
     ADM_USERS=r.users||[];
-    if(!ADM_USERS.length){$('adm-users-list').textContent='No users found.';return;}
-    const showBuilding=admIsSuper();
-    $('adm-users-list').innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Email</th><th style="padding:6px">Name</th><th style="padding:6px">Role</th>'+
-      (showBuilding?'<th style="padding:6px">Building</th>':'')+
-      '<th style="padding:6px">Device ID</th><th style="padding:6px;text-align:center">Approved</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
-      ADM_USERS.map(u=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px">'+esc(u.email)+'</td><td style="padding:6px">'+esc(u.name||'')+'</td><td style="padding:6px">'+esc(u.role||(u.is_admin?'admin':'user'))+'</td>'+
-        (showBuilding?'<td style="padding:6px">'+esc(u.building||'-')+'</td>':'')+
-        '<td style="padding:6px;font-family:monospace;font-size:11px">'+esc(u.mac||'')+'</td><td style="padding:6px;text-align:center">'+(u.approved?'<span style="color:var(--ok)">Yes</span>':'<span style="color:var(--err)">No</span>')+'</td><td style="padding:6px;white-space:nowrap">'+
-        '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admOpenUserModal(\''+esc(u.email)+'\')">Edit</button>'+
-        (!u.approved?'<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admApprove(\''+esc(u.email)+'\')">Approve</button>':
-        '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admReject(\''+esc(u.email)+'\')">Reject</button>')+
-        '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;color:var(--err)" onclick="admRemoveUser(\''+esc(u.email)+'\')">Remove</button>'+
-      '</td></tr>').join('')+'</tbody></table>';
+    admUsersPage=1;
+    admRenderUsersTable();
   }catch(e){$('adm-users-list').textContent='Failed to load users.';}
+}
+function admGoToUsersPage(p){admUsersPage=p;admRenderUsersTable();}
+function admRenderUsersTable(){
+  if(!ADM_USERS.length){$('adm-users-list').textContent='No users found.';return;}
+  const q=($('adm-user-search').value||'').trim().toLowerCase();
+  const filtered=q?ADM_USERS.filter(u=>(u.email||'').toLowerCase().includes(q)||(u.name||'').toLowerCase().includes(q)):ADM_USERS;
+  if(!filtered.length){$('adm-users-list').innerHTML='No users match "'+esc(q)+'".';return;}
+  const totalPages=Math.max(1,Math.ceil(filtered.length/ADM_USERS_PAGE_SIZE));
+  if(admUsersPage>totalPages)admUsersPage=totalPages;
+  const start=(admUsersPage-1)*ADM_USERS_PAGE_SIZE;
+  const pageRows=filtered.slice(start,start+ADM_USERS_PAGE_SIZE);
+  const showBuilding=admIsSuper();
+  let html='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:720px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Email</th><th style="padding:6px">Name</th><th style="padding:6px">Role</th>'+
+    (showBuilding?'<th style="padding:6px">Building</th>':'')+
+    '<th style="padding:6px">Device ID</th><th style="padding:6px;text-align:center">Approved</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
+    pageRows.map(u=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px;white-space:nowrap">'+esc(u.email)+'</td><td style="padding:6px;white-space:nowrap">'+esc(u.name||'')+'</td><td style="padding:6px">'+esc(u.role||(u.is_admin?'admin':'user'))+'</td>'+
+      (showBuilding?'<td style="padding:6px">'+esc(u.building||'-')+'</td>':'')+
+      '<td style="padding:6px;font-family:monospace;font-size:11px;white-space:nowrap">'+esc(u.mac||'')+'</td><td style="padding:6px;text-align:center">'+(u.approved?'<span style="color:var(--ok)">Yes</span>':'<span style="color:var(--err)">No</span>')+'</td><td style="padding:6px;white-space:nowrap">'+
+      '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admOpenUserModal(\''+esc(u.email)+'\')">Edit</button>'+
+      (!u.approved?'<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admApprove(\''+esc(u.email)+'\')">Approve</button>':
+      '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admReject(\''+esc(u.email)+'\')">Reject</button>')+
+      '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;color:var(--err)" onclick="admRemoveUser(\''+esc(u.email)+'\')">Remove</button>'+
+    '</td></tr>').join('')+'</tbody></table></div>';
+  html+='<div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;font-size:12px;color:var(--text-3)">'+
+    '<span>'+filtered.length+' user(s)'+(q?' (filtered)':'')+' - page '+admUsersPage+' of '+totalPages+'</span>'+
+    '<span><button class="btn btn-tonal" style="font-size:11px;padding:4px 12px;margin-right:6px" '+(admUsersPage<=1?'disabled':'')+' onclick="admGoToUsersPage('+(admUsersPage-1)+')">Prev</button>'+
+    '<button class="btn btn-tonal" style="font-size:11px;padding:4px 12px" '+(admUsersPage>=totalPages?'disabled':'')+' onclick="admGoToUsersPage('+(admUsersPage+1)+')">Next</button></span></div>';
+  $('adm-users-list').innerHTML=html;
 }
 
 async function admOpenUserModal(email){
@@ -2878,9 +2898,9 @@ async function admLoadBuildings(){
     if(r.error){$('adm-buildings-list').textContent=r.error;return;}
     ADM_BUILDINGS=r.buildings||[];
     if(!ADM_BUILDINGS.length){$('adm-buildings-list').textContent='No buildings configured yet.';return;}
-    $('adm-buildings-list').innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Building</th><th style="padding:6px">Sheet ID</th><th style="padding:6px">GSC Script URL</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
-      ADM_BUILDINGS.map(b=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px">'+esc(b.building)+'</td><td style="padding:6px;font-family:monospace;font-size:11px">'+esc((b.building_sheet_id||'').slice(0,18))+'...</td><td style="padding:6px;font-family:monospace;font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(b.gsc_script_url||'')+'</td>'+
-        '<td style="padding:6px"><button class="btn btn-tonal" style="font-size:10px;padding:2px 8px" onclick="admOpenBuildingModal(\''+esc(b.building)+'\')">Edit</button></td></tr>').join('')+'</tbody></table>';
+    $('adm-buildings-list').innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Building</th><th style="padding:6px">Sheet ID</th><th style="padding:6px">GSC Script URL</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
+      ADM_BUILDINGS.map(b=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px;white-space:nowrap">'+esc(b.building)+'</td><td style="padding:6px;font-family:monospace;font-size:11px;white-space:nowrap">'+esc((b.building_sheet_id||'').slice(0,18))+'...</td><td style="padding:6px;font-family:monospace;font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(b.gsc_script_url||'')+'</td>'+
+        '<td style="padding:6px;white-space:nowrap"><button class="btn btn-tonal" style="font-size:10px;padding:2px 8px" onclick="admOpenBuildingModal(\''+esc(b.building)+'\')">Edit</button></td></tr>').join('')+'</tbody></table></div>';
   }catch(e){$('adm-buildings-list').textContent='Failed to load buildings.';}
 }
 function admOpenBuildingModal(name){
