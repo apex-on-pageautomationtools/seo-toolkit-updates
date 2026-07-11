@@ -997,54 +997,6 @@ def _http(url, method="GET", timeout=20):
         return 0, "", url
 
 
-def _wayback_proxies():
-    """Proxy pool passed through from web_app_batch.py's subprocess env (the user's
-    own configured proxies + the shared admin-managed pool) - Wayback's Save Page Now
-    blocks/rate-limits by IP fast, so this deliberately never submits from the app's
-    own direct connection."""
-    raw = os.environ.get("ONPAGE_PROXIES", "")
-    if not raw:
-        return []
-    try:
-        return [p for p in json.loads(raw) if p.get("host") and p.get("port")]
-    except Exception:
-        return []
-
-
-def _proxy_url(p):
-    auth = f"{p['user']}:{p['pass']}@" if p.get("user") else ""
-    return f"{p.get('type', 'http')}://{auth}{p['host']}:{p['port']}"
-
-
-def submit_wayback_page(url, max_tries=3, timeout=45):
-    """Submit `url` to the Wayback Machine's Save Page Now (web.archive.org/save),
-    rotating through a different proxy each attempt (archive.org blocks/limits by IP,
-    so retrying on the SAME IP would just fail the same way). Capped at `max_tries` so
-    a slow/blocked archive.org can never hang or fail the whole report - on exhausted
-    retries this just returns None and the report shows a manual-check note instead."""
-    import random
-    import requests
-    proxies_pool = _wayback_proxies()
-    attempts = (random.sample(proxies_pool, min(max_tries, len(proxies_pool)))
-                if proxies_pool else [None] * max_tries)
-    save_url = "https://web.archive.org/save/" + url
-    for proxy in attempts:
-        try:
-            kwargs = {}
-            if proxy:
-                pu = _proxy_url(proxy)
-                kwargs["proxies"] = {"http": pu, "https": pu}
-            r = requests.get(save_url, headers={"User-Agent": "Mozilla/5.0 SEOPhase2Bot"},
-                             timeout=timeout, allow_redirects=True, **kwargs)
-            loc = r.headers.get("Content-Location", "")
-            m = re.search(r'(/web/\d{10,}/https?://[^\s"\'<>]+)', loc or r.text)
-            if m:
-                return "https://web.archive.org" + m.group(1)
-        except Exception:
-            continue
-    return None
-
-
 def _resolve_gsc_creds(domain, account=None):
     """Best-effort (token, property_url) from a connected GSC account, using the
     shared gsc_audit module. Returns (None, None) if nothing is configured - the
@@ -1225,18 +1177,6 @@ def audit_site(domain, pages_data, dry_run=False):
     f["ext_count"] = len(f["external_links_detail"])
     f["lang"] = home.get("lang", "") or ""
     f["viewport"] = any(pd.get("viewport") for pd in pages_data)
-
-    # Wayback Machine "Save Page Now" submission - actually archives each target page
-    # (not just checking if an old snapshot already exists, like the site-level web
-    # archive note above) and records the resulting snapshot URL. Best-effort: a page
-    # that fails after its retries just gets a manual-check note in the report.
-    if dry_run:
-        f["wayback_submissions"] = []
-    else:
-        f["wayback_submissions"] = [
-            {"page": pd["url"], "archived_url": submit_wayback_page(pd["url"])}
-            for pd in pages_data
-        ]
 
     m = re.search(r'href="([^"]+)"', home.get("canonical", "") or "")
     f["home_canonical"] = m.group(1) if m else None
@@ -2017,23 +1957,6 @@ def _sec_web_archive(h, captured):
                   f"https://web.archive.org/web/*/{root}/")
     h["shot"]("wayback", captured)
 
-def _sec_wayback_submission(h, findings):
-    h["ribbon"]("Wayback Machine Submission")
-    h["para"]("Each target page was submitted to the Wayback Machine's Save Page Now "
-              "to create a fresh, dated snapshot as a trusted citation/backup of the "
-              "page's current state.")
-    subs = findings.get("wayback_submissions") or []
-    if not subs:
-        h["para_red"]("Not submitted (dry run or no target pages).")
-        return
-    for s in subs:
-        if s.get("archived_url"):
-            h["result"](f"{s['page']}")
-            h["green"](f"Archived: {s['archived_url']}")
-        else:
-            h["para_red"](f"{s['page']} - could not be archived after retries. "
-                          f"Please submit manually at https://web.archive.org/save")
-
 def _sec_viewport(h, findings, captured):
     h["ribbon"]("Meta viewport")
     h["para"]("The viewport meta tag allows you to tell the mobile browser what size this virtual "
@@ -2111,7 +2034,6 @@ def _build_docx_james(domain, pages_data, findings, captured, brand, out_path):
     _sec_sucuri(h, findings, captured)
     _sec_noindex(h, findings, captured)
     _sec_web_archive(h, captured)
-    _sec_wayback_submission(h, findings)
     _sec_viewport(h, findings, captured)
     _sec_lang(h, findings, captured)
 

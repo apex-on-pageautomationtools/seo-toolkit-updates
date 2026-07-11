@@ -2987,14 +2987,6 @@ def _run_onpage_report(domain, targets_json, fmt, no_capture):
         gemini_key = CONFIG.get("gemini_api_key", "").strip()
         if gemini_key:
             proc_env["GEMINI_API_KEY"] = gemini_key
-        # Wayback Machine submission needs a proxy (archive.org blocks/limits by IP) -
-        # pass through the user's own saved proxies plus the shared admin-managed pool.
-        try:
-            wb_proxies = list(CONFIG.get("proxies", [])) + _shared_proxies()
-        except Exception:
-            wb_proxies = list(CONFIG.get("proxies", []))
-        if wb_proxies:
-            proc_env["ONPAGE_PROXIES"] = json.dumps(wb_proxies)
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1, cwd=SCRIPTS_DIR,
@@ -3696,7 +3688,7 @@ def api_auth_is_admin():
     elif result.get("error"):
         accts = auth._load_accounts()
         is_admin = accts.get(email, {}).get("is_admin", False)
-    return jsonify({"is_admin": is_admin, "role": role, "building": building})
+    return jsonify({"is_admin": is_admin, "role": role, "building": building, "email": email})
 
 # --------------------------------------------------------------------------- #
 # Admin config (Apps Script URL, API key sync)

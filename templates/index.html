@@ -385,6 +385,14 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
     </button>
   </div>
   <div class="sb-foot">
+    <button class="sb-item" data-tip="Check for updates" onclick="checkUpdates()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      <span class="sb-label">Check Updates</span>
+    </button>
+    <button class="sb-item" data-tip="Restart tool" onclick="restartTool()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+      <span class="sb-label">Restart</span>
+    </button>
     <button class="sb-item" data-tip="Settings" onclick="openSettings()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       <span class="sb-label">Settings</span>
@@ -1538,7 +1546,20 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
     </button>
   </div>
   <div class="sheet-body">
-    <div class="note accent" style="margin-bottom:18px">Saved proxies rotate automatically across keywords and on every block - the single biggest lever to cut CAPTCHA. user/pass optional.</div>
+    <div id="s-logged-in-as" style="font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:10px"></div>
+
+    <div class="sec-t">Change Password</div>
+    <div class="note" style="margin-bottom:8px">Update your account password - saved to your account immediately.</div>
+    <input type="password" id="cp-old" placeholder="Current password" autocomplete="current-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
+    <input type="password" id="cp-new" placeholder="New password (min 6 characters)" autocomplete="new-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
+    <input type="password" id="cp-confirm" placeholder="Confirm new password" autocomplete="new-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
+    <button class="btn btn-tonal" style="width:100%" onclick="changePassword()">Change Password</button>
+
+    <div class="sec-t" style="margin-top:22px">Downloads Folder</div>
+    <div class="note" style="margin-bottom:8px">All reports, CSVs, and screenshots save here. Leave blank for system Downloads folder.</div>
+    <input type="text" id="s-downloads-folder" placeholder="e.g. C:\Users\You\Downloads" autocomplete="off" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px">
+
+    <div class="note accent" style="margin-top:22px;margin-bottom:18px">Saved proxies rotate automatically across keywords and on every block - the single biggest lever to cut CAPTCHA. user/pass optional.</div>
 
     <div class="sec-t">Proxy Pool (<span id="pp-count">0</span>)</div>
     <div id="pp-list"></div>
@@ -1558,25 +1579,8 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       Add to pool
     </button>
 
-    <div class="sec-t" style="margin-top:22px">Downloads Folder</div>
-    <div class="note" style="margin-bottom:8px">All reports, CSVs, and screenshots save here. Leave blank for system Downloads folder.</div>
-    <input type="text" id="s-downloads-folder" placeholder="e.g. C:\Users\You\Downloads" autocomplete="off" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px">
-
-    <div class="sec-t" style="margin-top:22px">Change Password</div>
-    <div class="note" style="margin-bottom:8px">Update your account password - saved to your account immediately.</div>
-    <input type="password" id="cp-old" placeholder="Current password" autocomplete="current-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
-    <input type="password" id="cp-new" placeholder="New password (min 6 characters)" autocomplete="new-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
-    <input type="password" id="cp-confirm" placeholder="Confirm new password" autocomplete="new-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
-    <button class="btn btn-tonal" style="width:100%" onclick="changePassword()">Change Password</button>
-
     <div class="sec-t" style="margin-top:22px;color:var(--text-3)">API Keys & Credentials</div>
     <div class="note" style="margin-bottom:8px">API keys for PageSpeed, GSC, and Apps Script are managed by the admin in the <b>Admin</b> tab. Contact your admin to configure.</div>
-
-    <div class="sec-t" style="margin-top:22px;color:var(--text-3)">Software Updates</div>
-    <div class="note" style="margin-bottom:8px">Updates download automatically when you open the app. You can also check right now - no command line needed.</div>
-    <button class="btn btn-tonal" style="width:100%" id="btn-check-updates" onclick="checkUpdates()">Check for updates</button>
-    <div id="update-status" style="font-size:12px;color:var(--text-3);margin-top:8px"></div>
-    <button class="btn btn-tonal" style="width:100%;margin-top:8px" onclick="restartTool()">Restart tool</button>
   </div>
   <div class="sheet-foot">
     <button class="btn btn-tonal" style="flex:1" onclick="closeSettings()">Cancel</button>
@@ -1933,13 +1937,17 @@ function switchTab(m){
     $('status-txt').textContent='Idle';
     $('prog').style.width='0%';$('prog-lbl').textContent='';
   }
-  // For a batch tool, refresh the shared result count + log + live status from its own
+  // The shared #log box is written into directly by several tools (Crawl Tracker,
+  // the 4 batch checkers) - clear it on every switch, not just for batch tools, or
+  // another tool's stale leftover log lingers and looks like it came from whatever
+  // tab you're now on.
+  $('log').textContent='';
+  // For a batch tool, refresh the shared result count + live status from its own
   // job so the active tab shows the right tool's data (each runs independently). The
   // table rows are already in the DOM from background polling.
   if(BATCH.includes(m)){
     $('count').textContent=lastCounts[m]+(lastCounts[m]===1?' result':' results');
     $('btn-export').disabled=lastCounts[m]===0;
-    $('log').textContent='';
     poll(m);
   }
 }
@@ -2713,16 +2721,19 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('sheet').classLis
 async function checkUpdates(){
   const btn=$('btn-check-updates'), st=$('update-status');
   const old=btn?btn.textContent:''; if(btn){btn.disabled=true;btn.textContent='Checking...';} if(st)st.textContent='';
+  toast('Checking for updates...');
   try{
     const d=await(await fetch('/api/check-updates',{method:'POST'})).json();
+    let msg;
     if(!d.updated && d.reason){
-      st.textContent = /reach/i.test(d.reason) ? 'Could not reach the update server - check internet/firewall.' : d.reason;
+      msg = /reach/i.test(d.reason) ? 'Could not reach the update server - check internet/firewall.' : d.reason;
     }else if(d.updated && (d.updated_files||[]).length){
-      st.innerHTML='<span style="color:var(--ok)">Updated '+d.updated_files.length+' file(s). Please close and reopen the app to apply.</span>';
+      msg = 'Updated '+d.updated_files.length+' file(s). Please close and reopen the app to apply.';
     }else{
-      st.textContent='You are on the latest version.';
+      msg = 'You are on the latest version.';
     }
-  }catch(e){ if(st)st.textContent='Update check failed - try again.'; }
+    if(st)st.innerHTML=msg; toast(msg);
+  }catch(e){ const msg='Update check failed - try again.'; if(st)st.textContent=msg; toast(msg); }
   if(btn){btn.disabled=false;btn.textContent=old;}
 }
 async function autoCheckUpdates(){
@@ -2809,7 +2820,7 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ===================== admin ===================== */
-let MY_ADMIN_ROLE='',MY_ADMIN_BUILDING='',ADM_USERS=[],ADM_BUILDINGS=[],ADM_PROXIES=[];
+let MY_ADMIN_ROLE='',MY_ADMIN_BUILDING='',MY_EMAIL='',ADM_USERS=[],ADM_BUILDINGS=[],ADM_PROXIES=[];
 const admIsSuper=()=>MY_ADMIN_ROLE==='superadmin';
 const ALL_FORMATS=['james','omega','neon','xenon','gamma','sara','peta','deltafl',
   'deltafvr','deltaup','octal','camila','alpha','eta','kappa',
@@ -2823,6 +2834,8 @@ const ALL_TOOLS=[
 
 async function admCheckAdmin(){
   try{const r=await(await fetch('/api/auth/is_admin')).json();
+    MY_EMAIL=r.email||'';
+    const el=$('s-logged-in-as');if(el)el.textContent=MY_EMAIL?('Logged in as: '+MY_EMAIL):'';
     if(r.is_admin){
       $('tab-admin').style.display='';
       MY_ADMIN_ROLE=r.role||'admin';MY_ADMIN_BUILDING=r.building||'';
