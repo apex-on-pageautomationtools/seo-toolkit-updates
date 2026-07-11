@@ -34,37 +34,32 @@ def _log(msg):
         pass
 
 
-def _ensure_package(module_name, pip_name=None):
-    """Both pywebview and cffi ship in requirements.txt for fresh installs, but the
-    embedded Python bundle isn't itself distributed via OTA (too large; only source
-    files are) - so an existing install updated via OTA may predate one or both.
-    Rather than require a full reinstall, install silently in the background on first
-    run instead - small, self-contained packages, no user action, no prompt."""
+def _try_import(module_name):
     try:
         __import__(module_name)
         return True
     except ImportError:
-        pass
-    _log(f"{module_name} not found, attempting silent install of '{pip_name or module_name}'...")
+        return False
+
+
+def _background_install(missing):
+    """Fire-and-forget: kick off a DETACHED pip install for whatever's missing, so a
+    future launch has it, WITHOUT this launch waiting on it. A synchronous pip install
+    here (the previous approach) could hang for minutes with zero visible feedback if
+    the machine has no PyPI access (corporate network/firewall/offline) - that looked
+    exactly like "the tool isn't loading" since VBS runs this whole script hidden and
+    waits for it. Never block the actual window/fallback decision on a network call."""
     try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check",
-             pip_name or module_name],
-            timeout=90, capture_output=True, text=True,
+        pip_names = {"webview": "pywebview"}
+        args = [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check"]
+        args += [pip_names.get(m, m) for m in missing]
+        subprocess.Popen(
+            args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        if result.returncode != 0:
-            _log(f"pip install {pip_name or module_name} failed (exit {result.returncode}): "
-                 f"{result.stderr[-500:] if result.stderr else '(no stderr)'}")
-            return False
-        import importlib
-        importlib.invalidate_caches()
-        __import__(module_name)
-        _log(f"{module_name} installed and imported successfully.")
-        return True
+        _log(f"Kicked off background install (not waited on) for: {missing}")
     except Exception as e:
-        _log(f"_ensure_package({module_name}) failed: {type(e).__name__}: {e}")
-        return False
+        _log(f"Could not start background install: {type(e).__name__}: {e}")
 
 
 def main():
@@ -76,10 +71,15 @@ def main():
 
     _log(f"Starting native window for {url} (python: {sys.executable})")
 
-    # Best-effort; if either fails, the webview import below raises and the caller
-    # falls back to the Edge launch, same as any other failure.
-    _ensure_package("webview", pip_name="pywebview")
-    _ensure_package("cffi")
+    # Fast, local, no network: just check what's importable right now. If anything's
+    # missing, fail THIS launch immediately (falls back to Edge with no delay) and
+    # kick off a non-blocking background install so next launch can use the native
+    # window - never make the user wait on pip/network before they see anything.
+    missing = [m for m in ("webview", "cffi") if not _try_import(m)]
+    if missing:
+        _log(f"Missing package(s): {missing} - falling back to Edge this launch.")
+        _background_install(missing)
+        sys.exit(1)
 
     import webview
     _log(f"webview module OK: {webview.__file__}")
