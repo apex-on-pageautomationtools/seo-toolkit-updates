@@ -302,6 +302,16 @@ def get_admin_credentials():
     return None, None
 
 
+def get_any_credentials():
+    """(email, password) of the first logged-in account on this device, admin or
+    not. Used for server-side-only calls (e.g. fetching the shared proxy pool) that
+    need any valid authenticated user rather than specifically an admin."""
+    accounts = _load_accounts()
+    for em, acct in accounts.items():
+        return em, acct.get("password", "")
+    return None, None
+
+
 def get_allowed_formats():
     """Return the allowed formats for the currently logged-in user, or None (all allowed)."""
     accounts = _load_accounts()

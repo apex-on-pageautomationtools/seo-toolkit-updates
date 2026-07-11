@@ -2143,6 +2143,44 @@ def run_backlink_analysis(urls, domain, delay, headless, country, proxies,
         sess.quit()
 
 # --------------------------------------------------------------------------- #
+# Shared proxy pool (central sheet, admin-managed) - fetched server-side only,
+# never returned to the browser. Used as an OCCASIONAL fallback so the office
+# network's own IP doesn't take all the CAPTCHA heat - see _proxies_from_request.
+# --------------------------------------------------------------------------- #
+_shared_proxies_cache = {"data": [], "ts": 0}
+_shared_proxies_lock = threading.Lock()
+SHARED_PROXIES_TTL = 600
+SHARED_PROXY_USE_CHANCE = 0.2   # only when the user has no proxy of their own configured
+
+
+def _fetch_shared_proxies_now():
+    email, password = auth.get_any_credentials()
+    if not email:
+        return
+    try:
+        result = auth._api_call({"action": "proxies_list", "email": email, "password": password})
+        rows = result.get("proxies")
+        if isinstance(rows, list):
+            with _shared_proxies_lock:
+                _shared_proxies_cache["data"] = [r for r in rows if r.get("active", True)
+                                                  and r.get("host") and r.get("port")]
+                _shared_proxies_cache["ts"] = time.time()
+    except Exception:
+        pass
+
+
+def _shared_proxies():
+    with _shared_proxies_lock:
+        fresh = _shared_proxies_cache["data"] and (time.time() - _shared_proxies_cache["ts"] < SHARED_PROXIES_TTL)
+        data = list(_shared_proxies_cache["data"])
+    if not fresh:
+        _fetch_shared_proxies_now()
+        with _shared_proxies_lock:
+            data = list(_shared_proxies_cache["data"])
+    return data
+
+
+# --------------------------------------------------------------------------- #
 # Helpers for request parsing
 # --------------------------------------------------------------------------- #
 def _proxies_from_request(data):
@@ -2154,6 +2192,13 @@ def _proxies_from_request(data):
             "type": data.get("proxy_type", "http"), "host": ph, "port": pp,
             "user": (data.get("proxy_user") or "").strip(),
             "pass": (data.get("proxy_pass") or "").strip()})
+    if not proxies:
+        shared = _shared_proxies()
+        if shared and random.random() < SHARED_PROXY_USE_CHANCE:
+            pick = random.choice(shared)
+            proxies = [{"type": pick.get("type", "http"), "host": pick["host"], "port": pick["port"],
+                        "user": pick.get("user", ""), "pass": pick.get("pass", "")}]
+            add_log("Using a shared proxy for this run (occasional rotation to protect the office IP).")
     return proxies
 
 # --------------------------------------------------------------------------- #
@@ -3205,6 +3250,60 @@ def _gsc_webapp_url():
     return CONFIG.get("auth_api_url", "").strip()
 
 
+_gsc_mapping_cache = {"data": {}, "ts": 0, "url": None}
+_gsc_mapping_lock = threading.Lock()
+GSC_MAPPING_TTL = 300   # background refresh interval - keeps the cache warm so GSC
+                        # Audit / Health Audit's domain lookup never waits on a live
+                        # Sheets read
+
+
+def _fetch_gsc_mapping_now(webapp_url):
+    try:
+        resp = http_requests.get(webapp_url, params={"action": "get_config"}, timeout=20)
+        data = resp.json()
+        if data.get("success"):
+            with _gsc_mapping_lock:
+                _gsc_mapping_cache["data"] = data.get("mapping", {})
+                _gsc_mapping_cache["ts"] = time.time()
+                _gsc_mapping_cache["url"] = webapp_url
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _gsc_mapping():
+    """Cached domain -> GSC-account mapping. Kept warm by _gsc_mapping_prefetch_loop
+    (started at app launch); only makes a live Apps Script call itself if the
+    background loop hasn't populated the cache for this user's building yet."""
+    webapp_url = _gsc_webapp_url()
+    if not webapp_url:
+        return {}
+    with _gsc_mapping_lock:
+        have_current = _gsc_mapping_cache["url"] == webapp_url and _gsc_mapping_cache["data"]
+        data = dict(_gsc_mapping_cache["data"]) if have_current else {}
+    if not have_current:
+        _fetch_gsc_mapping_now(webapp_url)
+        with _gsc_mapping_lock:
+            data = dict(_gsc_mapping_cache["data"]) if _gsc_mapping_cache["url"] == webapp_url else {}
+    return data
+
+
+def _gsc_mapping_prefetch_loop():
+    """Waits for the logged-in user's building GSC URL to become available (a few
+    seconds to a couple minutes after login), fetches the domain->account mapping in
+    the background, then refreshes it every GSC_MAPPING_TTL seconds for the life of
+    the app - so GSC Audit / Health Audit's domain lookup is instant by the time
+    someone actually opens those tabs."""
+    while True:
+        webapp_url = _gsc_webapp_url()
+        if webapp_url:
+            _fetch_gsc_mapping_now(webapp_url)
+            time.sleep(GSC_MAPPING_TTL)
+        else:
+            time.sleep(15)
+
+
 def _run_gsc_audit(domain, email, fmt, headless, browser_name):
     with gsc_lock:
         gsc_state.update({"status": "running", "log": [], "domain": domain,
@@ -3638,6 +3737,47 @@ def api_admin_users():
 def api_admin_buildings():
     return jsonify(_admin_call("buildings_list"))
 
+@app.route("/api/admin/proxies")
+def api_admin_proxies():
+    """Admin/superadmin-only viewer for the shared proxy pool. This is the ONLY
+    place in the exe's UI that ever renders these passwords - regular users never
+    reach this route (no menu entry, and the backend still gates it via admin
+    credentials regardless)."""
+    return jsonify(_admin_call("proxies_list"))
+
+@app.route("/api/admin/save_proxy", methods=["POST"])
+def api_admin_save_proxy():
+    data = request.get_json(silent=True) or {}
+    result = _admin_call(
+        "proxies_upsert",
+        type=(data.get("type") or "http").strip(),
+        host=(data.get("host") or "").strip(),
+        port=(data.get("port") or "").strip(),
+        user=(data.get("user") or "").strip(),
+        **{"pass": (data.get("pass") or "").strip()},
+        region=(data.get("region") or "").strip(),
+        active=data.get("active", True),
+        notes=(data.get("notes") or "").strip(),
+        orig_host=(data.get("orig_host") or "").strip(),
+        orig_port=(data.get("orig_port") or "").strip(),
+    )
+    if result.get("success"):
+        activity(f"Admin saved shared proxy: {data.get('host')}:{data.get('port')}")
+        with _shared_proxies_lock:
+            _shared_proxies_cache["ts"] = 0   # force a fresh fetch next use
+    return jsonify(result)
+
+@app.route("/api/admin/delete_proxy", methods=["POST"])
+def api_admin_delete_proxy():
+    data = request.get_json(silent=True) or {}
+    result = _admin_call("proxies_delete", host=(data.get("host") or "").strip(),
+                          port=(data.get("port") or "").strip())
+    if result.get("success"):
+        activity(f"Admin removed shared proxy: {data.get('host')}:{data.get('port')}")
+        with _shared_proxies_lock:
+            _shared_proxies_cache["ts"] = 0
+    return jsonify(result)
+
 @app.route("/api/admin/save_building", methods=["POST"])
 def api_admin_save_building():
     data = request.get_json(silent=True) or {}
@@ -3794,9 +3934,7 @@ def api_gsc_check_for_domain():
     webapp_url = _gsc_webapp_url()
     if webapp_url:
         try:
-            resp = http_requests.get(webapp_url, params={"action": "get_config"}, timeout=15)
-            data = resp.json()
-            mapping = data.get("mapping", {}) if data.get("success") else {}
+            mapping = _gsc_mapping()
             info = mapping.get(domain)
             if info:
                 return jsonify({"connected": False,
@@ -3814,7 +3952,7 @@ def api_gsc_check_for_domain():
 
 @app.route("/api/gsc/domain-check")
 def api_gsc_domain_check():
-    """Check which GSC account owns a domain via Apps Script config."""
+    """Check which GSC account owns a domain via the cached Apps Script mapping."""
     domain = request.args.get("domain", "").strip().lower().replace("www.", "")
     if not domain:
         return jsonify({"error": "No domain"})
@@ -3822,11 +3960,7 @@ def api_gsc_domain_check():
     if not webapp_url:
         return jsonify({"found": False, "reason": "Apps Script URL not configured"})
     try:
-        resp = http_requests.get(webapp_url, params={"action": "get_config"}, timeout=15)
-        data = resp.json()
-        if not data.get("success"):
-            return jsonify({"found": False, "reason": data.get("error", "Sheet error")})
-        mapping = data.get("mapping", {})
+        mapping = _gsc_mapping()
         info = mapping.get(domain)
         if info:
             return jsonify({
@@ -4087,6 +4221,11 @@ def main():
     # Open browser unless suppressed by launcher
     if not os.environ.get("GRC_NO_BROWSER"):
         _open_app_window(url)
+
+    # Warm the GSC domain-mapping cache in the background so GSC Audit / Health
+    # Audit's domain lookup is instant by the time someone opens those tabs,
+    # instead of a live Sheets read on first use.
+    threading.Thread(target=_gsc_mapping_prefetch_loop, daemon=True).start()
 
     try:
         from werkzeug.serving import make_server
