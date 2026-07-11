@@ -416,7 +416,15 @@ def _parse_html(html, url, status):
         # Only the site's own images + Shopify CDN - drop trackers, fonts,
         # analytics pixels and third-party CDNs.
         if _allowed_image_host(src, site_host):
-            images.append({"src": src, "alt": (im.get("alt") or "").strip()})
+            # Lazy-load plugins/themes commonly leave the real alt text stored under a
+            # data-* attribute (or aria-label) until the image scrolls into view and
+            # JS swaps it onto the live `alt` attribute - which never happens in a
+            # non-interactive crawl, so `alt` alone reports "missing" even when the
+            # page's own source clearly has it. Check the common fallbacks too.
+            alt = (im.get("alt") or im.get("data-alt") or im.get("data-alt-text")
+                   or im.get("data-original-alt") or im.get("data-lazy-alt")
+                   or im.get("aria-label") or "").strip()
+            images.append({"src": src, "alt": alt})
     headings = [(h.name, h.get_text(strip=True)) for h in soup.find_all(re.compile(r"^h[1-6]$"))]
     site_reg = _registrable(urllib.parse.urlparse(url).netloc)
     internal, external = [], []
