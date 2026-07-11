@@ -4,6 +4,7 @@ Tries multiple tools in sequence, caches results per domain.
 """
 
 import re
+import json
 import time
 import random
 import logging
@@ -22,6 +23,51 @@ def _extract_domain(url_or_domain):
         d = "https://" + d
     parsed = urlparse(d)
     return parsed.netloc.replace("www.", "").lower()
+
+
+_WPB_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+
+
+def _try_wpblogging101(driver, domain):
+    """wpblogging101.com's public DA/PA Checker tool (tools/da-pa-checker/). A plain
+    HTTP flow - load the page for a fresh nonce, then submit via the page's own
+    admin-ajax.php - the exact interaction a visitor performs; no bypassed access
+    control, no browser needed, so it's both faster and less fragile than the
+    Selenium scrapers below. Tried first since it returns clean JSON rather than a
+    number that has to be regexed out of rendered HTML."""
+    try:
+        s = requests.Session()
+        r = s.get("https://wpblogging101.com/tools/da-pa-checker/", headers=_WPB_HEADERS, timeout=15)
+        # No generic _is_blocked() check here - the page always ships a hidden
+        # (display:none) CAPTCHA modal container in its markup even on a normal
+        # load, which false-positives that check; a captcha-gated state comes back
+        # as an explicit "error" in the AJAX JSON response below instead, which IS
+        # checked, so a real block still can't produce a fabricated DA/PA value.
+        if r.status_code != 200:
+            return None
+        m = re.search(r"atools101DapaSecure\s*=\s*(\{[^}]*\})", r.text)
+        if not m:
+            return None
+        cfg = json.loads(m.group(1))
+        nonce, ajax = cfg.get("nonce"), cfg.get("ajax")
+        if not nonce or not ajax:
+            return None
+        r2 = s.post(ajax, headers=_WPB_HEADERS, timeout=15,
+                     data={"action": "atools101_dapa_check", "url": domain, "_ajax_nonce": nonce})
+        if r2.status_code != 200:
+            return None
+        data = r2.json()
+        if data.get("error") or str(data.get("domain_name", "")).lower() != domain.lower():
+            return None
+        da_raw, pa_raw = str(data.get("da", "")).strip(), str(data.get("pa", "")).strip()
+        if not da_raw.isdigit():
+            return None
+        pa = int(pa_raw) if pa_raw.isdigit() else "N/A"
+        return {"da": int(da_raw), "pa": pa, "source": "wpblogging101.com"}
+    except Exception as e:
+        logger.debug(f"wpblogging101 failed: {e}")
+    return None
 
 
 def _try_rhinorank(driver, domain):
@@ -299,6 +345,7 @@ def check_domain_rating(domain, log_fn=None):
 
 
 _CHECKERS = [
+    ("wpblogging101.com", _try_wpblogging101),
     ("rhinorank.io", _try_rhinorank),
     ("websiteseochecker.com", _try_websiteseochecker),
     ("dapa-checker.com", _try_dapa_checker),
