@@ -361,11 +361,15 @@ def check_domain_rating(domain, log_fn=None):
 
 _CHECKERS = [
     ("wpblogging101.com", _try_wpblogging101),
-    ("rhinorank.io", _try_rhinorank),
-    ("websiteseochecker.com", _try_websiteseochecker),
-    ("dapa-checker.com", _try_dapa_checker),
-    ("da-checker.org", _try_da_checker_org),
-    ("teqtop.com", _try_teqtop),
+    # Disabled for now - wpblogging101.com alone is reliably returning real data,
+    # and skipping the rest saves the ~10-15s/tool wasted retrying dead sources on
+    # every uncached domain. Re-enable any of these by uncommenting if
+    # wpblogging101.com ever stops working.
+    # ("rhinorank.io", _try_rhinorank),
+    # ("websiteseochecker.com", _try_websiteseochecker),
+    # ("dapa-checker.com", _try_dapa_checker),
+    # ("da-checker.org", _try_da_checker_org),
+    # ("teqtop.com", _try_teqtop),
 ]
 
 
@@ -393,9 +397,6 @@ def check_da_pa(driver, url_or_domain, log_fn=None):
     if log_fn:
         log_fn(f"  Checking DA/PA for {domain}...")
 
-    # DR comes straight from Ahrefs' free public API - no browser needed.
-    dr_val = check_domain_rating(domain, log_fn=log_fn)
-
     # Save current URL to go back after
     try:
         original_url = driver.current_url
@@ -408,7 +409,11 @@ def check_da_pa(driver, url_or_domain, log_fn=None):
                 log_fn(f"  Trying {name}...")
             result = checker(driver, domain)
             if result and (isinstance(result.get("da"), int) and result["da"] > 0):
-                result["dr"] = dr_val
+                # wpblogging101 already returns a real DR alongside DA/PA in the same
+                # page load - use that instead of a separate Ahrefs API round trip.
+                # Only fall back to Ahrefs if this checker didn't provide one.
+                if not result.get("dr"):
+                    result["dr"] = check_domain_rating(domain, log_fn=log_fn)
                 _da_cache[domain] = result
                 if log_fn:
                     log_fn(f"  DA={result['da']}, DR={dr_val}, PA={result.get('pa','N/A')} (from {result['source']})")
@@ -425,7 +430,7 @@ def check_da_pa(driver, url_or_domain, log_fn=None):
                 log_fn(f"  {name} failed: {e}")
         time.sleep(random.uniform(1, 2))
 
-    fallback = {"da": "N/A", "pa": "N/A", "dr": dr_val, "source": "N/A"}
+    fallback = {"da": "N/A", "pa": "N/A", "dr": check_domain_rating(domain, log_fn=log_fn), "source": "N/A"}
     _da_cache[domain] = fallback
     if log_fn:
         log_fn(f"  DA/PA: could not retrieve from any tool")

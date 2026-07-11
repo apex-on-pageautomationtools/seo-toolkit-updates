@@ -377,8 +377,7 @@ def check_broken_links(domain, target_pages=None):
                 seen.add(u)
                 all_links.append(u)
 
-    broken = []
-    for u in all_links:
+    def _check_one(u):
         code = None
         for method in ("HEAD", "GET"):
             try:
@@ -392,12 +391,23 @@ def check_broken_links(domain, target_pages=None):
                 break
             except Exception:
                 code = 0
-        # Only genuinely dead links count as broken: 404 (Not Found) / 410 (Gone).
-        # 429 (rate-limited), 403/401/405 (bot-blocked), 5xx (temporary server errors)
-        # and timeouts are NOT broken links - they're the server refusing the automated
-        # request, so flagging them gives false "broken link" counts.
-        if code in (404, 410):
-            broken.append((u, code))
+        return u, code
+
+    # Links are checked independently of each other, so a small thread pool checks
+    # them concurrently instead of one HEAD/GET at a time - same per-link logic and
+    # same 404/410-only broken criteria below, just not serialized.
+    import concurrent.futures
+    broken = []
+    if all_links:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+            for u, code in pool.map(_check_one, all_links):
+                # Only genuinely dead links count as broken: 404 (Not Found) / 410 (Gone).
+                # 429 (rate-limited), 403/401/405 (bot-blocked), 5xx (temporary server
+                # errors) and timeouts are NOT broken links - they're the server
+                # refusing the automated request, so flagging them gives false
+                # "broken link" counts.
+                if code in (404, 410):
+                    broken.append((u, code))
     return len(all_links), broken
 
 

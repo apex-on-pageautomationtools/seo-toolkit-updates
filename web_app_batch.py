@@ -446,7 +446,10 @@ def autosave():
                     "results": list(state["results"]),
                     "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         with open(_autosave_file(mode), "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f)   # compact (no indent) - this file is only ever read back by
+                                  # load_autosave(), never by a human, and it's rewritten on
+                                  # every item in a run so skipping pretty-printing keeps that
+                                  # per-item write cheap without changing what's saved
     except Exception:
         pass
 
@@ -3911,6 +3914,22 @@ def api_gsc_projects():
     return jsonify([{"name": p.get("name", ""), "properties": p.get("properties", "")}
                     for p in projects])
 
+_gsc_account_props_cache = {}
+GSC_ACCOUNT_PROPS_TTL = 300   # a connected account's property list rarely changes
+                               # mid-session - avoids a live token refresh + API call
+                               # per connected account on every domain checked in the UI
+
+
+def _gsc_account_properties(email):
+    cached = _gsc_account_props_cache.get(email)
+    if cached and (time.time() - cached[0]) < GSC_ACCOUNT_PROPS_TTL:
+        return cached[1]
+    token = gsc_audit.get_access_token(email)
+    props = gsc_audit.list_properties(token)
+    _gsc_account_props_cache[email] = (time.time(), props)
+    return props
+
+
 @app.route("/api/gsc/check-for-domain")
 def api_gsc_check_for_domain():
     """Check if GSC is connected locally for a domain; if not, check sheet mapping."""
@@ -3921,8 +3940,7 @@ def api_gsc_check_for_domain():
     connected = [a for a in accounts if a.get("has_refresh")]
     for acct in connected:
         try:
-            token = gsc_audit.get_access_token(acct["email"])
-            props = gsc_audit.list_properties(token)
+            props = _gsc_account_properties(acct["email"])
             for p in props:
                 site = (p.get("siteUrl") or "").lower()
                 if domain in site:

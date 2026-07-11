@@ -325,12 +325,23 @@ def _crawl_selenium(url, keywords):
             time.sleep(0.4)
         html = driver.page_source or ""
         final_url = driver.current_url or url
+        # Chrome exposes the navigation's real HTTP status via the Navigation Timing
+        # API - when available this avoids a second full HTTP request purely to
+        # recover the status code Selenium already resolved during driver.get().
+        try:
+            status = driver.execute_script(
+                "try{return performance.getEntriesByType('navigation')[0].responseStatus}"
+                "catch(e){return null}")
+        except Exception:
+            status = None
     except Exception as e:
         log(f"   [warn] selenium crawl failed for {url}: {type(e).__name__}: {e}")
         return None
     if not html or len(html) < 200:
         return None
-    return _parse_html(html, final_url, _op_http_status(url))
+    if not status:
+        status = _op_http_status(url)
+    return _parse_html(html, final_url, status)
 
 
 def _crawl_rendered(url, keywords):
@@ -1229,11 +1240,37 @@ def capture_onpage_screenshots(domain, sitemap_url=None):
     def path(k):
         return os.path.join(out_dir, f"{domain}_seo_{k}.png")
 
+    def _wait_settled(max_wait):
+        """Poll for hydration-stable instead of always sleeping the full max_wait -
+        same idea as _crawl_selenium's wait, just capped at the old fixed sleep time
+        so a shot never waits LONGER than before, only shorter when the page settles
+        early (result is unaffected either way - just less idle waiting)."""
+        last, stable, elapsed, step = -1, 0, 0.0, 0.4
+        while elapsed < max_wait:
+            try:
+                ready = driver.execute_script("return document.readyState")
+                blen = driver.execute_script(
+                    "return (document.body ? document.body.innerText.length : 0)")
+            except Exception:
+                break
+            if ready == "complete" and blen > 0 and blen == last:
+                stable += 1
+                if stable >= 2:
+                    return
+            else:
+                stable = 0
+            last = blen
+            _t.sleep(step)
+            elapsed += step
+
     def _shot(key, url, height=900, view_source=False, sucuri=False):
         p = path(key)
         try:
             driver.get(("view-source:" + url) if view_source else url)
-            _t.sleep(15 if sucuri else 4)          # let the page (or Sucuri scan) settle
+            if view_source:
+                _t.sleep(4)          # view-source: pages don't hydrate normally - keep the fixed wait
+            else:
+                _wait_settled(15 if sucuri else 4)
             # Google serves headless browsers a reCAPTCHA / "unusual traffic" wall
             # instead of results - a screenshot of that is useless, so skip it (the
             # indexing section falls back to a text note / GSC data).
