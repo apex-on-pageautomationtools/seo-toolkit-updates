@@ -503,15 +503,38 @@ _GENERIC_TITLES = {
 }
 
 
-def _title_needs_suggestion(title):
-    """Missing, or a short generic nav-label title like 'Home' / 'About' / 'Service'
-    that carries no real SEO signal."""
+def _title_needs_suggestion(title, keywords=None):
+    """Missing, a short generic nav-label title ('Home' / 'About' / 'Service'), or
+    missing its target keyword entirely (not optimized for what the page is meant to
+    rank for). Length on its own is NOT a reason to flag a title - a long title (even
+    100-120 chars) is fine and is left alone."""
     if not title or title == MISSING:
         return True
     t = title.strip().lower()
     if t in _GENERIC_TITLES:
         return True
-    return len(title.strip()) < 15
+    if len(title.strip()) < 15:
+        return True
+    if keywords:
+        primary = keywords[0].strip().lower()
+        if primary and primary not in t:
+            return True
+    return False
+
+
+def _desc_needs_suggestion(desc, keywords=None):
+    """Missing, too short to say anything useful, or missing its target keyword
+    entirely (not optimized)."""
+    if not desc or desc == MISSING:
+        return True
+    d = desc.strip().lower()
+    if len(desc.strip()) < 50:
+        return True
+    if keywords:
+        primary = keywords[0].strip().lower()
+        if primary and primary not in d:
+            return True
+    return False
 
 
 def _best_rank_for_page(keywords, keyword_ranks):
@@ -537,12 +560,14 @@ def suggest_meta(page_data, keywords, brand, keyword_ranks=None):
     (GEMINI_API_KEY) when available, else a content-aware heuristic (never a bare
     "keyword | brand" slam-together).
 
-    A title is only suggested when it's missing or a short generic nav-label (e.g.
-    "Home", "About", "Service"). If the page already ranks in the top 20 for one of
-    its keywords (per an optional ranking column in the keyword sheet), the title
-    suggestion is skipped - a working title should not get overwritten - and the
-    sheet instead says to check it against the ranking. A description is suggested
-    whenever the existing one is missing."""
+    A title is only suggested when it's missing, a short generic nav-label (e.g.
+    "Home", "About", "Service"), or missing its target keyword entirely - length on
+    its own is never a reason (a long title, even 100-120 chars, is left alone). If
+    the page already ranks in the top 20 for one of its keywords (per an optional
+    ranking column in the keyword sheet), the title suggestion is skipped - a working
+    title should not get overwritten - and the sheet instead says to check it against
+    the ranking. A description is suggested whenever it's missing, too short, or
+    missing its target keyword (not optimized)."""
     existing_title = page_data["title"]
     existing_desc = page_data["description"]
     existing_h1 = page_data["h1"]
@@ -551,9 +576,9 @@ def suggest_meta(page_data, keywords, brand, keyword_ranks=None):
 
     best_rank = _best_rank_for_page(keywords, keyword_ranks)
     ranked_well = best_rank is not None and best_rank <= 20
-    title_flagged = _title_needs_suggestion(existing_title)
+    title_flagged = _title_needs_suggestion(existing_title, keywords)
     need_title = title_flagged and not ranked_well
-    need_desc = (not existing_desc) or existing_desc == MISSING
+    need_desc = _desc_needs_suggestion(existing_desc, keywords)
 
     suggested_title = None
     suggested_desc = None
