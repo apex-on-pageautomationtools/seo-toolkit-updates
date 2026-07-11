@@ -5990,6 +5990,235 @@ def _build_docx_sara(domain, pages_data, findings, captured, brand, out_path):
     doc.save(out_path)
 
 
+def _build_docx_theta(domain, pages_data, findings, captured, brand, out_path):
+    """Theta - verified against "On-Page-Suggestion-Report - krbrokers.com.docx".
+    Section banners are a full 4-sided teal (#215868) border + fill with white bold
+    13pt text (thicker/different from Neon's gold-bottom-only variant of the same
+    teal - both are legitimately different in their own reference files, not a case
+    of one copying the other). "Existing/Recommended URL Structure" is red/green
+    labeled where the reference shows it. Ends with a Keyword/Landing Page table
+    built from each page's own assigned keywords."""
+    from docx.shared import Pt, RGBColor
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    doc, h = _setup_docx(domain)
+    root = h["root"]; d = h["d"]; FONT = h["FONT"]
+
+    BLACK = RGBColor(0x00, 0x00, 0x00)
+    WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+    RED = RGBColor(0xFF, 0x00, 0x00)
+    GREEN = RGBColor(0x00, 0xB0, 0x50)
+
+    def _run(p, text, bold=False, color=BLACK, size=12):
+        r = p.add_run(text)
+        r.font.name = FONT
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        if color is not None:
+            r.font.color.rgb = color
+        return r
+
+    def banner(text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(10)
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=True, color=WHITE, size=13)
+        pPr = p._p.get_or_add_pPr()
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:fill'), '215868')
+        shd.set(qn('w:val'), 'clear')
+        pPr.append(shd)
+        pBdr = OxmlElement('w:pBdr')
+        for side in ('top', 'left', 'bottom', 'right'):
+            edge = OxmlElement(f'w:{side}')
+            edge.set(qn('w:val'), 'single')
+            edge.set(qn('w:sz'), '30')
+            edge.set(qn('w:space'), '0')
+            edge.set(qn('w:color'), '215868')
+            pBdr.append(edge)
+        pPr.append(pBdr)
+        return p
+
+    def body(text, bold=False):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=bold, color=BLACK, size=12)
+        return p
+
+    def labeled(label, text="", label_color=BLACK):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, label, bold=True, color=label_color, size=12)
+        if text:
+            _run(p, text, bold=False, color=BLACK, size=12)
+        return p
+
+    def shot(key):
+        src = (captured or {}).get(key)
+        if src and Path(src).exists():
+            try:
+                hr._add_bordered_image(doc, src)
+            except Exception:
+                pass
+
+    home_url = pages_data[0]["url"] if pages_data else root + "/"
+
+    # ---- Title ----
+    p = doc.add_paragraph()
+    _run(p, "On-Page Suggestion Report", bold=True, color=BLACK, size=20)
+    p = doc.add_paragraph()
+    _run(p, d.capitalize(), bold=True, color=BLACK, size=16)
+    body("All the measures that can be applied to the website in order to get/improve the "
+         "website in search ranking are called On-Page optimization. The role of a page "
+         "optimization report is imperative and has to be done with care.")
+    body("This report contains all the issues and suggestions to optimize the website, "
+         "follow the suggestion and do changes accordingly.")
+    body("All the following On-page factors and the given suggestions need attention and "
+         "should be fixed likewise if required to do so.")
+    body("Required changes need to be done ASAP as they often play a major role in "
+         "acquiring a good position in SERP. In time changes boost the SEO process "
+         "positively.")
+
+    # ---- Landing Pages (meta) ----
+    banner("Optimization of Landing Pages")
+    body("We have suggested Meta suggestions (Meta Title & Meta Description) including "
+         "Heading tags in the attached file. Kindly find the attached sheet for details.")
+
+    # ---- URLs ----
+    banner("Optimization of URLs")
+    body("An optimized URL structure refers to a clean, readable, and SEO-friendly format "
+         "of website addresses. Please review the site's URL structure manually and "
+         "shorten/simplify any URL containing special characters, dates, or unnecessary "
+         "parameters - redirect the existing URL to the recommended one using a 301 "
+         "permanent redirect after any change.")
+
+    # ---- Robots.txt ----
+    banner("Optimization of Robots.txt File")
+    if findings.get("robots_found"):
+        body("Optimized robots.txt file found in your website. It is good from search "
+             "engine point of view.")
+    else:
+        body("Robots.txt file not found on the website. An optimized robots.txt file has "
+             "been prepared; please upload it to the root folder of the website.")
+    shot("robots")
+
+    # ---- Image Alt ----
+    banner("Image Alt Tag and Image Optimization")
+    alt_missing = findings.get("alt_missing", 0)
+    if alt_missing:
+        body(f"Image Alt tag missing on {alt_missing} image(s) across the target pages of "
+             "the website. It is not good from search engine point of view - kindly find "
+             "the attached Image Alt Tag Suggestion sheet.")
+    else:
+        body("Image Alt tag found in all target pages of the website. It is good from "
+             "search engine point of view.")
+
+    # ---- Hyperlinking ----
+    banner("Optimization of Hyperlinks")
+    body("We recommend reviewing hyperlinking across the website's key pages (footer, "
+         "navigation, in-content links) to ensure every important link points to the "
+         "correct destination and no link is missing or broken.")
+
+    # ---- External Links ----
+    banner("Optimization of External Links")
+    ext_count = findings.get("ext_count", 0)
+    body(f"{ext_count} external link(s) found in the website. It is good from search "
+         "engine point of view.")
+    shot("externallinks")
+
+    # ---- Broken Links ----
+    banner("Broken Link Optimization (Landing Pages)")
+    broken = findings.get("broken_links") or []
+    if broken:
+        body(f"{len(broken)} broken link(s) found in your website. It is not good from "
+             "search engine point of view. Kindly find the attached Broken Links sheet "
+             "for details.")
+    else:
+        body("No broken links found on the website. It is good from search engine point "
+             "of view.")
+    shot("brokenlinks")
+
+    # ---- Text Content ----
+    banner("Text Content Optimization (Landing Pages)")
+    body("Low Keyword Density Content: we recommend reviewing target pages with thin or "
+         "low keyword-density content and rewriting key passages to more clearly reflect "
+         "each page's target keyword(s).")
+    body("Add More Content: pages with very little content should be expanded with "
+         "unique, keyword-relevant copy to give search engines more context about the "
+         "page's topic.")
+
+    # ---- Canonical ----
+    banner("Canonical Tag Optimization (Landing Pages)")
+    if findings.get("canonical_issue"):
+        body("We noticed a canonical issue on some target page(s). Kindly find the "
+             "attached Canonical Tag Suggestions sheet for the recommended canonical tag "
+             "per page.")
+    else:
+        body("No canonical issue found on the target pages. It is good from search engine "
+             "point of view.")
+    shot("canonical")
+
+    # ---- Redirection ----
+    banner("URL Redirection Issue (Landing Pages)")
+    if findings.get("www_redirect_issue") or findings.get("url_changes"):
+        body("We identified a redirection issue on the website. We suggest redirecting "
+             "all URL variants to a single canonical version using a 301 permanent "
+             "redirect.")
+    else:
+        body("No redirection issue found on the website. It is good from a search engine "
+             "point of view.")
+
+    # ---- Sitemap ----
+    banner("Website XML Site Map Optimization")
+    if findings.get("sitemap_found"):
+        body("sitemap.xml file found in your website. It is good from search engine "
+             "point of view.")
+    else:
+        body("sitemap.xml file not found in your website. An optimized sitemap file has "
+             "been prepared for your website - please add it to the website's root "
+             "directory.")
+    shot("sitemap")
+
+    # ---- Security ----
+    banner("Site Security Check")
+    if findings.get("sucuri_clean") is False:
+        body(f"Security issues were detected on your website. Please review and fix them "
+             f"at https://sitecheck.sucuri.net/results/https/{d}/.")
+    else:
+        body("We didn't find any kind of security issue on your website. It's good from "
+             "SEO point of view.")
+
+    # ---- Additional Suggestions ----
+    banner("Additional Suggestions")
+    labeled("Note for FAQ's: ",
+            "We recommend adding relevant FAQs related to the target keywords on the "
+            "target pages. FAQ sections help address common user queries, improve "
+            "content relevance, and increase keyword coverage naturally. They also "
+            "enhance the user experience by providing quick answers to important "
+            "questions and can improve the chances of earning rich results (FAQ "
+            "snippets) in search engines, which may increase visibility and "
+            "click-through rates.")
+
+    # ---- Keywords and Landing Pages ----
+    banner("Keywords and Landing Pages")
+    kw_rows = [(kw, pd["url"]) for pd in pages_data for kw in (pd.get("keywords") or [])]
+    if kw_rows:
+        table = doc.add_table(rows=1, cols=2)
+        table.style = "Table Grid"
+        hdr = table.rows[0].cells
+        _run(hdr[0].paragraphs[0], "Keyword", bold=True, color=BLACK, size=12)
+        _run(hdr[1].paragraphs[0], "Landing Page", bold=True, color=BLACK, size=12)
+        for kw, url in kw_rows:
+            row = table.add_row().cells
+            _run(row[0].paragraphs[0], kw, bold=False, color=BLACK, size=11)
+            _run(row[1].paragraphs[0], url, bold=False, color=BLACK, size=11)
+    else:
+        body("No target keyword(s) were provided for this report.")
+
+    doc.save(out_path)
+
+
 def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, fmt="james"):
     """Dispatch to the format-specific DOCX builder - builds EXACTLY the selected
     format, or raises rather than silently defaulting to another one."""
@@ -6002,6 +6231,7 @@ def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, f
         "deltaup": _build_docx_deltaup, "octal": _build_docx_octal,
         "camila": _build_docx_camila, "alpha": _build_docx_alpha,
         "eta": _build_docx_eta, "kappa": _build_docx_kappa,
+        "theta": _build_docx_theta,
     }
     fn = builders.get(str(fmt or "").strip().lower())
     if not fn:
@@ -6019,7 +6249,7 @@ def main():
     ap.add_argument("--out", default=str(OUTPUT_DIR))
     ap.add_argument("--dry-run", action="store_true", help="use mock crawl data (no network)")
     ap.add_argument("--no-capture", action="store_true", help="skip live screenshots (text-only docx)")
-    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma", "sara", "peta", "deltafl", "deltafvr", "deltaup", "octal", "camila", "alpha", "eta", "kappa"],
+    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma", "sara", "peta", "deltafl", "deltafvr", "deltaup", "octal", "camila", "alpha", "eta", "kappa", "theta"],
                     help="Report sub-format: james (Driftzine), omega (alltechco), neon (sumitechengineers), xenon, gamma (Hawkeev), sara (teal template)")
     ap.add_argument("--gsc-token", default=None, help="GSC API access token for URL inspection")
     ap.add_argument("--property-url", default=None, help="GSC property URL (e.g. sc-domain:example.com)")
