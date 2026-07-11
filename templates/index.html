@@ -1340,20 +1340,23 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
 
         <!-- User Management -->
         <div class="card" style="margin-bottom:16px">
-          <div class="card-t" style="margin-bottom:12px">User Management</div>
-          <div style="margin-bottom:14px;padding:12px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border)">
-            <div style="font-weight:700;font-size:13px;margin-bottom:10px">Add New User</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-              <input type="text" id="adm-new-email" placeholder="Email" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
-              <input type="password" id="adm-new-pass" placeholder="Password" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
-              <input type="text" id="adm-new-name" placeholder="Name (optional)" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
-              <input type="text" id="adm-new-mac" placeholder="Device ID (optional)" autocomplete="off" style="padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
-            </div>
-            <button class="btn btn-primary" style="font-size:12px;padding:6px 18px" onclick="admAddUser()">Add User</button>
+          <div class="card-t" style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+            <span>User Management</span>
+            <span>
+              <button class="btn btn-tonal" style="font-size:12px;padding:6px 16px;margin-right:6px" onclick="admOpenBulkModal()">Bulk Add</button>
+              <button class="btn btn-primary" style="font-size:12px;padding:6px 16px" onclick="admOpenUserModal()">+ Add User</button>
+            </span>
           </div>
           <div id="adm-users-list" style="font-size:13px">Loading users...</div>
+        </div>
+
+        <!-- Building Management (super admin only) -->
+        <div class="card" style="margin-bottom:16px" id="adm-buildings-card">
+          <div class="card-t" style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+            <span>Building Management</span>
+            <button class="btn btn-primary" style="font-size:12px;padding:6px 16px" onclick="admOpenBuildingModal()">+ Add Building</button>
+          </div>
+          <div id="adm-buildings-list" style="font-size:13px">Loading buildings...</div>
         </div>
 
         <!-- City Management -->
@@ -1581,6 +1584,108 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
   </div>
 </div>
 
+<!-- ===================== ADD/EDIT USER SHEET ===================== -->
+<div class="sheet-overlay" id="user-modal-overlay" onclick="admCloseUserModal()"></div>
+<div class="sheet" id="user-modal" role="dialog" aria-modal="true" aria-label="Add or edit user">
+  <div class="sheet-grip"></div>
+  <div class="sheet-hd">
+    <h2 id="um-title">Add User</h2>
+    <button class="icon-btn" onclick="admCloseUserModal()" title="Close">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="sheet-body">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Email</label>
+        <input type="text" id="um-email" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+      <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Name</label>
+        <input type="text" id="um-name" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+    </div>
+    <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Password <span style="font-weight:400;color:var(--text-3)" id="um-pass-hint"></span></label>
+      <input type="password" id="um-pass" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+    <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:8px;align-items:end">
+      <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Device ID</label>
+        <input type="text" id="um-mac" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+      <button class="btn btn-tonal" style="font-size:12px;padding:8px 14px" onclick="$('um-mac').value=''">Clear</button>
+    </div>
+    <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Notes</label>
+      <textarea id="um-notes" rows="2" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px;resize:vertical"></textarea></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px" id="um-role-building-row">
+      <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Role</label>
+        <select id="um-role" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
+          <option value="user">User</option><option value="admin">Admin</option><option value="superadmin">Super Admin</option>
+        </select></div>
+      <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Building</label>
+        <input type="text" id="um-building" list="um-building-list" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
+        <datalist id="um-building-list"></datalist></div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:13px;cursor:pointer">
+      <input type="checkbox" id="um-approved" checked style="width:16px;height:16px"> Approved
+    </label>
+    <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:6px;display:block">Allowed Formats <span style="font-weight:400;color:var(--text-3)">(none checked = all allowed)</span></label>
+      <div id="um-formats-grid" style="display:flex;flex-wrap:wrap;gap:6px"></div></div>
+    <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:6px;display:block">Allowed Tools <span style="font-weight:400;color:var(--text-3)">(none checked = all allowed)</span></label>
+      <div id="um-tools-grid" style="display:flex;flex-wrap:wrap;gap:6px"></div></div>
+  </div>
+  <div class="sheet-foot">
+    <button class="btn btn-tonal" style="flex:1" onclick="admCloseUserModal()">Cancel</button>
+    <button class="btn btn-primary" style="flex:2" id="um-save-btn" onclick="admSaveUser()">Save User</button>
+  </div>
+</div>
+
+<!-- ===================== ADD/EDIT BUILDING SHEET ===================== -->
+<div class="sheet-overlay" id="building-modal-overlay" onclick="admCloseBuildingModal()"></div>
+<div class="sheet" id="building-modal" role="dialog" aria-modal="true" aria-label="Add or edit building">
+  <div class="sheet-grip"></div>
+  <div class="sheet-hd">
+    <h2 id="bm-title">Add Building</h2>
+    <button class="icon-btn" onclick="admCloseBuildingModal()" title="Close">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="sheet-body">
+    <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Building name</label>
+      <input type="text" id="bm-name" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+    <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Users Sheet ID <span style="font-weight:400;color:var(--text-3)">(that building's GSC_Building sheet)</span></label>
+      <input type="text" id="bm-sheet-id" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+    <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">GSC script URL <span style="font-weight:400;color:var(--text-3)">(that building's GSC /exec URL)</span></label>
+      <input type="text" id="bm-gsc-url" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+  </div>
+  <div class="sheet-foot">
+    <button class="btn btn-tonal" style="flex:1" onclick="admCloseBuildingModal()">Cancel</button>
+    <button class="btn btn-primary" style="flex:2" onclick="admSaveBuilding()">Save Building</button>
+  </div>
+</div>
+
+<!-- ===================== BULK ADD USERS SHEET ===================== -->
+<div class="sheet-overlay" id="bulk-modal-overlay" onclick="admCloseBulkModal()"></div>
+<div class="sheet" id="bulk-modal" role="dialog" aria-modal="true" aria-label="Bulk add users">
+  <div class="sheet-grip"></div>
+  <div class="sheet-hd">
+    <h2>Bulk Add Users</h2>
+    <button class="icon-btn" onclick="admCloseBulkModal()" title="Close">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="sheet-body">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px" id="bulk-role-building-row">
+      <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Role (applies to all rows)</label>
+        <select id="bulk-role" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px">
+          <option value="user">User</option><option value="admin">Admin</option>
+        </select></div>
+      <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Building (applies to all rows)</label>
+        <input type="text" id="bulk-building" list="um-building-list" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px"></div>
+    </div>
+    <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">One user per line: <code>email, password, name (optional), device ID (optional)</code></label>
+    <textarea id="bulk-rows" rows="10" placeholder="jane@example.com, Passw0rd!, Jane Doe&#10;john@example.com, Passw0rd!" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);background:var(--md-surface);color:var(--md-on-surface);font-size:13px;font-family:monospace;resize:vertical"></textarea>
+    <div id="bulk-result" style="font-size:12px;margin-top:10px;white-space:pre-wrap"></div>
+  </div>
+  <div class="sheet-foot">
+    <button class="btn btn-tonal" style="flex:1" onclick="admCloseBulkModal()">Cancel</button>
+    <button class="btn btn-primary" style="flex:2" id="bulk-save-btn" onclick="admSaveBulk()">Add Users</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 <div id="update-banner" style="display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:22px;z-index:99999;background:#1a73e8;color:#fff;padding:11px 16px;border-radius:12px;font-size:13px;box-shadow:0 6px 22px rgba(0,0,0,.28);max-width:92vw">
   <span id="update-banner-text">Update installed - please relaunch to apply.</span>
@@ -1757,7 +1862,11 @@ function switchTab(m){
     admin:'Manage users, cities, and app configuration.'};
   $('page-title').textContent=titles[m];
   $('page-sub').textContent=subs[m];
-  if(m==='admin'){admLoadUsers();admLoadCities();admLoadConfig();admLoadKeysStatus();}
+  // The bottom Activity History bar is a cross-tool feed (every tool's actions,
+  // not just the current one) - only useful/shown on the Admin tab, so each tool's
+  // own panel only ever shows that tool's own log, matching every other tool here.
+  $('activity-bar').style.display=m==='admin'?'':'none';
+  if(m==='admin'){admLoadUsers();admLoadBuildings();admLoadCities();admLoadConfig();admLoadKeysStatus();fetchActivityLog();}
   if(m==='crawl'){crawlLoadUrls();}
   // Refresh buttons and shared status bar for the newly selected tab
   setButtons(_modeState[m], m);
@@ -2645,37 +2754,108 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ===================== admin ===================== */
+let MY_ADMIN_ROLE='',MY_ADMIN_BUILDING='',ADM_USERS=[],ADM_BUILDINGS=[];
+const admIsSuper=()=>MY_ADMIN_ROLE==='superadmin';
+const ALL_FORMATS=['james','omega','neon','xenon','gamma','sara','peta','deltafl',
+  'deltafvr','deltaup','octal','camila','alpha','eta','kappa',
+  'beta','w3era_g','beta_bhargu','w3era_r','kappa_up'];
+const ALL_TOOLS=[
+  {key:'ranking',label:'Rank Checker'},{key:'index',label:'Indexing Checker'},
+  {key:'count',label:'Results Count'},{key:'backlink',label:'Backlink Status'},
+  {key:'onpage',label:'SEO On-Page'},{key:'health',label:'Health Audit'},
+  {key:'gsc',label:'GSC Audit'},{key:'crawl',label:'Crawl Tracker'},
+  {key:'brief',label:'Brief Analysis'}];
+
 async function admCheckAdmin(){
   try{const r=await(await fetch('/api/auth/is_admin')).json();
-    if(r.is_admin){$('tab-admin').style.display='';}
+    if(r.is_admin){
+      $('tab-admin').style.display='';
+      MY_ADMIN_ROLE=r.role||'admin';MY_ADMIN_BUILDING=r.building||'';
+      $('adm-buildings-card').style.display=admIsSuper()?'':'none';
+    }
   }catch(e){}
 }
+
+function admFmtChip(key,label){
+  return '<label class="fmt-chip" style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:8px;border:1px solid var(--md-outline-variant);font-size:12px;cursor:pointer">'+
+    '<input type="checkbox" value="'+esc(key)+'" style="width:14px;height:14px"> '+esc(label)+'</label>';
+}
+
 async function admLoadUsers(){
   try{
     const r=await(await fetch('/api/admin/users')).json();
     if(r.error){$('adm-users-list').textContent=r.error;return;}
-    const users=r.users||[];
-    if(!users.length){$('adm-users-list').textContent='No users found.';return;}
-    $('adm-users-list').innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Email</th><th style="padding:6px">Name</th><th style="padding:6px">Device ID</th><th style="padding:6px;text-align:center">Approved</th><th style="padding:6px;text-align:center">Admin</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
-      users.map(u=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px">'+esc(u.email)+'</td><td style="padding:6px">'+esc(u.name||'')+'</td><td style="padding:6px;font-family:monospace;font-size:11px">'+esc(u.mac||'')+'</td><td style="padding:6px;text-align:center">'+(u.approved?'<span style="color:var(--ok)">Yes</span>':'<span style="color:var(--err)">No</span>')+'</td><td style="padding:6px;text-align:center">'+(u.is_admin?'<span style="color:var(--ok)">Yes</span>':'N/A')+'</td><td style="padding:6px;white-space:nowrap">'+
+    ADM_USERS=r.users||[];
+    if(!ADM_USERS.length){$('adm-users-list').textContent='No users found.';return;}
+    const showBuilding=admIsSuper();
+    $('adm-users-list').innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Email</th><th style="padding:6px">Name</th><th style="padding:6px">Role</th>'+
+      (showBuilding?'<th style="padding:6px">Building</th>':'')+
+      '<th style="padding:6px">Device ID</th><th style="padding:6px;text-align:center">Approved</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
+      ADM_USERS.map(u=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px">'+esc(u.email)+'</td><td style="padding:6px">'+esc(u.name||'')+'</td><td style="padding:6px">'+esc(u.role||(u.is_admin?'admin':'user'))+'</td>'+
+        (showBuilding?'<td style="padding:6px">'+esc(u.building||'-')+'</td>':'')+
+        '<td style="padding:6px;font-family:monospace;font-size:11px">'+esc(u.mac||'')+'</td><td style="padding:6px;text-align:center">'+(u.approved?'<span style="color:var(--ok)">Yes</span>':'<span style="color:var(--err)">No</span>')+'</td><td style="padding:6px;white-space:nowrap">'+
+        '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admOpenUserModal(\''+esc(u.email)+'\')">Edit</button>'+
         (!u.approved?'<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admApprove(\''+esc(u.email)+'\')">Approve</button>':
         '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admReject(\''+esc(u.email)+'\')">Reject</button>')+
-        '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admChgPass(\''+esc(u.email)+'\')">Password</button>'+
-        '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admChgMac(\''+esc(u.email)+'\')">Device ID</button>'+
         '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;color:var(--err)" onclick="admRemoveUser(\''+esc(u.email)+'\')">Remove</button>'+
       '</td></tr>').join('')+'</tbody></table>';
   }catch(e){$('adm-users-list').textContent='Failed to load users.';}
 }
-async function admAddUser(){
-  const email=$('adm-new-email').value.trim(),pass=$('adm-new-pass').value.trim(),name=$('adm-new-name').value.trim(),mac=$('adm-new-mac').value.trim();
-  if(!email||!pass){toast('Email and password required');return;}
+
+async function admOpenUserModal(email){
+  const existing=email?ADM_USERS.find(u=>u.email===email):null;
+  $('um-title').textContent=existing?'Edit User':'Add User';
+  $('um-email').value=existing?existing.email:'';
+  $('um-email').readOnly=!!existing;
+  $('um-name').value=existing?(existing.name||''):'';
+  $('um-pass').value='';
+  $('um-pass-hint').textContent=existing?'(leave blank to keep current)':'';
+  $('um-mac').value=existing?(existing.mac||''):'';
+  $('um-notes').value=existing?(existing.notes||''):'';
+  $('um-approved').checked=existing?!!existing.approved:true;
+  $('um-role').value=existing?(existing.role||(existing.is_admin?'admin':'user')):'user';
+  $('um-building').value=existing?(existing.building||''):(admIsSuper()?'':MY_ADMIN_BUILDING);
+  $('um-role-building-row').style.display=admIsSuper()?'grid':'none';
+  if(!admIsSuper()){$('um-role').value='user';}
+
+  $('um-building-list').innerHTML=ADM_BUILDINGS.map(b=>'<option value="'+esc(b.building)+'">').join('');
+
+  const existingFmts=(existing&&existing.formats)?String(existing.formats).split(',').map(s=>s.trim()).filter(Boolean):[];
+  $('um-formats-grid').innerHTML=ALL_FORMATS.map(f=>admFmtChip(f,f)).join('');
+  $('um-formats-grid').querySelectorAll('input').forEach(cb=>{if(existingFmts.includes(cb.value))cb.checked=true;});
+
+  const existingTools=(existing&&existing.tools)?String(existing.tools).split(',').map(s=>s.trim()).filter(Boolean):[];
+  $('um-tools-grid').innerHTML=ALL_TOOLS.map(t=>admFmtChip(t.key,t.label)).join('');
+  $('um-tools-grid').querySelectorAll('input').forEach(cb=>{if(existingTools.includes(cb.value))cb.checked=true;});
+
+  $('user-modal-overlay').classList.add('open');$('user-modal').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function admCloseUserModal(){
+  $('user-modal-overlay').classList.remove('open');$('user-modal').classList.remove('open');
+  document.body.style.overflow='';
+}
+async function admSaveUser(){
+  const email=$('um-email').value.trim().toLowerCase();
+  if(!email){toast('Enter an email address');return;}
+  const role=admIsSuper()?$('um-role').value:'user';
+  const building=admIsSuper()?$('um-building').value.trim():MY_ADMIN_BUILDING;
+  if(admIsSuper()&&role!=='superadmin'&&!building){toast('Choose a building for this user (or role = Super Admin)');return;}
+  const formats=Array.from($('um-formats-grid').querySelectorAll('input:checked')).map(c=>c.value).join(',');
+  const tools=Array.from($('um-tools-grid').querySelectorAll('input:checked')).map(c=>c.value).join(',');
+  const body={email,name:$('um-name').value.trim(),notes:$('um-notes').value.trim(),
+    approved:$('um-approved').checked,role,building,formats,tools};
+  const mac=$('um-mac').value.trim();
+  if(mac)body.mac=mac; else body.clear_mac=true;
+  const pass=$('um-pass').value;
+  if(pass)body.password=pass;
   try{
-    const r=await(await fetch('/api/admin/add_user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pass,name,mac})})).json();
+    const r=await(await fetch('/api/admin/add_user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.error){toast(r.error);return;}
-    toast('User added: '+email);
-    $('adm-new-email').value='';$('adm-new-pass').value='';$('adm-new-name').value='';$('adm-new-mac').value='';
+    toast('User saved: '+email);
+    admCloseUserModal();
     admLoadUsers();
-  }catch(e){toast('Failed to add user');}
+  }catch(e){toast('Failed to save user');}
 }
 async function admApprove(email){
   if(!confirm('Approve '+email+'?'))return;
@@ -2685,23 +2865,85 @@ async function admReject(email){
   if(!confirm('Reject '+email+'?'))return;
   try{await fetch('/api/admin/reject_user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});toast('Rejected');admLoadUsers();}catch(e){toast('Failed');}
 }
-async function admChgPass(email){
-  const np=prompt('New password for '+email+':');
-  if(!np)return;
-  try{const r=await(await fetch('/api/admin/change_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,new_password:np})})).json();
-    toast(r.error||'Password changed');
-  }catch(e){toast('Failed');}
-}
-async function admChgMac(email){
-  const mac=prompt('Device ID(s) for '+email+' - comma-separate up to 3 to allow multiple devices, or leave blank to clear all:');
-  if(mac===null)return;
-  try{const r=await(await fetch('/api/admin/update_mac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,mac})})).json();
-    toast(r.error||'Device ID updated');admLoadUsers();
-  }catch(e){toast('Failed');}
-}
 async function admRemoveUser(email){
   if(!confirm('Remove user '+email+'? This cannot be undone.'))return;
   try{await fetch('/api/admin/remove_user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});toast('Removed');admLoadUsers();}catch(e){toast('Failed');}
+}
+
+/* ----- buildings (super admin only) ----- */
+async function admLoadBuildings(){
+  if(!admIsSuper()){$('adm-buildings-card').style.display='none';return;}
+  try{
+    const r=await(await fetch('/api/admin/buildings')).json();
+    if(r.error){$('adm-buildings-list').textContent=r.error;return;}
+    ADM_BUILDINGS=r.buildings||[];
+    if(!ADM_BUILDINGS.length){$('adm-buildings-list').textContent='No buildings configured yet.';return;}
+    $('adm-buildings-list').innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Building</th><th style="padding:6px">Sheet ID</th><th style="padding:6px">GSC Script URL</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
+      ADM_BUILDINGS.map(b=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px">'+esc(b.building)+'</td><td style="padding:6px;font-family:monospace;font-size:11px">'+esc((b.building_sheet_id||'').slice(0,18))+'...</td><td style="padding:6px;font-family:monospace;font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(b.gsc_script_url||'')+'</td>'+
+        '<td style="padding:6px"><button class="btn btn-tonal" style="font-size:10px;padding:2px 8px" onclick="admOpenBuildingModal(\''+esc(b.building)+'\')">Edit</button></td></tr>').join('')+'</tbody></table>';
+  }catch(e){$('adm-buildings-list').textContent='Failed to load buildings.';}
+}
+function admOpenBuildingModal(name){
+  const existing=name?ADM_BUILDINGS.find(b=>b.building===name):null;
+  $('bm-title').textContent=existing?'Edit Building':'Add Building';
+  $('bm-name').value=existing?existing.building:'';
+  $('bm-name').readOnly=!!existing;
+  $('bm-sheet-id').value=existing?(existing.building_sheet_id||''):'';
+  $('bm-gsc-url').value=existing?(existing.gsc_script_url||''):'';
+  $('building-modal-overlay').classList.add('open');$('building-modal').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function admCloseBuildingModal(){
+  $('building-modal-overlay').classList.remove('open');$('building-modal').classList.remove('open');
+  document.body.style.overflow='';
+}
+async function admSaveBuilding(){
+  const building=$('bm-name').value.trim();
+  if(!building){toast('Enter a building name');return;}
+  const body={building,building_sheet_id:$('bm-sheet-id').value.trim(),gsc_script_url:$('bm-gsc-url').value.trim()};
+  try{
+    const r=await(await fetch('/api/admin/save_building',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.error){toast(r.error);return;}
+    toast('Building saved: '+building);
+    admCloseBuildingModal();
+    admLoadBuildings();
+  }catch(e){toast('Failed to save building');}
+}
+
+/* ----- bulk add users ----- */
+function admOpenBulkModal(){
+  $('bulk-rows').value='';
+  $('bulk-result').textContent='';
+  $('bulk-role-building-row').style.display=admIsSuper()?'grid':'none';
+  $('bulk-building').value=admIsSuper()?'':MY_ADMIN_BUILDING;
+  $('bulk-modal-overlay').classList.add('open');$('bulk-modal').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function admCloseBulkModal(){
+  $('bulk-modal-overlay').classList.remove('open');$('bulk-modal').classList.remove('open');
+  document.body.style.overflow='';
+}
+async function admSaveBulk(){
+  const lines=$('bulk-rows').value.split('\n').map(l=>l.trim()).filter(Boolean);
+  if(!lines.length){toast('Paste at least one user row');return;}
+  const role=admIsSuper()?$('bulk-role').value:'user';
+  const building=admIsSuper()?$('bulk-building').value.trim():MY_ADMIN_BUILDING;
+  if(admIsSuper()&&role!=='superadmin'&&!building){toast('Choose a building (or add rows one at a time as Super Admin)');return;}
+  const rows=lines.map(line=>{
+    const parts=line.split(',').map(p=>p.trim());
+    return {email:(parts[0]||'').toLowerCase(),password:parts[1]||'',name:parts[2]||'',mac:parts[3]||'',role,building,approved:true};
+  }).filter(r=>r.email);
+  if(!rows.length){toast('No valid rows found (need at least an email per line)');return;}
+  const btn=$('bulk-save-btn');btn.disabled=true;btn.textContent='Adding...';
+  try{
+    const r=await(await fetch('/api/admin/bulk_add_users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows})})).json();
+    if(r.error){toast(r.error);btn.disabled=false;btn.textContent='Add Users';return;}
+    const lines2=(r.results||[]).map(x=>x.error?('FAILED '+x.email+': '+x.error):('OK '+x.email+' ('+(x.mode||'saved')+')'));
+    $('bulk-result').textContent=lines2.join('\n');
+    toast(r.ok_count+'/'+r.total+' user(s) added');
+    admLoadUsers();
+  }catch(e){toast('Bulk add failed');}
+  btn.disabled=false;btn.textContent='Add Users';
 }
 async function admLoadCities(){
   try{
@@ -3109,7 +3351,7 @@ async function initApp(){
 })();
 </script>
 <!-- Activity Log Bar -->
-<div id="activity-bar" style="position:fixed;bottom:0;right:0;left:220px;z-index:30;transition:left .3s var(--ease)">
+<div id="activity-bar" style="position:fixed;bottom:0;right:0;left:220px;z-index:30;transition:left .3s var(--ease);display:none">
   <div onclick="toggleActivityLog()" style="background:var(--surface-2);border-top:1px solid var(--border);padding:8px 20px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--text-3);user-select:none">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
     Activity History

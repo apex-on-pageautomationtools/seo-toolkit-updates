@@ -289,6 +289,19 @@ def list_logged_in():
             for em, a in accounts.items()]
 
 
+def get_admin_credentials():
+    """(email, password) of the first logged-in account on this device that is an
+    admin, or (None, None) if none. The backend's _callerContext() already accepts
+    admin_email/admin_password as an alternative to a shared admin_key - since the
+    password is already saved locally for periodic re-validation, a logged-in admin
+    shouldn't need a SEPARATE admin_key configured just to use the Admin tab."""
+    accounts = _load_accounts()
+    for em, acct in accounts.items():
+        if acct.get("is_admin"):
+            return em, acct.get("password", "")
+    return None, None
+
+
 def get_allowed_formats():
     """Return the allowed formats for the currently logged-in user, or None (all allowed)."""
     accounts = _load_accounts()

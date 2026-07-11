@@ -3509,6 +3509,8 @@ def api_auth_is_admin():
         email = accounts[0]["email"]
     result = auth._api_call({"action": "is_admin", "email": email})
     is_admin = result.get("is_admin", False)
+    role = result.get("role", "")
+    building = result.get("building", "")
     if is_admin:
         accts = auth._load_accounts()
         if email in accts:
@@ -3517,7 +3519,7 @@ def api_auth_is_admin():
     elif result.get("error"):
         accts = auth._load_accounts()
         is_admin = accts.get(email, {}).get("is_admin", False)
-    return jsonify({"is_admin": is_admin})
+    return jsonify({"is_admin": is_admin, "role": role, "building": building})
 
 # --------------------------------------------------------------------------- #
 # Admin config (Apps Script URL, admin key, API key sync)
@@ -3585,97 +3587,166 @@ def api_admin_keys_status():
     return jsonify({"keys": status, "gsc_projects": proj_display})
 
 # --------------------------------------------------------------------------- #
-# Admin user management - proxies to the same Apps Script backend auth.py's
-# login/registration already uses (action=admin_list/admin_add_user/... , gated by
-# ADMIN_KEY there). The Apps Script side already implements every one of these
-# actions; only these Flask routes were missing, which is why "Add User" in the
-# exe's Admin tab has been failing silently.
+# Admin user management - proxies to central_gateway_apps_script.js (the live
+# multi-tenant backend: a central "users" sheet for super admins + one users sheet
+# per building, roles user/admin/superadmin). Every call is authorized as WHOEVER
+# IS ALREADY LOGGED INTO THE EXE AS AN ADMIN - their email+password are already
+# saved locally for periodic re-validation (auth.get_admin_credentials()), so no
+# separate admin_key needs configuring for the common case. A configured admin_key
+# (Admin -> Settings) still works too, as a superadmin-equivalent override/fallback
+# for machines with no admin logged in locally.
 # --------------------------------------------------------------------------- #
-def _admin_key():
-    return CONFIG.get("admin_key", "").strip()
+def _admin_auth_params():
+    """{'admin_email':..., 'admin_password':...} for the locally-logged-in admin,
+    else {'admin_key':...} if one's configured, else None if neither is available."""
+    email, password = auth.get_admin_credentials()
+    if email:
+        return {"admin_email": email, "admin_password": password}
+    key = CONFIG.get("admin_key", "").strip()
+    if key:
+        return {"admin_key": key}
+    return None
+
+def _admin_call(action, **params):
+    auth_params = _admin_auth_params()
+    if auth_params is None:
+        return {"error": "Not logged in as an admin, and no admin key configured "
+                          "(Admin -> Settings) as a fallback."}
+    return auth._api_call({"action": action, **auth_params, **params})
 
 @app.route("/api/admin/users")
 def api_admin_users():
-    if not _admin_key():
-        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
-    result = auth._api_call({"action": "admin_list", "admin_key": _admin_key()})
+    return jsonify(_admin_call("admin_list"))
+
+@app.route("/api/admin/buildings")
+def api_admin_buildings():
+    return jsonify(_admin_call("buildings_list"))
+
+@app.route("/api/admin/save_building", methods=["POST"])
+def api_admin_save_building():
+    data = request.get_json(silent=True) or {}
+    result = _admin_call(
+        "buildings_upsert",
+        building=(data.get("building") or "").strip(),
+        building_sheet_id=(data.get("building_sheet_id") or "").strip(),
+        gsc_script_url=(data.get("gsc_script_url") or "").strip(),
+    )
+    if result.get("success"):
+        activity(f"Admin saved building: {data.get('building')}")
     return jsonify(result)
+
+@app.route("/api/admin/bulk_add_users", methods=["POST"])
+def api_admin_bulk_add_users():
+    """Add many users at once (one 'admin_upsert' call per row) - each row is
+    {email, password, name, mac, role, building, notes}. Building-admin callers are
+    always forced into their own building by the backend regardless of what's sent,
+    same as the single-user path; a superadmin can target any building per row."""
+    data = request.get_json(silent=True) or {}
+    rows = data.get("rows") or []
+    if not isinstance(rows, list) or not rows:
+        return jsonify({"error": "No rows provided"})
+    results = []
+    for row in rows:
+        email = (row.get("email") or "").strip()
+        if not email:
+            results.append({"email": "", "error": "Missing email"})
+            continue
+        upsert_params = {
+            "email": email,
+            "name": (row.get("name") or "").strip(),
+            "role": (row.get("role") or "").strip(),
+            "building": (row.get("building") or "").strip(),
+            "approved": bool(row.get("approved", True)),
+        }
+        if row.get("password"):
+            upsert_params["password"] = row["password"]
+        if row.get("mac"):
+            upsert_params["device"] = row["mac"]
+        if row.get("notes"):
+            upsert_params["notes"] = row["notes"]
+        r = _admin_call("admin_upsert", **upsert_params)
+        r["email"] = email
+        results.append(r)
+    ok_count = sum(1 for r in results if r.get("success"))
+    activity(f"Admin bulk-added {ok_count}/{len(rows)} user(s)")
+    return jsonify({"results": results, "ok_count": ok_count, "total": len(rows)})
 
 @app.route("/api/admin/add_user", methods=["POST"])
 def api_admin_add_user():
-    if not _admin_key():
-        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
+    """Create OR edit a user (admin_upsert decides by whether the email already
+    exists) - matches the reference admin panel's single save-user action."""
     data = request.get_json(silent=True) or {}
-    result = auth._api_call({
-        "action": "admin_add_user", "admin_key": _admin_key(),
+    upsert_params = {
         "email": (data.get("email") or "").strip(),
-        "password": data.get("password") or "",
         "name": (data.get("name") or "").strip(),
-        "mac": (data.get("mac") or "").strip(),
-    })
-    if result.get("status") == "added":
-        activity(f"Admin added user: {result.get('email')}")
+        "notes": (data.get("notes") or "").strip(),
+        "device": (data.get("mac") or data.get("device") or "").strip(),
+        "role": (data.get("role") or "").strip(),
+        "building": (data.get("building") or "").strip(),
+        "approved": bool(data.get("approved", True)),
+    }
+    if data.get("password"):
+        upsert_params["password"] = data["password"]
+    if data.get("clear_mac"):
+        upsert_params["clear_mac"] = True
+    if "formats" in data:
+        upsert_params["formats"] = data.get("formats") or ""
+    if "tools" in data:
+        upsert_params["tools"] = data.get("tools") or ""
+    result = _admin_call("admin_upsert", **upsert_params)
+    if result.get("success"):
+        activity(f"Admin {result.get('mode', 'saved')} user: {upsert_params['email']}")
     return jsonify(result)
 
 @app.route("/api/admin/approve_user", methods=["POST"])
 def api_admin_approve_user():
-    if not _admin_key():
-        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
     data = request.get_json(silent=True) or {}
-    result = auth._api_call({"action": "admin_approve", "admin_key": _admin_key(),
-                             "email": (data.get("email") or "").strip()})
-    if result.get("status") == "approved":
-        activity(f"Admin approved user: {result.get('email')}")
+    email = (data.get("email") or "").strip()
+    result = _admin_call("admin_approve", email=email)
+    if result.get("success") or result.get("status") == "approved":
+        activity(f"Admin approved user: {email}")
     return jsonify(result)
 
 @app.route("/api/admin/reject_user", methods=["POST"])
 def api_admin_reject_user():
-    if not _admin_key():
-        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
     data = request.get_json(silent=True) or {}
-    result = auth._api_call({"action": "admin_reject", "admin_key": _admin_key(),
-                             "email": (data.get("email") or "").strip()})
-    if result.get("status") == "rejected":
-        activity(f"Admin rejected user: {result.get('email')}")
+    email = (data.get("email") or "").strip()
+    result = _admin_call("admin_reject", email=email)
+    if result.get("success") or result.get("status") == "rejected":
+        activity(f"Admin rejected user: {email}")
     return jsonify(result)
 
 @app.route("/api/admin/change_password", methods=["POST"])
 def api_admin_change_password():
-    if not _admin_key():
-        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
+    """No separate admin_change_password action on the live backend - folded into
+    admin_upsert (only the password field changes, every other field is preserved
+    when omitted)."""
     data = request.get_json(silent=True) or {}
-    result = auth._api_call({
-        "action": "admin_change_password", "admin_key": _admin_key(),
-        "email": (data.get("email") or "").strip(),
-        "new_password": data.get("new_password") or "",
-    })
-    if result.get("status") == "password_changed":
-        activity(f"Admin changed password for: {result.get('email')}")
+    email = (data.get("email") or "").strip()
+    result = _admin_call("admin_upsert", email=email, password=data.get("new_password") or "")
+    if result.get("success"):
+        activity(f"Admin changed password for: {email}")
     return jsonify(result)
 
 @app.route("/api/admin/update_mac", methods=["POST"])
 def api_admin_update_mac():
-    if not _admin_key():
-        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
+    """Same fold-into-upsert approach as change_password above."""
     data = request.get_json(silent=True) or {}
-    result = auth._api_call({
-        "action": "admin_update_mac", "admin_key": _admin_key(),
-        "email": (data.get("email") or "").strip(),
-        "mac": (data.get("mac") or "").strip(),
-    })
-    if result.get("status") == "mac_updated":
-        activity(f"Admin updated Device ID for: {result.get('email')}")
+    email = (data.get("email") or "").strip()
+    mac = (data.get("mac") or "").strip()
+    kwargs = {"clear_mac": True} if not mac else {"device": mac}
+    result = _admin_call("admin_upsert", email=email, **kwargs)
+    if result.get("success"):
+        activity(f"Admin updated Device ID for: {email}")
     return jsonify(result)
 
 @app.route("/api/admin/remove_user", methods=["POST"])
 def api_admin_remove_user():
-    if not _admin_key():
-        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
     data = request.get_json(silent=True) or {}
-    result = auth._api_call({"action": "admin_remove_user", "admin_key": _admin_key(),
-                             "email": (data.get("email") or "").strip()})
-    if result.get("status") == "removed":
-        activity(f"Admin removed user: {result.get('email')}")
+    email = (data.get("email") or "").strip()
+    result = _admin_call("admin_delete", email=email)
+    if result.get("success") or result.get("status") == "deleted":
+        activity(f"Admin removed user: {email}")
     return jsonify(result)
 
 @app.route("/api/gsc/projects")
