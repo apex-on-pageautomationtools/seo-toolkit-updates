@@ -3252,9 +3252,9 @@ def _gsc_webapp_url():
 
 _gsc_mapping_cache = {"data": {}, "ts": 0, "url": None}
 _gsc_mapping_lock = threading.Lock()
-GSC_MAPPING_TTL = 300   # background refresh interval - keeps the cache warm so GSC
+GSC_MAPPING_TTL = 3600  # background refresh interval - keeps the cache warm so GSC
                         # Audit / Health Audit's domain lookup never waits on a live
-                        # Sheets read
+                        # Sheets read, without hammering the sheet every few minutes
 
 
 def _fetch_gsc_mapping_now(webapp_url):
