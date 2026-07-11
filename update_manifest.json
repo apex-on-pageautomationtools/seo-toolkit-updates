@@ -153,7 +153,7 @@
     },
     {
       "path": "Start Tool.vbs",
-      "hash": "c74b8c0a5d9af3a8a25c43ef6b27d76e29eff715811936fe48a6bd054c3bd301",
+      "hash": "718f4298a3f5a895434bc731f89b94a99566d223386c6ef6efca2e644e41e169",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/Start%20Tool.vbs"
     },
     {
@@ -167,13 +167,8 @@
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/splash.ps1"
     },
     {
-      "path": "native_window.py",
-      "hash": "04d9318559d935a55c5ceb1131d223583c8c9bbbe296340c8b7564d00657ad2f",
-      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/native_window.py"
-    },
-    {
       "path": "requirements.txt",
-      "hash": "30250fb6c89ede16930321bbf8ab1bfec15107b1745c0d28fc666b9b79c5c2f5",
+      "hash": "200d8280eee7fa54fdb9f88bbfcc112bd91d848b3830048565b599ce7ba6c334",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/requirements.txt"
     }
   ]
