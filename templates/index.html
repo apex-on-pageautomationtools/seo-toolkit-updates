@@ -378,6 +378,10 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
       <span class="sb-label">Wayback Submitter</span>
     </button>
+    <button class="sb-item" id="tab-seranking" data-tip="SEranking Audit" onclick="switchTab('seranking')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>
+      <span class="sb-label">SEranking Audit</span>
+    </button>
     <button class="sb-item" id="tab-brief" data-tip="Brief Analysis" onclick="switchTab('brief')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>
       <span class="sb-label">Brief Analysis</span>
@@ -1133,6 +1137,23 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <div class="note">Pure HTTP - no browser needed. Speed depends on archive.org, typically a few seconds per URL.</div>
     </section>
 
+    <section class="card panel" id="panel-seranking" style="display:none">
+      <div class="card-t">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>
+        SEranking Audit
+      </div>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Upload a SEranking Site Audit .xlsx export (or your own similar issue-list export) and get back the same sheets with suggestion columns filled in - real page-specific Title/H1/Description suggestions and broken-link fixes, generated from each page's live content. Raw technical sheets (JS/CSS/image issues) pass through unchanged. Suggestions only - nothing is ever changed on your live site.</p>
+      <div class="field">
+        <label>Brand name <span class="hint">(used in suggested titles/descriptions)</span></label>
+        <input type="text" id="sr-brand" placeholder="e.g. An Oasis of Healing" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>SEranking export (.xlsx)</label>
+        <input type="file" id="sr-file" accept=".xlsx,.xls">
+      </div>
+      <div class="note">Can take a few minutes - each flagged page's live content is fetched to generate real suggestions.</div>
+    </section>
+
     <section class="card panel" id="panel-brief" style="display:none">
       <div class="card-t">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -1336,6 +1357,27 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
               Download Report
             </button>
             <button class="btn btn-tonal" onclick="gscReset()">New Audit</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- seranking audit -->
+      <div id="tbl-seranking" style="flex:1;display:none">
+        <div class="empty" id="empty-seranking">
+          <div class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg></div>
+          <p>Upload a SEranking Site Audit .xlsx export and click <b>Start</b>.</p>
+        </div>
+        <div id="seranking-active" class="hidden">
+          <div style="margin-bottom:12px">
+            <span class="tag t-yes" id="sr-progress">Starting...</span>
+          </div>
+          <div class="log" id="sr-log" style="height:350px;overflow-y:auto;font-size:12px"></div>
+          <div style="margin-top:14px;display:flex;gap:10px">
+            <button class="btn btn-primary" id="btn-sr-download" onclick="srDownload()" disabled>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Download Audit
+            </button>
+            <button class="btn btn-tonal" onclick="srReset()">New Audit</button>
           </div>
         </div>
       </div>
@@ -1939,6 +1981,7 @@ function switchTab(m){
   $('panel-admin').style.display=m==='admin'?'':'none';
   $('panel-brief').style.display=m==='brief'?'':'none';
   $('panel-wayback').style.display=m==='wayback'?'':'none';
+  $('panel-seranking').style.display=m==='seranking'?'':'none';
   $('tbl-ranking').style.display=m==='ranking'?'':'none';
   $('tbl-index').style.display=m==='index'?'':'none';
   $('tbl-count').style.display=m==='count'?'':'none';
@@ -1950,7 +1993,8 @@ function switchTab(m){
   $('tbl-admin').style.display=m==='admin'?'':'none';
   $('tbl-brief').style.display=m==='brief'?'':'none';
   $('tbl-wayback').style.display=m==='wayback'?'':'none';
-  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',wayback:'Wayback Machine Submitter',admin:'Admin Panel'};
+  $('tbl-seranking').style.display=m==='seranking'?'':'none';
+  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',wayback:'Wayback Machine Submitter',seranking:'SEranking Audit',admin:'Admin Panel'};
   const subs={ranking:'Find where your domain ranks on Google - across regions, CAPTCHA-resistant.',
     index:'Check if your URLs are indexed in Google - searches site:url to verify.',
     count:'Get Google\'s total "About N results" number for each keyword - regional, CAPTCHA-resistant.',
@@ -1961,6 +2005,7 @@ function switchTab(m){
     crawl:'Check when Google last crawled your URLs - uses URL Inspection API via configured GSC accounts.',
     brief:'Quick SEO analysis - indexing, domain age, titles, meta, headers, images, redirects, canonical, sitemap, robots, broken links.',
     wayback:'Submit URLs to the Wayback Machine\'s Save Page Now for a fresh, dated archive snapshot.',
+    seranking:'Turn a SEranking Site Audit export into a suggestion-filled final workbook.',
     admin:'Manage users, cities, and app configuration.'};
   $('page-title').textContent=titles[m];
   $('page-sub').textContent=subs[m];
@@ -2119,6 +2164,22 @@ async function doStart(){
     setButtons('running');
     startBaPoll();
     return;
+  }else if(mode==='seranking'){
+    const file=$('sr-file').files[0];
+    if(!file){toast('Choose a SEranking .xlsx export first');return;}
+    const fd=new FormData();
+    fd.append('file',file);
+    fd.append('brand',$('sr-brand').value.trim());
+    const rs=await fetch('/api/seranking/start',{method:'POST',body:fd});
+    const ds=await rs.json();
+    if(ds.error){toast(ds.error);return;}
+    toast('SEranking audit started');
+    $('empty-seranking').style.display='none';
+    $('seranking-active').classList.remove('hidden');
+    $('btn-sr-download').disabled=true;
+    setButtons('running');
+    startSrPoll();
+    return;
   }else if(mode==='wayback'){
     p.urls=$('wb-urls').value.trim();
     if(!p.urls){toast('Enter at least one URL');return;}
@@ -2200,6 +2261,7 @@ async function doStop(){
   if(mode==='health'){await haStop();return;}
   if(mode==='brief'){await baStop();return;}
   if(mode==='wayback'){await wbStop();return;}
+  if(mode==='seranking'){await srStop();return;}
   const m=mode;await fetch('/api/stop',_mkbody(m));setButtons('stopped',m);stopPoll(m);showAlert(false);toast('Stopped');
 }
 async function doReset(){
@@ -2211,6 +2273,7 @@ async function doReset(){
   if(mode==='brief'){baReset();return;}
   if(mode==='crawl'){crawlReset();return;}
   if(mode==='wayback'){wbReset();return;}
+  if(mode==='seranking'){srReset();return;}
   const m=mode;await fetch('/api/reset',_mkbody(m));setButtons('idle',m);showAlert(false);clearResults(m);updateProgress(0,0,'');setStatus('idle');stopPoll(m);$('log').textContent='';}
 async function loadPrevious(){
   const m=mode;
@@ -2286,7 +2349,7 @@ function updateProgress(cur,tot,kw){
   $('prog-lbl').textContent=cur+' / '+tot;
   $('cur-kw').textContent=(kw&&cur>0&&cur<=tot)?'Checking: "'+kw+'"':'';
 }
-const _modeState={ranking:'idle',index:'idle',count:'idle',backlink:'idle',onpage:'idle',health:'idle',gsc:'idle',crawl:'idle',brief:'idle',wayback:'idle',admin:'idle'};
+const _modeState={ranking:'idle',index:'idle',count:'idle',backlink:'idle',onpage:'idle',health:'idle',gsc:'idle',crawl:'idle',brief:'idle',wayback:'idle',seranking:'idle',admin:'idle'};
 function setButtons(s, m){
   m = m || mode;
   _modeState[m] = s;
@@ -2622,6 +2685,44 @@ function baReset(){
   setButtons('idle','brief');stopBaPoll();
 }
 
+/* ===================== seranking audit ===================== */
+let srTimer=null;
+function startSrPoll(){stopSrPoll();srTimer=setInterval(srPoll,2000);}
+function stopSrPoll(){if(srTimer){clearInterval(srTimer);srTimer=null;}}
+async function srPoll(){
+  try{
+    const r=await fetch('/api/seranking/status');
+    const d=await r.json();
+    const el=$('sr-log');
+    if(d.log&&d.log.length) el.textContent=d.log.join('\n');
+    el.scrollTop=el.scrollHeight;
+    if(d.status==='completed'){
+      $('sr-progress').textContent='Completed';$('sr-progress').className='tag t-yes';
+      $('btn-sr-download').disabled=!d.has_file;
+      setButtons('completed','seranking');stopSrPoll();toast('SEranking audit ready');
+    }else if(d.status==='error'){
+      $('sr-progress').className='tag t-not_found';
+      $('sr-progress').textContent='Error: '+(d.error_msg||'failed');
+      setButtons('stopped','seranking');stopSrPoll();
+    }else if(d.status==='stopped'){
+      $('sr-progress').className='tag t-unknown';
+      setButtons('stopped','seranking');stopSrPoll();
+    }else{
+      $('sr-progress').textContent='Running...';$('sr-progress').className='tag t-yes';
+    }
+  }catch(e){}
+}
+function srDownload(){window.location.href='/api/seranking/download';}
+async function srStop(){await fetch('/api/seranking/stop',{method:'POST'});toast('Stopping...');}
+function srReset(){
+  $('empty-seranking').style.display='block';
+  $('seranking-active').classList.add('hidden');
+  $('sr-log').textContent='';
+  $('btn-sr-download').disabled=true;
+  $('sr-file').value='';
+  setButtons('idle','seranking');stopSrPoll();
+}
+
 /* ===================== wayback submitter ===================== */
 let wbTimer=null;
 function startWbPoll(){stopWbPoll();wbTimer=setInterval(wbPoll,2000);}
@@ -2942,7 +3043,8 @@ const ALL_TOOLS=[
   {key:'count',label:'Results Count'},{key:'backlink',label:'Backlink Status'},
   {key:'onpage',label:'SEO On-Page'},{key:'health',label:'Health Audit'},
   {key:'gsc',label:'GSC Audit'},{key:'crawl',label:'Crawl Tracker'},
-  {key:'brief',label:'Brief Analysis'},{key:'wayback',label:'Wayback Submitter'}];
+  {key:'brief',label:'Brief Analysis'},{key:'wayback',label:'Wayback Submitter'},
+  {key:'seranking',label:'SEranking Audit'}];
 
 async function admCheckAdmin(){
   try{const r=await(await fetch('/api/auth/is_admin')).json();
@@ -3581,7 +3683,7 @@ async function applyToolFilter(){
     if(typeof t==='string')t=t.split(',');          // accept comma string
     const allowed=t.map(x=>String(x).trim().toLowerCase()).filter(x=>x);
     if(allowed.length===0||allowed.includes('all'))return;
-    const KEYS=['ranking','index','count','backlink','onpage','health','gsc','crawl','brief','wayback'];
+    const KEYS=['ranking','index','count','backlink','onpage','health','gsc','crawl','brief','wayback','seranking'];
     KEYS.forEach(key=>{
       if(!allowed.includes(key)){const b=$('tab-'+key);if(b)b.style.display='none';}
     });

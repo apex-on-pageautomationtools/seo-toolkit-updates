@@ -1234,20 +1234,70 @@ def _save_full_page_screenshot(driver, path):
 
 
 def _upload_ranking_screenshot(path):
-    """Upload a ranking SERP screenshot to catbox.moe (free, no signup, permanent
-    public hosting) so the exported CSV/sheet can carry a real shareable URL
-    instead of the /api/screenshot/<file> link, which only resolves while this
-    app's local server is running."""
+    """Upload a ranking SERP screenshot somewhere public so the exported CSV/sheet
+    can carry a real shareable URL instead of the /api/screenshot/<file> link,
+    which only resolves while this app's local server is running.
+
+    Tries the no-signup hosts first (transfer.sh, storage.to, Pixeldrain - all free,
+    no API key), then falls back to ImgBB only if an API key has been configured
+    (Admin -> Sync API Keys). catbox.moe/0x0.st were dropped: 0x0.st disabled
+    uploads entirely ('nothing but AI botnet spam'), and catbox.moe is unreachable
+    from some networks."""
+    fname = os.path.basename(path)
+
+    # transfer.sh - PUT the raw file, get a plain-text URL back. 14-day retention.
     try:
         with open(path, "rb") as f:
-            r = http_requests.post("https://catbox.moe/user/api.php",
-                                    data={"reqtype": "fileupload"},
-                                    files={"fileToUpload": f}, timeout=30)
+            r = http_requests.put(f"https://transfer.sh/{fname}", data=f, timeout=25)
         url = r.text.strip()
-        if r.status_code == 200 and url.startswith("http"):
+        if r.status_code in (200, 201) and url.startswith("http"):
             return url
+        add_log(f"Screenshot upload (transfer.sh) returned unexpected response: {r.status_code} {url[:80]}")
     except Exception as e:
-        add_log(f"Screenshot upload failed: {e}")
+        add_log(f"Screenshot upload (transfer.sh) failed: {type(e).__name__}: {e}")
+
+    # storage.to - multipart POST, plain-text or JSON URL back. ~30-day retention.
+    try:
+        with open(path, "rb") as f:
+            r = http_requests.post("https://storage.to", files={"file": f}, timeout=25)
+        url = ""
+        try:
+            data = r.json()
+            url = data.get("url") or data.get("data", {}).get("url", "")
+        except Exception:
+            url = r.text.strip()
+        if r.status_code in (200, 201) and url.startswith("http"):
+            return url
+        add_log(f"Screenshot upload (storage.to) returned unexpected response: {r.status_code} {url[:80]}")
+    except Exception as e:
+        add_log(f"Screenshot upload (storage.to) failed: {type(e).__name__}: {e}")
+
+    # Pixeldrain - image-focused, no key needed, ~30 days and resets on each view.
+    try:
+        with open(path, "rb") as f:
+            r = http_requests.post("https://pixeldrain.com/api/file", files={"file": f}, timeout=20)
+        data = r.json()
+        if r.status_code in (200, 201) and data.get("success") and data.get("id"):
+            return "https://pixeldrain.com/u/" + data["id"]
+        add_log(f"Screenshot upload (Pixeldrain) failed: {data.get('message', r.text[:120])}")
+    except Exception as e:
+        add_log(f"Screenshot upload (Pixeldrain) failed: {type(e).__name__}: {e}")
+
+    # ImgBB - real image host, essentially permanent - last resort, needs a key.
+    imgbb_key = CONFIG.get("imgbb_api_key", "").strip()
+    if imgbb_key:
+        try:
+            with open(path, "rb") as f:
+                r = http_requests.post("https://api.imgbb.com/1/upload",
+                                        params={"key": imgbb_key},
+                                        files={"image": f}, timeout=25)
+            data = r.json()
+            url = (data.get("data") or {}).get("url", "")
+            if r.status_code == 200 and data.get("success") and url:
+                return url
+            add_log(f"Screenshot upload (ImgBB) failed: {data.get('error', {}).get('message', r.text[:120])}")
+        except Exception as e:
+            add_log(f"Screenshot upload (ImgBB) failed: {type(e).__name__}: {e}")
     return ""
 
 
@@ -3235,6 +3285,122 @@ def api_wayback_export():
 
 
 # --------------------------------------------------------------------------- #
+# SEranking Audit - turns an uploaded SEranking Site Audit .xlsx export into a
+# suggestion-filled final workbook (subprocess, same pattern as On-Page).
+# --------------------------------------------------------------------------- #
+sr_state = {"status": "idle", "log": [], "output_file": "", "output_file_backup": "", "error_msg": ""}
+sr_lock = threading.Lock()
+sr_stop = threading.Event()
+
+
+def _run_seranking_audit(in_path, brand):
+    with sr_lock:
+        sr_state.update({"status": "running", "log": [], "output_file": "",
+                         "output_file_backup": "", "error_msg": ""})
+    sr_stop.clear()
+    activity(f"SEranking audit started ({os.path.basename(in_path)})")
+
+    def _log(msg):
+        with sr_lock:
+            sr_state["log"].append(msg)
+
+    slug = os.path.splitext(os.path.basename(in_path))[0]
+    out_dir = os.path.join(UPLOADS_DIR, "seranking_out")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"Final Audit - {slug}.xlsx")
+
+    python_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "python", "python.exe")
+    script = os.path.join(SCRIPTS_DIR, "generate_seranking_audit.py")
+    cmd = [python_exe, "-u", script, "--in", in_path, "--out", out_path, "--brand", brand]
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, bufsize=1, cwd=SCRIPTS_DIR,
+                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        for line in proc.stdout:
+            if sr_stop.is_set():
+                proc.kill()
+                _log("Stopped by user.")
+                with sr_lock:
+                    sr_state["status"] = "stopped"
+                return
+            _log(line.rstrip())
+        proc.wait()
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            with sr_lock:
+                sr_state["status"] = "error"
+                sr_state["error_msg"] = f"Script failed (exit code {proc.returncode})"
+            _log(f"Script exited with code {proc.returncode}")
+            return
+        backup_path = _backup_report("seranking", slug, out_path)
+        with sr_lock:
+            sr_state["status"] = "completed"
+            sr_state["output_file"] = out_path
+            sr_state["output_file_backup"] = backup_path or ""
+        _log("Done.")
+    except Exception as e:
+        _log(f"Error: {e}")
+        with sr_lock:
+            sr_state["status"] = "error"
+            sr_state["error_msg"] = str(e)
+    finally:
+        try:
+            os.remove(in_path)
+        except Exception:
+            pass
+
+
+@app.route("/api/seranking/start", methods=["POST"])
+def api_seranking_start():
+    with sr_lock:
+        if sr_state["status"] == "running":
+            return jsonify({"error": "SEranking audit already running."}), 400
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "Upload a SEranking Site Audit .xlsx export."}), 400
+    if not f.filename.lower().endswith((".xlsx", ".xls")):
+        return jsonify({"error": "Only .xlsx/.xls files are supported."}), 400
+    brand = (request.form.get("brand") or "").strip()
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+    in_path = os.path.join(UPLOADS_DIR, f"seranking_{int(time.time())}_{os.path.basename(f.filename)}")
+    f.save(in_path)
+    t = threading.Thread(target=_run_seranking_audit, args=(in_path, brand), daemon=True)
+    t.start()
+    return jsonify({"status": "started"})
+
+
+@app.route("/api/seranking/status")
+def api_seranking_status():
+    with sr_lock:
+        return jsonify({
+            "status": sr_state["status"],
+            "log": sr_state["log"][-200:],
+            "error_msg": sr_state["error_msg"],
+            "has_file": bool(sr_state["output_file"]),
+        })
+
+
+@app.route("/api/seranking/stop", methods=["POST"])
+def api_seranking_stop():
+    sr_stop.set()
+    return jsonify({"status": "stopping"})
+
+
+@app.route("/api/seranking/download")
+def api_seranking_download():
+    with sr_lock:
+        out_path = sr_state.get("output_file", "")
+        backup_path = sr_state.get("output_file_backup", "")
+    if not out_path or not os.path.exists(out_path):
+        out_path = backup_path if backup_path and os.path.exists(backup_path) else ""
+    if not out_path:
+        return jsonify({"error": "No report available for download."}), 404
+    resp = send_file(out_path, as_attachment=True, download_name=os.path.basename(out_path))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+# --------------------------------------------------------------------------- #
 # Health Audit - runs checks + optional Selenium screenshots, builds report
 # --------------------------------------------------------------------------- #
 ha_state = {
@@ -3806,7 +3972,7 @@ def api_auth_is_admin():
 # --------------------------------------------------------------------------- #
 # Admin config (Apps Script URL, API key sync)
 # --------------------------------------------------------------------------- #
-SENSITIVE_KEYS = {"psi_api_key", "gemini_api_key", "gsc_client_id", "gsc_client_secret",
+SENSITIVE_KEYS = {"psi_api_key", "gemini_api_key", "imgbb_api_key", "gsc_client_id", "gsc_client_secret",
                   "auth_api_url", "user_auth_url", "gsc_projects"}
 
 @app.route("/api/admin/save_config", methods=["POST"])
@@ -3848,7 +4014,8 @@ def api_admin_sync_keys():
 
 @app.route("/api/admin/keys_status")
 def api_admin_keys_status():
-    key_names = {"psi_api_key": "PageSpeed API Key", "gemini_api_key": "Gemini API Key"}
+    key_names = {"psi_api_key": "PageSpeed API Key", "gemini_api_key": "Gemini API Key",
+                "imgbb_api_key": "ImgBB API Key (ranking screenshot URLs)"}
     status = {}
     for k, label in key_names.items():
         val = CONFIG.get(k, "")
