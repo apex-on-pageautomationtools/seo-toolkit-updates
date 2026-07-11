@@ -316,9 +316,13 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
 .add-grid{display:grid;grid-template-columns:110px 1fr 90px;gap:10px;margin-bottom:10px}
 .add-grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
 @media (max-width:520px){.add-grid{grid-template-columns:1fr 1fr}}
+/* Keep the tool UI invisible until authCheck() resolves, so a login (or a
+   post-logout reload) never flashes the tool before the login screen appears -
+   #auth-overlay sits outside these two elements so it's unaffected. */
+body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
 </style>
 </head>
-<body>
+<body class="auth-pending">
 
 <!-- ===================== SIDEBAR ===================== -->
 <nav class="sidebar" id="sidebar">
@@ -2689,7 +2693,7 @@ async function admChgPass(email){
   }catch(e){toast('Failed');}
 }
 async function admChgMac(email){
-  const mac=prompt('New Device ID for '+email+':');
+  const mac=prompt('Device ID(s) for '+email+' - comma-separate up to 3 to allow multiple devices, or leave blank to clear all:');
   if(mac===null)return;
   try{const r=await(await fetch('/api/admin/update_mac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,mac})})).json();
     toast(r.error||'Device ID updated');admLoadUsers();
@@ -3100,6 +3104,7 @@ async function initApp(){
 }
 (async function(){
   const ok=await authCheck();
+  document.body.classList.remove('auth-pending');
   if(ok)initApp();
 })();
 </script>
