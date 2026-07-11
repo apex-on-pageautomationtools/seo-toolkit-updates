@@ -3584,6 +3584,100 @@ def api_admin_keys_status():
                              "properties": p.get("properties", "")})
     return jsonify({"keys": status, "gsc_projects": proj_display})
 
+# --------------------------------------------------------------------------- #
+# Admin user management - proxies to the same Apps Script backend auth.py's
+# login/registration already uses (action=admin_list/admin_add_user/... , gated by
+# ADMIN_KEY there). The Apps Script side already implements every one of these
+# actions; only these Flask routes were missing, which is why "Add User" in the
+# exe's Admin tab has been failing silently.
+# --------------------------------------------------------------------------- #
+def _admin_key():
+    return CONFIG.get("admin_key", "").strip()
+
+@app.route("/api/admin/users")
+def api_admin_users():
+    if not _admin_key():
+        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
+    result = auth._api_call({"action": "admin_list", "admin_key": _admin_key()})
+    return jsonify(result)
+
+@app.route("/api/admin/add_user", methods=["POST"])
+def api_admin_add_user():
+    if not _admin_key():
+        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
+    data = request.get_json(silent=True) or {}
+    result = auth._api_call({
+        "action": "admin_add_user", "admin_key": _admin_key(),
+        "email": (data.get("email") or "").strip(),
+        "password": data.get("password") or "",
+        "name": (data.get("name") or "").strip(),
+        "mac": (data.get("mac") or "").strip(),
+    })
+    if result.get("status") == "added":
+        activity(f"Admin added user: {result.get('email')}")
+    return jsonify(result)
+
+@app.route("/api/admin/approve_user", methods=["POST"])
+def api_admin_approve_user():
+    if not _admin_key():
+        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
+    data = request.get_json(silent=True) or {}
+    result = auth._api_call({"action": "admin_approve", "admin_key": _admin_key(),
+                             "email": (data.get("email") or "").strip()})
+    if result.get("status") == "approved":
+        activity(f"Admin approved user: {result.get('email')}")
+    return jsonify(result)
+
+@app.route("/api/admin/reject_user", methods=["POST"])
+def api_admin_reject_user():
+    if not _admin_key():
+        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
+    data = request.get_json(silent=True) or {}
+    result = auth._api_call({"action": "admin_reject", "admin_key": _admin_key(),
+                             "email": (data.get("email") or "").strip()})
+    if result.get("status") == "rejected":
+        activity(f"Admin rejected user: {result.get('email')}")
+    return jsonify(result)
+
+@app.route("/api/admin/change_password", methods=["POST"])
+def api_admin_change_password():
+    if not _admin_key():
+        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
+    data = request.get_json(silent=True) or {}
+    result = auth._api_call({
+        "action": "admin_change_password", "admin_key": _admin_key(),
+        "email": (data.get("email") or "").strip(),
+        "new_password": data.get("new_password") or "",
+    })
+    if result.get("status") == "password_changed":
+        activity(f"Admin changed password for: {result.get('email')}")
+    return jsonify(result)
+
+@app.route("/api/admin/update_mac", methods=["POST"])
+def api_admin_update_mac():
+    if not _admin_key():
+        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
+    data = request.get_json(silent=True) or {}
+    result = auth._api_call({
+        "action": "admin_update_mac", "admin_key": _admin_key(),
+        "email": (data.get("email") or "").strip(),
+        "mac": (data.get("mac") or "").strip(),
+    })
+    if result.get("status") == "mac_updated":
+        activity(f"Admin updated Device ID for: {result.get('email')}")
+    return jsonify(result)
+
+@app.route("/api/admin/remove_user", methods=["POST"])
+def api_admin_remove_user():
+    if not _admin_key():
+        return jsonify({"error": "Admin key not configured (Admin -> Settings)."})
+    data = request.get_json(silent=True) or {}
+    result = auth._api_call({"action": "admin_remove_user", "admin_key": _admin_key(),
+                             "email": (data.get("email") or "").strip()})
+    if result.get("status") == "removed":
+        activity(f"Admin removed user: {result.get('email')}")
+    return jsonify(result)
+
 @app.route("/api/gsc/projects")
 def api_gsc_projects():
     projects = CONFIG.get("gsc_projects", [])
