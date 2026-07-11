@@ -562,22 +562,42 @@ def list_properties(token):
     return resp.get("siteEntry", [])
 
 
+_property_cache = {}  # domain -> (siteUrl, expires_at) - a token's property list is
+                      # essentially static minute to minute, but resolve_property() was
+                      # called with a live sites.list API request on every single call
+                      # (e.g. every Health Audit run re-resolving the same domain).
+_PROPERTY_CACHE_TTL = 600  # seconds
+
+
 def resolve_property(token, domain):
-    """Find the best GSC property URL for a domain."""
-    props = list_properties(token)
+    """Find the best GSC property URL for a domain. Cached per domain for 10 minutes
+    so repeat lookups (e.g. Health Audit re-resolving a domain GSC Audit already
+    resolved this session) skip the live sites.list API call entirely."""
     domain_clean = domain.lower().replace("www.", "").strip("/")
+    cached = _property_cache.get(domain_clean)
+    if cached and cached[1] > time.time():
+        return cached[0]
+
+    props = list_properties(token)
     # Prefer domain property, then URL prefix
+    result = None
     for p in props:
         url = p.get("siteUrl", "")
         if url == f"sc-domain:{domain_clean}":
-            return url
-    for p in props:
-        url = p.get("siteUrl", "")
-        if domain_clean in url.lower():
-            return url
-    if props:
-        return props[0].get("siteUrl", "")
-    raise Exception(f"No GSC property found for '{domain}'. Make sure the domain is added to Google Search Console.")
+            result = url
+            break
+    if not result:
+        for p in props:
+            url = p.get("siteUrl", "")
+            if domain_clean in url.lower():
+                result = url
+                break
+    if not result and props:
+        result = props[0].get("siteUrl", "")
+    if not result:
+        raise Exception(f"No GSC property found for '{domain}'. Make sure the domain is added to Google Search Console.")
+    _property_cache[domain_clean] = (result, time.time() + _PROPERTY_CACHE_TTL)
+    return result
 
 
 def fetch_sitemaps(token, property_url):

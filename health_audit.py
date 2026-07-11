@@ -1099,20 +1099,24 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
             fut_psi = None
 
     # --- Fast checks run sequentially while slow ones are in progress ---
-    _total = 13
+    _total = 11  # robots.txt/sitemap.xml/status200 now share one progress step (run in parallel)
     _step = [0]
     def _prog(msg):
         _step[0] += 1
         log_fn(f"[{_step[0]}/{_total}] {msg}")
 
-    _prog("Checking robots.txt...")
-    robots = check_robots_txt(domain)
-
-    _prog("Checking sitemap.xml...")
-    sitemap = check_sitemap(domain)
-
-    _prog("Running status200 check...")
-    s200 = check_status200(target_pages, domain)
+    # robots.txt, sitemap.xml and the status200 check are each independent HTTP round
+    # trips (none of them touch the shared Selenium driver, unlike canonical/double-meta
+    # /meta-robots below), so run them concurrently instead of one after another - this
+    # is the main reason a Health Audit was slow just to get through its first checks.
+    _prog("Checking robots.txt, sitemap.xml & status200 (in parallel)...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as fast_pool:
+        fut_robots = fast_pool.submit(check_robots_txt, domain)
+        fut_sitemap = fast_pool.submit(check_sitemap, domain)
+        fut_s200 = fast_pool.submit(check_status200, target_pages, domain)
+        robots = fut_robots.result()
+        sitemap = fut_sitemap.result()
+        s200 = fut_s200.result()
 
     _prog("Running canonical check...")
     canon = check_canonical(target_pages, domain, driver=driver)
