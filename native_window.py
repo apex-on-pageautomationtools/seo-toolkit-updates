@@ -15,7 +15,23 @@ the tool just because one machine's WebView2/.NET setup is unusual.
 """
 import sys
 import os
+import tempfile
+import traceback
 import subprocess
+from datetime import datetime
+
+# VBS launches this hidden (WindowStyle 0) so nothing captures stdout/stderr - log to
+# a file instead so a failure (and WHY) is actually inspectable afterward, rather than
+# silently falling back to Edge with no way to tell what went wrong.
+LOG_PATH = os.path.join(tempfile.gettempdir(), "seotoolkitpro_native_window.log")
+
+
+def _log(msg):
+    try:
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
 
 
 def _ensure_package(module_name, pip_name=None):
@@ -29,18 +45,25 @@ def _ensure_package(module_name, pip_name=None):
         return True
     except ImportError:
         pass
+    _log(f"{module_name} not found, attempting silent install of '{pip_name or module_name}'...")
     try:
-        subprocess.run(
+        result = subprocess.run(
             [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check",
              pip_name or module_name],
-            timeout=90, check=True,
+            timeout=90, capture_output=True, text=True,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        if result.returncode != 0:
+            _log(f"pip install {pip_name or module_name} failed (exit {result.returncode}): "
+                 f"{result.stderr[-500:] if result.stderr else '(no stderr)'}")
+            return False
         import importlib
         importlib.invalidate_caches()
         __import__(module_name)
+        _log(f"{module_name} installed and imported successfully.")
         return True
-    except Exception:
+    except Exception as e:
+        _log(f"_ensure_package({module_name}) failed: {type(e).__name__}: {e}")
         return False
 
 
@@ -51,12 +74,15 @@ def main():
     url = sys.argv[1]
     icon_path = sys.argv[2] if len(sys.argv) > 2 else None
 
+    _log(f"Starting native window for {url} (python: {sys.executable})")
+
     # Best-effort; if either fails, the webview import below raises and the caller
     # falls back to the Edge launch, same as any other failure.
     _ensure_package("webview", pip_name="pywebview")
     _ensure_package("cffi")
 
     import webview
+    _log(f"webview module OK: {webview.__file__}")
 
     window_kwargs = dict(
         title="SEO Toolkit Pro",
@@ -75,12 +101,15 @@ def main():
         # pywebview versions, so this is best-effort and never fatal on its own.
         start_kwargs["icon"] = icon_path
 
+    _log("Calling webview.start()...")
     webview.start(**start_kwargs)
+    _log("webview.start() returned (window closed normally).")
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
+        _log(f"FAILED: {type(e).__name__}: {e}\n{traceback.format_exc()}")
         print(f"[native_window] Failed to open native window: {type(e).__name__}: {e}", file=sys.stderr)
         sys.exit(1)
