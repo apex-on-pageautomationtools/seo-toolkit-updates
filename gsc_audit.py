@@ -789,12 +789,37 @@ def capture_gsc_screenshots(driver, property_url, email, out_dir, pages=None, lo
     screenshots = {}
     statuses = {}
 
+    def _wait_network_idle(max_wait):
+        """Poll for network activity to go idle instead of always sleeping the full
+        max_wait. GSC's pages are a React SPA whose charts/tables load via
+        fetch/XHR after the base HTML is 'complete', so resource-count stability
+        (no new network requests for ~1s) is a much safer 'actually done loading'
+        signal than DOM text length here - and it's capped at the same max_wait as
+        before, so a shot can only finish SOONER than the old fixed sleep, never
+        later, which is what keeps this from risking a blank/partial capture."""
+        last_count, stable, elapsed, step = -1, 0, 0.0, 0.5
+        while elapsed < max_wait:
+            try:
+                count = driver.execute_script(
+                    "return performance.getEntriesByType('resource').length")
+            except Exception:
+                break
+            if count == last_count:
+                stable += 1
+                if stable >= 2:                        # idle for ~1s -> settled
+                    return
+            else:
+                stable = 0
+            last_count = count
+            time.sleep(step)
+            elapsed += step
+
     for p in pages:
         url = build_gsc_url(p["page"], property_url, email)
         log_fn(f"  Capturing {p['key']}...")
         try:
             driver.get(url)
-            time.sleep(p["wait"])
+            _wait_network_idle(p["wait"])
             if _looks_like_signin(driver):
                 log_fn(f"  [warn] {p['key']} bounced to sign-in mid-capture - "
                        f"skipping (would be a misleading screenshot).")

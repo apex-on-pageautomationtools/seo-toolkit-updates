@@ -21,7 +21,8 @@
     {
       "path": "gsc_audit.py",
       "hash": "c2a8148c4682d50fa3ef0d6a4912af48fe329b67e431779046f6307c6196d1be",
-      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/gsc_audit.py"
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/gsc_audit.py",
+      "sha256": "5ec15bc24817da748d57d99cd1c4a1af3c64a1f00cf199ff1bb855457c3ced15"
     },
     {
       "path": "health_audit.py",
