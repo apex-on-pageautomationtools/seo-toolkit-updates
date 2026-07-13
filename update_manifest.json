@@ -173,7 +173,8 @@
     },
     {
       "path": "scripts/generate_seranking_audit.py",
-      "hash": "27121cdc77b6d0a1af916dcc931dd849da553d0bd8b5236c74a16e2c1c86d8e8"
+      "hash": "27121cdc77b6d0a1af916dcc931dd849da553d0bd8b5236c74a16e2c1c86d8e8",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seranking_audit.py"
     }
   ]
 }
