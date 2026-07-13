@@ -3222,10 +3222,22 @@ def _submit_wayback_url(url, max_tries=3, timeout=45):
                 kwargs["proxies"] = {"http": pu, "https": pu}
             r = http_requests.get(save_url, headers={"User-Agent": "Mozilla/5.0 SEOToolkitPro"},
                                   timeout=timeout, allow_redirects=True, **kwargs)
+            # Content-Location is Wayback's own redirect header for exactly the page
+            # just requested - authoritative, prefer it over scraping the HTML.
             loc = r.headers.get("Content-Location", "")
-            m = _re.search(r'(/web/\d{10,}/https?://[^\s"\'<>]+)', loc or r.text)
-            if m:
-                return "https://web.archive.org" + m.group(1)
+            if loc and _re.search(r"/web/\d{10,}/https?://", loc):
+                return "https://web.archive.org" + loc
+
+            # Fallback: the results page's "Visit page: <a href=...>" line, NOT the
+            # resource listing further down (a page pulls in dozens of images/CSS/JS,
+            # each with its own /web/.../ link in that list - grabbing the first match
+            # anywhere in the page picked up a random embedded image instead of the
+            # page itself). Require the archived URL to actually match what was
+            # submitted, not just look like a Wayback link.
+            for m in _re.finditer(r'/web/\d{10,}/(https?://[^\s"\'<>]+)', r.text):
+                archived_target = m.group(1).rstrip("/")
+                if archived_target == url.rstrip("/"):
+                    return "https://web.archive.org" + m.group(0)
         except Exception:
             continue
     return None
