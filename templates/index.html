@@ -3534,6 +3534,11 @@ async function crawlStart(){
   $('crawl-tbody').innerHTML='';
   $('btn-crawl-download').disabled=false;
   $('crawl-eta').textContent='';
+  // Clear stats/progress-bar left over from a previous stopped/completed run -
+  // otherwise a stale "Stopped" / "N / M (0%)" sits there, unchanged, for the
+  // entire Validating phase, looking like nothing is happening.
+  $('crawl-stats').textContent='';
+  $('crawl-prog-bar').style.width='0%';
   crawlResults=[];crawlIdx=0;crawlPaused=false;crawlStopped=false;crawlStartTime=null;crawlInflight.clear();
   setButtons('running','crawl');
   $('crawl-progress').textContent='Validating...';
@@ -3542,6 +3547,16 @@ async function crawlStart(){
   crawlLog('Validating '+urls.length+' URL(s) against the master domain list...');
   try{
     const r=await(await fetch('/api/crawl/validate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls})})).json();
+    // The validate request isn't cancellable mid-flight - if the user clicked
+    // Stop while it was still running, its result is now stale (it reflects
+    // what WOULD have been checked, not what actually was). Don't report it as
+    // if validation completed normally; just confirm the stop and bail out.
+    if(crawlStopped){
+      crawlLog('Stopped before validation finished - nothing was checked.');
+      $('crawl-progress').textContent='Stopped';$('crawl-progress').className='tag t-unknown';
+      setButtons('stopped','crawl');
+      return;
+    }
     if(!r.success){crawlLog('Validation failed: '+(r.error||'Unknown error'));toast(r.error||'Validation failed');setButtons('stopped','crawl');return;}
     crawlBatchId=r.batchId||'';
     crawlItems=r.items;
