@@ -245,6 +245,9 @@ tbody tr:hover td{background:var(--surface-2)}
 .lnk{color:var(--accent);text-decoration:none;font-size:12.5px}
 .lnk:hover{text-decoration:underline}
 .cell-url{min-width:200px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#tbl-r{table-layout:fixed;width:100%}
+#tbl-r .cell-url{min-width:0;max-width:none;width:auto}
+#tbl-r td,#tbl-r th{overflow:hidden;text-overflow:ellipsis}
 td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-width:140px;max-width:280px}
 .empty{text-align:center;padding:60px 20px;color:var(--text-3)}
 .empty .ic{width:72px;height:72px;border-radius:24px;background:var(--surface-2);
@@ -1299,6 +1302,15 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
           <p>Add your domain and keywords, then press <b>Start</b> below.</p>
         </div>
         <table id="tbl-r" class="hidden">
+          <colgroup>
+            <col style="width:36px">
+            <col style="width:150px">
+            <col class="col-target hidden" style="width:150px">
+            <col style="width:64px">
+            <col style="width:260px">
+            <col style="width:120px">
+            <col style="width:56px">
+          </colgroup>
           <thead><tr><th>#</th><th>Keyword</th><th class="col-target hidden">Target Page</th><th style="text-align:center">Pos</th><th>SERP URL</th><th>Status</th><th>SERP</th></tr></thead>
           <tbody id="tbody-r"></tbody>
         </table>
