@@ -1164,6 +1164,37 @@ def _manual_pause(reason):
             state["status"] = "running"
     return not stop_event.is_set()
 
+def _browser_closed_pause(sess):
+    """Browser window was closed (by the user or a crash) mid-run. Instead of ending
+    the whole run with an error, pause the same way a manual CAPTCHA solve does -
+    already-checked items stay in the results (nothing is lost) - and on Resume,
+    reopen a fresh browser so the caller can retry whatever item was in progress
+    from the start. Returns False if the user stopped the run instead of resuming."""
+    add_log("Browser window was closed. Click Resume to reopen it and continue - "
+            "already-checked results are kept; the current item will be re-checked "
+            "from the start.")
+    with state_lock:
+        state["captcha_msg"] = ("The browser window was closed. Click Resume to reopen it "
+                                "and continue. Already-checked results are safe.")
+        state["status"] = "paused"
+    pause_event.clear()
+    pause_event.wait()
+    if stop_event.is_set():
+        return False
+    try:
+        sess.start(rotate=bool(sess.pool))
+        add_log("Browser reopened - resuming.")
+    except Exception as e:
+        add_log(f"Could not reopen browser: {e}")
+        with state_lock:
+            state["captcha_msg"] = ""
+        return False
+    with state_lock:
+        state["captcha_msg"] = ""
+        state["status"] = "running"
+    return True
+
+
 def _highlight_domain_in_serp(driver, domain_clean, first_only=False):
     """Highlight the target domain's organic result(s) in the LIVE SERP before the
     screenshot - like the SERP Highlighter extension: an orange outline, a soft
@@ -1582,7 +1613,8 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
             if stop_event.is_set():
                 break
             if not is_alive(sess.driver):
-                raise BrowserClosedError("Browser closed between keywords")
+                if not _browser_closed_pause(sess):
+                    raise BrowserClosedError("Browser closed and the run was stopped")
 
             # Check VPN location every 10 keywords to detect drift
             if vpn_method not in ("none", "proxy") and i > 0 and i % 10 == 0:
@@ -1604,12 +1636,8 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
 
             # Auto-recover if browser died between keywords
             if not is_alive(sess.driver):
-                add_log("Browser disconnected - restarting...")
-                try:
-                    sess.start(rotate=bool(sess.pool))
-                    add_log("Browser restarted successfully.")
-                except Exception as re_err:
-                    raise BrowserClosedError(f"Could not restart browser: {re_err}")
+                if not _browser_closed_pause(sess):
+                    raise BrowserClosedError("Browser closed and the run was stopped")
 
             if not target_pages:
                 target_pages = {}
@@ -1620,7 +1648,18 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
                 _parsed = _up2(kw_target if "://" in kw_target else "https://" + kw_target)
                 kw_domain = _parsed.netloc.replace("www.", "") or domain
 
-            result = rank_one(sess, kw, kw_domain, country, max_pages, search_mode, city=city, lang=lang)
+            # If the browser dies mid-check (not just between keywords), pause and
+            # retry the SAME keyword from scratch once it's reopened, rather than
+            # losing the whole run - everything checked before this point is safe
+            # in state["results"] already.
+            while True:
+                try:
+                    result = rank_one(sess, kw, kw_domain, country, max_pages, search_mode, city=city, lang=lang)
+                    break
+                except BrowserClosedError:
+                    if not _browser_closed_pause(sess):
+                        raise BrowserClosedError("Browser closed and the run was stopped")
+                    add_log(f"Retrying '{kw}' from the start after the browser reopened...")
 
             with state_lock:
                 row = _make_row(kw, kw_target, result)
@@ -1758,18 +1797,21 @@ def run_index_analysis(urls, delay, headless, country, proxies,
             if stop_event.is_set():
                 break
             if not is_alive(sess.driver):
-                add_log("Browser disconnected - restarting...")
-                try:
-                    sess.start(rotate=bool(sess.pool))
-                    add_log("Browser restarted successfully.")
-                except Exception as re_err:
-                    raise BrowserClosedError(f"Could not restart browser: {re_err}")
+                if not _browser_closed_pause(sess):
+                    raise BrowserClosedError("Browser closed and the run was stopped")
             with state_lock:
                 state["current_keyword"] = url
                 state["current_index"] = i + 1
                 state["status"] = "running"
             add_log(f"Index check '{url}' ({i+1}/{len(urls)})")
-            result = index_one(sess, url, country, city=city, lang=lang)
+            while True:
+                try:
+                    result = index_one(sess, url, country, city=city, lang=lang)
+                    break
+                except BrowserClosedError:
+                    if not _browser_closed_pause(sess):
+                        raise BrowserClosedError("Browser closed and the run was stopped")
+                    add_log(f"Retrying '{url}' from the start after the browser reopened...")
             with state_lock:
                 state["results"].append({
                     "url": url, "indexed": result.get("indexed", "Unknown"),
@@ -1910,18 +1952,21 @@ def run_count_analysis(keywords, delay, headless, country, proxies,
             if stop_event.is_set():
                 break
             if not is_alive(sess.driver):
-                add_log("Browser disconnected - restarting...")
-                try:
-                    sess.start(rotate=bool(sess.pool))
-                    add_log("Browser restarted successfully.")
-                except Exception as re_err:
-                    raise BrowserClosedError(f"Could not restart browser: {re_err}")
+                if not _browser_closed_pause(sess):
+                    raise BrowserClosedError("Browser closed and the run was stopped")
             with state_lock:
                 state["current_keyword"] = kw
                 state["current_index"] = i + 1
                 state["status"] = "running"
             add_log(f"Search results count '{kw}' ({i+1}/{len(keywords)})")
-            result = count_one(sess, kw, country, city=city, lang=lang)
+            while True:
+                try:
+                    result = count_one(sess, kw, country, city=city, lang=lang)
+                    break
+                except BrowserClosedError:
+                    if not _browser_closed_pause(sess):
+                        raise BrowserClosedError("Browser closed and the run was stopped")
+                    add_log(f"Retrying '{kw}' from the start after the browser reopened...")
             with state_lock:
                 state["results"].append({
                     "keyword": kw,
@@ -2137,18 +2182,21 @@ def run_backlink_analysis(urls, domain, delay, headless, country, proxies,
             if stop_event.is_set():
                 break
             if not is_alive(sess.driver):
-                add_log("Browser disconnected - restarting...")
-                try:
-                    sess.start(rotate=bool(sess.pool))
-                    add_log("Browser restarted successfully.")
-                except Exception as re_err:
-                    raise BrowserClosedError(f"Could not restart browser: {re_err}")
+                if not _browser_closed_pause(sess):
+                    raise BrowserClosedError("Browser closed and the run was stopped")
             with state_lock:
                 state["current_keyword"] = url
                 state["current_index"] = i + 1
                 state["status"] = "running"
             add_log(f"Checking backlink '{url}' ({i+1}/{len(urls)})")
-            result = backlink_one(sess, url, domain, check_da=check_da)
+            while True:
+                try:
+                    result = backlink_one(sess, url, domain, check_da=check_da)
+                    break
+                except BrowserClosedError:
+                    if not _browser_closed_pause(sess):
+                        raise BrowserClosedError("Browser closed and the run was stopped")
+                    add_log(f"Retrying '{url}' from the start after the browser reopened...")
             add_log(f"  domain {'found' if result['domain_found']=='Yes' else 'not found'}, "
                     f"meta: {result['meta_robots']}, link: {result['link_type']}")
             with state_lock:
