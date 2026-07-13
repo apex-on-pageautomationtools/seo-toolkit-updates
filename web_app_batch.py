@@ -1013,6 +1013,26 @@ def _recover(sess, kind):
     return False
 
 
+def _reanchor_locale(sess, country, lang):
+    """After a CAPTCHA/block is cleared, explicitly re-navigate to the Google
+    homepage with the ORIGINAL hl=lang&gl=country - solving a CAPTCHA challenge
+    (or a soft-block interstitial) can leave Google's session cookies drifted
+    toward whatever locale that challenge page itself was served in (which
+    follows the exit IP's GeoIP, not our hl/gl params) - so a keyword restart
+    after recovery shouldn't just resume typing into whatever page state we're
+    now on; it should re-establish the exact same starting conditions (language,
+    country) as the very first attempt for that keyword."""
+    try:
+        if is_alive(sess.driver):
+            dom = google_domain(country)
+            safe_get(sess.driver, f"https://www.{dom}/?gl={country}&hl={lang}")
+            human_pause(1.5, 2.5)
+    except BrowserClosedError:
+        raise
+    except Exception:
+        pass
+
+
 def _recover_page(sess, page_num):
     """A pagination page came back with 0 organic links.
 
@@ -1343,6 +1363,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
             add_log(f"Block detected ({kind}). Starting recovery...")
             if not _recover(sess, kind):
                 return {"status": "captcha", "matches": match_domain([], domain_clean)}
+            _reanchor_locale(sess, country, lang)
             continue
 
         # Small wait then log what's on page 1
@@ -1493,6 +1514,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
             if _try < max_retries:
                 add_log(f"'{keyword}': search cut short by a block at page {page_num} - "
                         f"restarting keyword from page 1 (retry {_try + 1}/{max_retries})")
+                _reanchor_locale(sess, country, lang)
                 continue
             add_log(f"'{keyword}': search cut short by a block at page {page_num} - "
                     f"ranking may exist deeper ({total_links} results seen)")
@@ -1765,6 +1787,7 @@ def index_one(sess, raw_url, country, city=None, lang="en"):
         if kind in ("captcha", "soft_block", "http_403"):
             if not _recover(sess, kind):
                 return {"status": "captcha", "indexed": "Unknown", "found_url": ""}
+            _reanchor_locale(sess, country, lang)
             continue
         if "did not match any documents" in src.lower():
             return {"status": "ok", "indexed": "No", "found_url": ""}
@@ -1915,6 +1938,7 @@ def count_one(sess, keyword, country, city=None, lang="en"):
             add_log(f"Block detected ({kind}). Starting recovery...")
             if not _recover(sess, kind):
                 return {"status": "captcha", "results_count": ""}
+            _reanchor_locale(sess, country, lang)
             continue
         time.sleep(0.8)
         count = _capture_result_count(sess.driver)
