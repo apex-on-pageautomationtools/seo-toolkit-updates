@@ -1451,23 +1451,9 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                 matches = matches[:1]
             # Screenshots were already captured per page (with the domain
             # highlighted) in _shot_serp_page, so no end-of-run capture is needed.
-            # Visit each matched URL to capture final loaded URL (redirects)
-            for m in matches:
-                try:
-                    if is_alive(sess.driver):
-                        sess.driver.get(m["serp_url"])
-                        time.sleep(random.uniform(2, 4))
-                        m["loaded_url"] = sess.driver.current_url
-                        add_log(f"Loaded URL: {m['loaded_url']}")
-                except Exception:
-                    m["loaded_url"] = ""
-            # Navigate back to Google for next keyword
-            try:
-                if is_alive(sess.driver):
-                    sess.driver.back()
-                    time.sleep(1)
-            except Exception:
-                pass
+            # serp_url is already the exact URL shown in the SERP result (captured
+            # straight from the page source in find_domain_in_page) - no extra page
+            # load needed, and none is done, so the driver stays on the SERP page.
             add_log(f"'{keyword}': found at #{matches[0]['position']} "
                     f"({total_links} results across {page_num} pages)")
             return {"status": "found", "matches": matches, "pages": page_num}
@@ -1578,11 +1564,10 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
                     suffix = "" if idx == 0 else f"_{idx+1}"
                     row[f"position{suffix}"] = m["position"]
                     row[f"serp_url{suffix}"] = m["serp_url"]
-                    row[f"loaded_url{suffix}"] = m.get("loaded_url", "")
                 if matches[0].get("screenshot"):
                     row["screenshot"] = matches[0]["screenshot"]
                 return row
-            row = {"keyword": kw, "position": "-", "serp_url": "", "loaded_url": "",
+            row = {"keyword": kw, "position": "-", "serp_url": "",
                    "status": result.get("status", "not_found")}
             if kw_target:
                 row["target_page"] = kw_target
@@ -2782,15 +2767,15 @@ def api_export_csv():
     if m == "ranking":
         # Collect all column names across all rows (handles multiple matches)
         has_targets = any(r.get("target_page") for r in results)
-        base = ["keyword", "target_page", "status", "position", "serp_url", "loaded_url"] if has_targets else ["keyword", "status", "position", "serp_url", "loaded_url"]
+        base = ["keyword", "target_page", "status", "position", "serp_url"] if has_targets else ["keyword", "status", "position", "serp_url"]
         extra = set()
         for r in results:
             for k in r:
                 if k not in base and k not in extra:
                     extra.add(k)
-        # Sort extra columns: position_2, serp_url_2, loaded_url_2, position_3, ...
+        # Sort extra columns: position_2, serp_url_2, position_3, ...
         def _col_sort(c):
-            for i, prefix in enumerate(["position_", "serp_url_", "loaded_url_"]):
+            for i, prefix in enumerate(["position_", "serp_url_"]):
                 if c.startswith(prefix):
                     num = c[len(prefix):]
                     return (int(num) if num.isdigit() else 99, i)

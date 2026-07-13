@@ -1299,7 +1299,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
           <p>Add your domain and keywords, then press <b>Start</b> below.</p>
         </div>
         <table id="tbl-r" class="hidden">
-          <thead><tr><th>#</th><th>Keyword</th><th class="col-target hidden">Target Page</th><th style="text-align:center">Pos</th><th>SERP URL</th><th>Loaded URL</th><th>Status</th><th>SERP</th></tr></thead>
+          <thead><tr><th>#</th><th>Keyword</th><th class="col-target hidden">Target Page</th><th style="text-align:center">Pos</th><th>SERP URL</th><th>Status</th><th>SERP</th></tr></thead>
           <tbody id="tbody-r"></tbody>
         </table>
       </div>
@@ -2454,10 +2454,6 @@ function appendRow(row,num,m){
     const serp=su.startsWith('http')
       ?'<a class="lnk" href="'+esc(su)+'" target="_blank" rel="noopener" title="'+esc(su)+'">'+esc(su.replace(/https?:\/\/(www\.)?/,''))+'</a>'
       :'<span style="color:var(--text-3)">'+esc(su||'Not found')+'</span>';
-    const lu=row.loaded_url||'';
-    const loaded=lu.startsWith('http')
-      ?'<a class="lnk" href="'+esc(lu)+'" target="_blank" rel="noopener" title="'+esc(lu)+'">'+esc(lu.replace(/https?:\/\/(www\.)?/,''))+'</a>'
-      :'<span style="color:var(--text-3)">N/A</span>';
     const tr=document.createElement('tr');
     const ss=row.screenshot||'';
     const ssUrl=row.screenshot_url||(ss?'/api/screenshot/'+esc(ss):'');
@@ -2470,7 +2466,6 @@ function appendRow(row,num,m){
       '<td class="col-target cell-url'+(document.querySelector('.col-target.hidden')?' hidden':'')+'">'+tpCell+'</td>'+
       '<td style="text-align:center"><span class="rank-pill '+(isNum?rankClass(n):'r-none')+'">'+(isNum?n:'N/F')+'</span></td>'+
       '<td class="cell-url">'+serp+'</td>'+
-      '<td class="cell-url">'+loaded+'</td>'+
       '<td><span class="tag '+((row.status||'').startsWith('not_found')?'t-not_found':'t-'+(row.status||'unknown'))+'">'+esc((row.status||'').replace(/_/g,' '))+'</span></td>'+
       '<td style="text-align:center">'+ssCell+'</td>';
     tbody_r.appendChild(tr);
