@@ -73,7 +73,17 @@ def _download_file(url, dest, timeout=90):
             os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
             with open(tmp, "wb") as f:
                 shutil.copyfileobj(r, f)
-        os.replace(tmp, dest)
+        # Antivirus real-time scanning can briefly lock a just-written file before
+        # the rename, especially for .zip/.exe-adjacent paths - retry the rename a
+        # few times instead of failing outright on a transient PermissionError.
+        for _r in range(5):
+            try:
+                os.replace(tmp, dest)
+                break
+            except PermissionError:
+                if _r == 4:
+                    raise
+                time.sleep(0.5 * (_r + 1))
         return True, ""
     except Exception as e:
         try:

@@ -38,7 +38,7 @@ def _config_file():
     return cf
 
 AUTH_FILE = _auth_file()
-APP_VERSION = "3.9"
+APP_VERSION = "4.0"
 SESSION_MAX_HOURS = 12   # a saved login stays valid this long, then re-login is required
 
 
