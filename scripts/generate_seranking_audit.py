@@ -169,6 +169,19 @@ def _suggest_broken_link_fix(url):
 # --------------------------------------------------------------------------- #
 # Per-sheet suggestion filling
 # --------------------------------------------------------------------------- #
+# Sheet-NAME based fallback for inputs that don't already carry pre-built
+# "Suggested X" columns (a plain issue-list export, not SEranking's own template
+# with those columns already present but blank) - if the sheet is clearly about
+# one of these issue types and has a page/URL column, the right suggestion
+# column is added rather than requiring it to already exist.
+_NAME_JUDGMENT_RULES = [
+    (re.compile(r"h1", re.I), "h1"),
+    (re.compile(r"title", re.I), "title"),
+    (re.compile(r"description", re.I), "desc"),
+    (re.compile(r"4xx|broken|dead.?link", re.I), "broken"),
+]
+
+
 def _apply_suggestions(sheet_name, headers, rows, brand):
     page_col = _find_page_col(headers)
     title_col = _find_col(headers, TITLE_COLS)
@@ -176,9 +189,26 @@ def _apply_suggestions(sheet_name, headers, rows, brand):
     h1_col = _find_col(headers, H1_COLS)
     broken_col = _find_col(headers, {"broken link suggestion"})
 
+    has_any_suggestion_col = any(c is not None for c in (title_col, desc_col, h1_col, broken_col))
+    if page_col is not None and not has_any_suggestion_col:
+        # No pre-built suggestion column - infer what's needed from the sheet name
+        # and add it, so a plain (non-SEranking-template) issue list still gets
+        # real suggestions instead of silently passing through untouched.
+        kinds = {kind for pattern, kind in _NAME_JUDGMENT_RULES if pattern.search(sheet_name)}
+        if kinds:
+            if "title" in kinds:
+                headers = headers + ["Suggested Title"]; title_col = len(headers) - 1
+            if "desc" in kinds:
+                headers = headers + ["Suggested Description"]; desc_col = len(headers) - 1
+            if "h1" in kinds:
+                headers = headers + ["Suggested H1"]; h1_col = len(headers) - 1
+            if "broken" in kinds:
+                headers = headers + ["Broken link Suggestion"]; broken_col = len(headers) - 1
+            rows = [list(r) + [None] * (len(headers) - len(r)) for r in rows]
+
     if page_col is None or not (title_col is not None or desc_col is not None
                                  or h1_col is not None or broken_col is not None):
-        return rows  # not a judgment sheet - pass through unchanged
+        return headers, rows  # not a judgment sheet - pass through unchanged
 
     log(f"   Generating suggestions for '{sheet_name}' ({len(rows)} row(s))...")
     out = []
@@ -197,7 +227,7 @@ def _apply_suggestions(sheet_name, headers, rows, brand):
                 if h1_col is not None:
                     row[h1_col] = s["suggested_h1"]
         out.append(row)
-    return out
+    return headers, out
 
 
 # --------------------------------------------------------------------------- #
@@ -250,7 +280,7 @@ def process_workbook(in_path, out_path, brand):
         headers, rows = _read_sheet(ws_in)
         if not headers:
             continue
-        rows = _apply_suggestions(sheet_name, headers, rows, brand)
+        headers, rows = _apply_suggestions(sheet_name, headers, rows, brand)
         _write_sheet(wb_out, sheet_name, headers, rows)
 
     wb_out.save(out_path)

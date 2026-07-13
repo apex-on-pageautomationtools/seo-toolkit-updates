@@ -2776,8 +2776,10 @@ def api_export_csv():
         name = f"search_results_{ts}.csv"
     else:
         name = f"index_check_{ts}.csv"
-    # Save to domain folder
-    csv_data = out.getvalue()
+    # Save to domain folder. UTF-8 BOM prefix - without it, Excel opens a UTF-8 CSV
+    # using the system ANSI codepage instead, garbling any non-ASCII character
+    # (em-dashes, accented characters in domains/URLs) into mojibake like "a€"".
+    csv_data = "﻿" + out.getvalue()
     try:
         folder = _domain_folder(domain, m)
         with open(os.path.join(folder, name), "w", encoding="utf-8", newline="") as f:

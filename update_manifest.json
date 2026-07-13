@@ -34,7 +34,7 @@
       "path": "web_app_batch.py",
       "hash": "7ccc70ffc7eedea24a0220919af4fd4692554f7675deb31f5a05ae427ea739f6",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py",
-      "sha256": "566a6e486a88c20c24431db187b5cf0f84fb2b0737e39e06808f2bd9dd282ef2"
+      "sha256": "17acc5a8a414732a60eeace8bb8d4c2d08a111f08921ba0cd00f68379bd706d8"
     },
     {
       "path": "updater.py",
@@ -181,7 +181,7 @@
     },
     {
       "path": "scripts/generate_seranking_audit.py",
-      "sha256": "b4d050b7f72da655bf3031cbcf1e04e7f322bcbe75e925f19e9bbfba53fe50d1"
+      "sha256": "7e64447d0f39b79225b60d0ad0b0b01ecd1ad3d9207fcca2e601e4ca434bed2e"
     }
   ]
 }
