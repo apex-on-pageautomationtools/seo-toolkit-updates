@@ -718,6 +718,30 @@ def solve_with_buster(driver, max_attempts=1):
         if _recaptcha_status(driver) == "CHECKED":
             add_log("Solved by checkbox.")
             return True
+
+        # Try the image-challenge-reset -> fresh-audio -> Buster sequence FIRST
+        # (switching to the "eye"/image challenge briefly, then a fresh audio
+        # challenge) - Buster solves audio far more reliably than image, and a
+        # fresh audio challenge avoids the "automated queries" rate-limit that
+        # makes repeated solves on the SAME challenge fail. This used to only run
+        # as a late-stage fallback after 3 reload cycles; trying it immediately
+        # solves most CAPTCHAs faster and with fewer DOM interactions (each one
+        # is a chance for a stale-element error if the page changes mid-click).
+        if _click_audio_and_buster(driver):
+            for _ in range(10):
+                time.sleep(2)
+                if not is_alive(driver):
+                    return False
+                if _recaptcha_status(driver) == "CHECKED":
+                    add_log("CAPTCHA solved by Buster on the audio challenge!")
+                    return True
+                try:
+                    if classify_page(page_source(driver)) == "ok":
+                        add_log("CAPTCHA solved manually!")
+                        return True
+                except Exception:
+                    pass
+
         # Wait for Buster to inject its button in the bframe's help-button-holder
         # Buster uses a CLOSED shadow DOM - use CDP to pierce it
         clicked = False

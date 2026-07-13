@@ -1501,7 +1501,24 @@ def _build_edge_driver(args, country, binary, logger, latitude=None, longitude=N
     if binary:
         opts.binary_location = binary
     logger("Launching Edge browser...")
-    driver = Edge(options=opts)
+    driver = None
+    last_err = None
+    for attempt in range(3):
+        try:
+            driver = Edge(options=opts)
+            break
+        except Exception as e:
+            last_err = e
+            # "session not created: cannot connect to ... not reachable" is a known
+            # flaky launch failure (the spawned browser process didn't bind its debug
+            # port in time - antivirus scanning the exe, a slow machine, or a
+            # lingering process from a just-closed session) - almost always transient
+            # and succeeds on a plain retry.
+            if attempt < 2:
+                logger(f"Edge launch attempt {attempt + 1}/3 failed ({e}); retrying...")
+                time.sleep(2 + attempt * 2)
+    if driver is None:
+        raise last_err
     _apply_stealth(driver, country, latitude, longitude)
     _block_downloads(driver)
     driver.set_page_load_timeout(45)
@@ -1521,7 +1538,21 @@ def _build_chrome_driver(args, country, binary, logger, latitude=None, longitude
     if chrome_ver:
         logger(f"Detected Chrome version: {chrome_ver}")
         kwargs["version_main"] = chrome_ver
-    driver = uc.Chrome(**kwargs)
+    driver = None
+    last_err = None
+    for attempt in range(3):
+        try:
+            driver = uc.Chrome(**kwargs)
+            break
+        except Exception as e:
+            last_err = e
+            # Same flaky "cannot connect to chrome ... not reachable" launch failure
+            # as Edge above - retry before giving up.
+            if attempt < 2:
+                logger(f"Chrome launch attempt {attempt + 1}/3 failed ({e}); retrying...")
+                time.sleep(2 + attempt * 2)
+    if driver is None:
+        raise last_err
     _apply_stealth(driver, country, latitude, longitude)
     _block_downloads(driver)
     driver.set_page_load_timeout(45)
