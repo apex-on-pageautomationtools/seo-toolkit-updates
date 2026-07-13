@@ -52,9 +52,14 @@ If port = "" Then
     WScript.Quit
 End If
 
-' Server is up — pull OTA updates in the BACKGROUND (does not delay the window; new
-' files apply on the next launch, and the app shows an "update installed" note).
-WshShell.Run "cmd /c """ & strDir & "\python\python.exe"" -s """ & strDir & "\updater.py""", 0, False
+' NOTE: OTA updates are pulled by the app's own in-page auto-check (autoCheckUpdates(),
+' fires ~3.5s after the window loads), NOT from here. This used to ALSO fire its own
+' separate background updater.py call - both used the same lock file, so only one of
+' them actually ran, and it was a coin-flip which one won. When THIS one won, the
+' update completed with zero visible indication (a VBS subprocess has no way to show
+' the in-page "Restart now" banner), so users had no idea an update had even happened
+' and no prompt to restart - which is why it silently took 2+ launches to actually
+' pick up a change. Removed so the in-page check is the single, always-visible path.
 
 appUrl = "http://127.0.0.1:" & port
 

@@ -162,7 +162,8 @@
     {
       "path": "Start Tool.vbs",
       "hash": "718f4298a3f5a895434bc731f89b94a99566d223386c6ef6efca2e644e41e169",
-      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/Start%20Tool.vbs"
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/Start%20Tool.vbs",
+      "sha256": "df2ad5fe588d1cf198b372cc12e080f69a819483e9cb14882b3af7d374cdea0b"
     },
     {
       "path": "app_launch.ps1",
