@@ -1150,10 +1150,14 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <input type="text" id="sr-brand" placeholder="e.g. An Oasis of Healing" autocomplete="off">
       </div>
       <div class="field">
-        <label>SEranking export (.xlsx)</label>
+        <label>SEranking export (.xlsx) <span class="hint">(optional if a PDF is provided)</span></label>
         <input type="file" id="sr-file" accept=".xlsx,.xls">
       </div>
-      <div class="note">Can take a few minutes - each flagged page's live content is fetched to generate real suggestions.</div>
+      <div class="field">
+        <label>PDF audit export <span class="hint">(optional, e.g. a SEMrush overview - included as its own summary sheet)</span></label>
+        <input type="file" id="sr-pdf" accept=".pdf">
+      </div>
+      <div class="note">Can take a few minutes - each flagged page's live content is fetched to generate real suggestions. PDF text extraction is best-effort - some PDFs render text through embedded fonts that can't be reliably decoded, in which case that sheet just says so instead of showing garbage.</div>
     </section>
 
     <section class="card panel" id="panel-brief" style="display:none">
@@ -2185,9 +2189,11 @@ async function doStart(){
     return;
   }else if(mode==='seranking'){
     const file=$('sr-file').files[0];
-    if(!file){toast('Choose a SEranking .xlsx export first');return;}
+    const pdfFile=$('sr-pdf').files[0];
+    if(!file&&!pdfFile){toast('Choose a SEranking .xlsx export and/or a PDF export');return;}
     const fd=new FormData();
-    fd.append('file',file);
+    if(file)fd.append('file',file);
+    if(pdfFile)fd.append('pdf',pdfFile);
     fd.append('brand',$('sr-brand').value.trim());
     const rs=await fetch('/api/seranking/start',{method:'POST',body:fd});
     const ds=await rs.json();
@@ -2741,6 +2747,7 @@ function srReset(){
   $('sr-log').textContent='';
   $('btn-sr-download').disabled=true;
   $('sr-file').value='';
+  $('sr-pdf').value='';
   setButtons('idle','seranking');stopSrPoll();
 }
 

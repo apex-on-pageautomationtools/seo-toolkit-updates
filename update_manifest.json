@@ -34,7 +34,7 @@
       "path": "web_app_batch.py",
       "hash": "7ccc70ffc7eedea24a0220919af4fd4692554f7675deb31f5a05ae427ea739f6",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py",
-      "sha256": "17acc5a8a414732a60eeace8bb8d4c2d08a111f08921ba0cd00f68379bd706d8"
+      "sha256": "3189b1f9954e705925a9f7554180982b7744b871ec9285c4c00ae2c2d84474e7"
     },
     {
       "path": "updater.py",
@@ -142,7 +142,7 @@
       "path": "templates/index.html",
       "hash": "0c6c70609b361a874941cb1406d0d08737553c73cb8e6aec0e9b099c882c4f9e",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html",
-      "sha256": "d7e0b765f3850988a32f4f1f6ca1cb71a2b01987c36dcb29f99ae95c09845a44"
+      "sha256": "afbe8c3da26f9ccb1d8cb44c5b1875c2a85cdfb90beee2a28cd28c42f28fa4a1"
     },
     {
       "path": "brief_analysis.py",
@@ -181,7 +181,7 @@
     },
     {
       "path": "scripts/generate_seranking_audit.py",
-      "sha256": "7e64447d0f39b79225b60d0ad0b0b01ecd1ad3d9207fcca2e601e4ca434bed2e"
+      "sha256": "27121cdc77b6d0a1af916dcc931dd849da553d0bd8b5236c74a16e2c1c86d8e8"
     }
   ]
 }

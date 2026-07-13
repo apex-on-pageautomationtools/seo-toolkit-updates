@@ -24,6 +24,7 @@ Run:
 import os
 import re
 import sys
+import zlib
 import argparse
 import urllib.request
 import urllib.error
@@ -101,6 +102,98 @@ def _read_sheet(ws):
             continue
         rows.append(list(row))
     return headers, rows
+
+
+# --------------------------------------------------------------------------- #
+# PDF input (e.g. a SEMrush Site Audit export) - stdlib-only text extraction
+# (zlib, no new dependency to distribute to every machine). PDFs like this are
+# typically a summary/overview rather than a per-URL table, so this pulls out
+# readable text into its own sheet rather than attempting risky, likely-wrong
+# structured-table extraction from what's usually prose + stat blocks.
+# --------------------------------------------------------------------------- #
+def _pdf_decompress_streams(raw):
+    """Every FlateDecode-compressed stream in the PDF, decompressed. Best-effort -
+    a PDF with other filters (rare for text-based exports) just yields fewer/no
+    chunks rather than raising."""
+    chunks = []
+    for m in re.finditer(rb"<<(.*?)>>\s*stream\r?\n(.*?)endstream", raw, re.S):
+        dict_txt, body = m.group(1), m.group(2)
+        if b"FlateDecode" not in dict_txt:
+            continue
+        try:
+            chunks.append(zlib.decompress(body))
+        except Exception:
+            continue
+    return chunks
+
+
+def _pdf_extract_text_from_content(content):
+    """Pull the text-showing operators (Tj / TJ) out of one decompressed PDF
+    content stream, resolving PDF's backslash string escapes."""
+    out = []
+    for m in re.finditer(rb"\((?:\\.|[^\\()])*\)", content):
+        s = m.group(0)[1:-1]
+        s = re.sub(rb"\\([()\\])", rb"\1", s)
+        s = s.replace(b"\\n", b" ").replace(b"\\r", b" ")
+        try:
+            out.append(s.decode("latin-1"))
+        except Exception:
+            continue
+    return out
+
+
+_PDF_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _looks_like_real_text(s):
+    """FlateDecode also compresses embedded font programs and other binary
+    resources, not just page content - a '(...)' pulled out of one of those
+    decodes to noise, not text. Require mostly-printable content before keeping
+    a line, so that garbage never reaches the output sheet (openpyxl also
+    outright rejects certain control characters)."""
+    if not s or len(s) < 2:
+        return False
+    printable = sum(1 for c in s if c == " " or (32 <= ord(c) < 127) or ord(c) > 160)
+    return (printable / len(s)) > 0.85
+
+
+def extract_pdf_text(path):
+    """Return the PDF's visible text as a list of lines, grouped loosely by the
+    order strings appear in the file (approximates reading order for the simple,
+    mostly-linear layouts these audit-summary PDFs use)."""
+    with open(path, "rb") as f:
+        raw = f.read()
+    lines = []
+    for stream in _pdf_decompress_streams(raw):
+        pieces = _pdf_extract_text_from_content(stream)
+        if pieces:
+            line = _PDF_CONTROL_CHARS.sub("", "".join(pieces)).strip()
+            if line and _looks_like_real_text(line):
+                lines.append(line)
+    return lines
+
+
+def build_pdf_summary_rows(pdf_path):
+    """[[line_number, text], ...] ready to drop straight into a sheet via
+    _write_sheet - the PDF's content preserved for human review, since a
+    summary-style PDF rarely has enough per-URL structure to safely auto-suggest
+    from without risking wrong/invented claims.
+
+    Some PDFs (confirmed with real SEMrush exports) render their visible text
+    through an embedded custom font's glyph encoding rather than literal text
+    strings in the content stream - a lightweight stdlib extractor can only
+    recover font metadata noise from those, never the actual words. Showing that
+    noise as if it were real content would be actively misleading, so a quality
+    check here refuses to return it and reports the limitation honestly instead."""
+    lines = extract_pdf_text(pdf_path)
+    words = " ".join(lines).split()
+    has_real_words = sum(1 for w in words if w.isalpha() and len(w) > 2)
+    if not lines or has_real_words < 5:
+        return [[1, "This PDF's text could not be reliably extracted - it likely renders "
+                    "text through an embedded custom font rather than literal text (common "
+                    "in SEMrush/design-tool exports). Please review the PDF manually, or "
+                    "provide the underlying data as an .xlsx export instead."]]
+    return [[i + 1, line] for i, line in enumerate(lines)]
 
 
 # --------------------------------------------------------------------------- #
@@ -268,20 +361,27 @@ def _write_sheet(wb_out, name, headers, rows):
     ws.freeze_panes = "A2"
 
 
-def process_workbook(in_path, out_path, brand):
-    log(f"Reading: {in_path}")
-    wb_in = openpyxl.load_workbook(in_path, data_only=True)
+def process_workbook(in_path, out_path, brand, pdf_path=None):
     wb_out = openpyxl.Workbook()
     wb_out.remove(wb_out.active)
 
-    for i, sheet_name in enumerate(wb_in.sheetnames):
-        log(f"[{i + 1}/{len(wb_in.sheetnames)}] Processing '{sheet_name}'...")
-        ws_in = wb_in[sheet_name]
-        headers, rows = _read_sheet(ws_in)
-        if not headers:
-            continue
-        headers, rows = _apply_suggestions(sheet_name, headers, rows, brand)
-        _write_sheet(wb_out, sheet_name, headers, rows)
+    if in_path:
+        log(f"Reading: {in_path}")
+        wb_in = openpyxl.load_workbook(in_path, data_only=True)
+        for i, sheet_name in enumerate(wb_in.sheetnames):
+            log(f"[{i + 1}/{len(wb_in.sheetnames)}] Processing '{sheet_name}'...")
+            ws_in = wb_in[sheet_name]
+            headers, rows = _read_sheet(ws_in)
+            if not headers:
+                continue
+            headers, rows = _apply_suggestions(sheet_name, headers, rows, brand)
+            _write_sheet(wb_out, sheet_name, headers, rows)
+
+    if pdf_path:
+        log(f"Reading PDF: {pdf_path}")
+        rows = build_pdf_summary_rows(pdf_path)
+        log(f"   Extracted {len(rows)} line(s) of text.")
+        _write_sheet(wb_out, "PDF Summary", ["#", "Text"], rows)
 
     wb_out.save(out_path)
     log(f"[DONE] {out_path}")
@@ -289,11 +389,14 @@ def process_workbook(in_path, out_path, brand):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--in", dest="in_path", required=True, help="SEranking Site Audit .xlsx export")
+    ap.add_argument("--in", dest="in_path", default=None, help="SEranking Site Audit .xlsx export")
+    ap.add_argument("--pdf", dest="pdf_path", default=None, help="A PDF audit export (e.g. SEMrush overview)")
     ap.add_argument("--out", dest="out_path", required=True, help="Output .xlsx path")
     ap.add_argument("--brand", default="", help="Brand name for suggested titles/descriptions")
     args = ap.parse_args()
-    process_workbook(args.in_path, args.out_path, args.brand)
+    if not args.in_path and not args.pdf_path:
+        ap.error("Provide --in (.xlsx) and/or --pdf")
+    process_workbook(args.in_path, args.out_path, args.brand, args.pdf_path)
 
 
 if __name__ == "__main__":

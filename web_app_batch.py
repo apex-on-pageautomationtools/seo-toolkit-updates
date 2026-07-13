@@ -3309,25 +3309,30 @@ sr_lock = threading.Lock()
 sr_stop = threading.Event()
 
 
-def _run_seranking_audit(in_path, brand):
+def _run_seranking_audit(in_path, pdf_path, brand):
     with sr_lock:
         sr_state.update({"status": "running", "log": [], "output_file": "",
                          "output_file_backup": "", "error_msg": ""})
     sr_stop.clear()
-    activity(f"SEranking audit started ({os.path.basename(in_path)})")
+    src_name = os.path.basename(in_path or pdf_path)
+    activity(f"SEranking audit started ({src_name})")
 
     def _log(msg):
         with sr_lock:
             sr_state["log"].append(msg)
 
-    slug = os.path.splitext(os.path.basename(in_path))[0]
+    slug = os.path.splitext(src_name)[0]
     out_dir = os.path.join(UPLOADS_DIR, "seranking_out")
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"Final Audit - {slug}.xlsx")
 
     python_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "python", "python.exe")
     script = os.path.join(SCRIPTS_DIR, "generate_seranking_audit.py")
-    cmd = [python_exe, "-u", script, "--in", in_path, "--out", out_path, "--brand", brand]
+    cmd = [python_exe, "-u", script, "--out", out_path, "--brand", brand]
+    if in_path:
+        cmd += ["--in", in_path]
+    if pdf_path:
+        cmd += ["--pdf", pdf_path]
 
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -3360,10 +3365,12 @@ def _run_seranking_audit(in_path, brand):
             sr_state["status"] = "error"
             sr_state["error_msg"] = str(e)
     finally:
-        try:
-            os.remove(in_path)
-        except Exception:
-            pass
+        for _p in (in_path, pdf_path):
+            if _p:
+                try:
+                    os.remove(_p)
+                except Exception:
+                    pass
 
 
 @app.route("/api/seranking/start", methods=["POST"])
@@ -3371,16 +3378,26 @@ def api_seranking_start():
     with sr_lock:
         if sr_state["status"] == "running":
             return jsonify({"error": "SEranking audit already running."}), 400
-    f = request.files.get("file")
-    if not f or not f.filename:
-        return jsonify({"error": "Upload a SEranking Site Audit .xlsx export."}), 400
-    if not f.filename.lower().endswith((".xlsx", ".xls")):
-        return jsonify({"error": "Only .xlsx/.xls files are supported."}), 400
+    xf = request.files.get("file")
+    pf = request.files.get("pdf")
+    if (not xf or not xf.filename) and (not pf or not pf.filename):
+        return jsonify({"error": "Upload a SEranking .xlsx export and/or a PDF audit export."}), 400
+    if xf and xf.filename and not xf.filename.lower().endswith((".xlsx", ".xls")):
+        return jsonify({"error": "The Excel file must be .xlsx/.xls."}), 400
+    if pf and pf.filename and not pf.filename.lower().endswith(".pdf"):
+        return jsonify({"error": "The PDF file must be .pdf."}), 400
     brand = (request.form.get("brand") or "").strip()
     os.makedirs(UPLOADS_DIR, exist_ok=True)
-    in_path = os.path.join(UPLOADS_DIR, f"seranking_{int(time.time())}_{os.path.basename(f.filename)}")
-    f.save(in_path)
-    t = threading.Thread(target=_run_seranking_audit, args=(in_path, brand), daemon=True)
+    ts = int(time.time())
+    in_path = None
+    pdf_path = None
+    if xf and xf.filename:
+        in_path = os.path.join(UPLOADS_DIR, f"seranking_{ts}_{os.path.basename(xf.filename)}")
+        xf.save(in_path)
+    if pf and pf.filename:
+        pdf_path = os.path.join(UPLOADS_DIR, f"seranking_{ts}_{os.path.basename(pf.filename)}")
+        pf.save(pdf_path)
+    t = threading.Thread(target=_run_seranking_audit, args=(in_path, pdf_path, brand), daemon=True)
     t.start()
     return jsonify({"status": "started"})
 
