@@ -43,16 +43,27 @@ def _fetch_json(url, timeout=30):
 
 
 def _download_file(url, dest, timeout=90):
-    """Download a file from URL to dest path."""
+    """Download a file from URL to dest path. Downloads to a temp file first, then
+    atomically replaces dest - a failure/interruption partway through never leaves a
+    truncated file sitting at dest for the hash check to trip over. Returns
+    (ok, error_message) so callers can log WHY a download failed, not just that it
+    did - a swallowed exception was making every failure look identical/unexplained."""
+    tmp = dest + ".part"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "SEOToolkitPro-Updater/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-            with open(dest, "wb") as f:
+            with open(tmp, "wb") as f:
                 shutil.copyfileobj(r, f)
-        return True
-    except Exception:
-        return False
+        os.replace(tmp, dest)
+        return True, ""
+    except Exception as e:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+        return False, f"{type(e).__name__}: {e}"
 
 
 def _log_update(msg):
@@ -107,6 +118,7 @@ def check_and_update(log_fn=None):
     updated_files = []
     skipped = []
     failed = []
+    failed_reasons = {}
 
     for entry in files:
         rel_path = entry.get("path", "")
@@ -141,12 +153,18 @@ def check_and_update(log_fn=None):
         # leave that file stale (so a feature never updated on some machines). Verify
         # the hash each try so a corrupt/partial download is rejected and retried.
         ok = False
+        last_err = ""
         for _attempt in range(3):
-            if _download_file(download_url, local_path):
+            dl_ok, err = _download_file(download_url, local_path)
+            if dl_ok:
                 if not remote_hash or _file_hash(local_path) == remote_hash:
                     ok = True
                     break
+                last_err = "hash mismatch after download"
                 _log_update(f"Hash mismatch (try {_attempt + 1}): {rel_path}")
+            else:
+                last_err = err
+                _log_update(f"Download error (try {_attempt + 1}) for {rel_path}: {err}")
             if _attempt < 2:
                 time.sleep(2 * (_attempt + 1))
         if ok:
@@ -161,7 +179,8 @@ def check_and_update(log_fn=None):
                     pass
         else:
             failed.append(rel_path)
-            _log_update(f"Failed: {rel_path}")
+            failed_reasons[rel_path] = last_err
+            _log_update(f"Failed: {rel_path} - {last_err}")
             # Roll back: restore the previous good version, or drop a corrupt new file
             backup = local_path + ".bak"
             if os.path.exists(backup):
@@ -183,6 +202,7 @@ def check_and_update(log_fn=None):
         "updated_files": updated_files,
         "skipped": len(skipped),
         "failed": failed,
+        "failed_reasons": failed_reasons,
     }
 
     if updated_files:
