@@ -11,7 +11,7 @@
       "path": "auth.py",
       "hash": "18c58f7b6095c86c979faa7e61f24d8c1f4b7512c208c66a4e420b2eb6495597",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/auth.py",
-      "sha256": "c06bc442d4cd7211e33373cd2ee4fce3bf9330a85ce73cb65cc0a47e7ce72f82"
+      "sha256": "46c8b6e86976f1f140363b867e1d49cc9bdb106d4b20219e89f38b81a0dfe124"
     },
     {
       "path": "engine.py",
@@ -34,7 +34,7 @@
       "path": "web_app_batch.py",
       "hash": "7ccc70ffc7eedea24a0220919af4fd4692554f7675deb31f5a05ae427ea739f6",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py",
-      "sha256": "74e80413d6fe6be145e5be7d1f8e386d1d6fbd0bc8fd82150f9b8d634f0009c3"
+      "sha256": "3a9d251622c075c9ecb0a6c3910ef4e2c228d4bc7d6f0eb8617bdadeab69859d"
     },
     {
       "path": "updater.py",
@@ -141,7 +141,7 @@
       "path": "templates/index.html",
       "hash": "0c6c70609b361a874941cb1406d0d08737553c73cb8e6aec0e9b099c882c4f9e",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html",
-      "sha256": "3888728a6b4419354d26645af0a129afa64b18d9b8106ce6672d77cfd2497316"
+      "sha256": "df65c57ce79094c4d389168b9c844eafa054c6b22a2e2cc6c8ab3b37a07c669f"
     },
     {
       "path": "brief_analysis.py",

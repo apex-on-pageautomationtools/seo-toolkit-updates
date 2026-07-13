@@ -1635,9 +1635,20 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
     </button>
   </div>
   <div class="sheet-body">
-    <div id="s-logged-in-as" style="font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:10px"></div>
+    <div class="sec-t">Your Account</div>
+    <div class="field" style="margin-bottom:8px">
+      <label>Name</label>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="s-my-name" placeholder="Your name" autocomplete="off" style="flex:1">
+        <button class="btn btn-tonal" style="padding:0 14px" onclick="saveMyName()">Save</button>
+      </div>
+    </div>
+    <div class="field" style="margin-bottom:8px">
+      <label>Email</label>
+      <input type="text" id="s-my-email" disabled style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-3);font-size:14px;box-sizing:border-box">
+    </div>
 
-    <div class="sec-t">Change Password</div>
+    <div class="sec-t" style="margin-top:22px">Change Password</div>
     <div class="note" style="margin-bottom:8px">Update your account password - saved to your account immediately.</div>
     <input type="password" id="cp-old" placeholder="Current password" autocomplete="current-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
     <input type="password" id="cp-new" placeholder="New password (min 6 characters)" autocomplete="new-password" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:14px;margin-bottom:8px;box-sizing:border-box">
@@ -3005,6 +3016,16 @@ async function changePassword(){
     }else{ toast(d.message||'Could not change password'); }
   }catch(e){ toast('Could not change password'); }
 }
+async function saveMyName(){
+  const name=$('s-my-name').value.trim();
+  if(!name){toast('Enter a name');return;}
+  try{
+    const r=await fetch('/api/auth/update-name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+    const d=await r.json();
+    if(d.status==='name_changed'){MY_NAME=name;toast('Name updated');}
+    else{toast(d.message||'Could not update name');}
+  }catch(e){toast('Could not update name');}
+}
 async function authCheck(){
   // Version check first
   try{
@@ -3033,7 +3054,7 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ===================== admin ===================== */
-let MY_ADMIN_ROLE='',MY_ADMIN_BUILDING='',MY_EMAIL='',ADM_USERS=[],ADM_BUILDINGS=[],ADM_PROXIES=[];
+let MY_ADMIN_ROLE='',MY_ADMIN_BUILDING='',MY_EMAIL='',MY_NAME='',ADM_USERS=[],ADM_BUILDINGS=[],ADM_PROXIES=[];
 const admIsSuper=()=>MY_ADMIN_ROLE==='superadmin';
 const ALL_FORMATS=['james','omega','neon','xenon','gamma','sara','peta','deltafl',
   'deltafvr','deltaup','octal','camila','alpha','eta','kappa',
@@ -3048,8 +3069,9 @@ const ALL_TOOLS=[
 
 async function admCheckAdmin(){
   try{const r=await(await fetch('/api/auth/is_admin')).json();
-    MY_EMAIL=r.email||'';
-    const el=$('s-logged-in-as');if(el)el.textContent=MY_EMAIL?('Logged in as: '+MY_EMAIL):'';
+    MY_EMAIL=r.email||'';MY_NAME=r.name||'';
+    const emEl=$('s-my-email');if(emEl)emEl.value=MY_EMAIL;
+    const nmEl=$('s-my-name');if(nmEl&&document.activeElement!==nmEl)nmEl.value=MY_NAME;
     if(r.is_admin){
       $('tab-admin').style.display='';
       MY_ADMIN_ROLE=r.role||'admin';MY_ADMIN_BUILDING=r.building||'';

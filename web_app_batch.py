@@ -2335,6 +2335,17 @@ def api_change_password():
         return jsonify({"status": "error", "message": "Not logged in."}), 401
     return jsonify(auth.change_password(logged[0]["email"], old_pw, new_pw))
 
+@app.route("/api/auth/update-name", methods=["POST"])
+def api_update_name():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"status": "error", "message": "Name cannot be empty."}), 400
+    logged = auth.list_logged_in()
+    if not logged:
+        return jsonify({"status": "error", "message": "Not logged in."}), 401
+    return jsonify(auth.update_name(logged[0]["email"], name))
+
 @app.route("/api/auth/mac")
 def api_auth_mac():
     """Return MAC address for display to user (token for admin)."""
@@ -3959,6 +3970,7 @@ def api_auth_is_admin():
     is_admin = result.get("is_admin", False)
     role = result.get("role", "")
     building = result.get("building", "")
+    name = result.get("name", "")
     if is_admin:
         accts = auth._load_accounts()
         if email in accts:
@@ -3967,7 +3979,9 @@ def api_auth_is_admin():
     elif result.get("error"):
         accts = auth._load_accounts()
         is_admin = accts.get(email, {}).get("is_admin", False)
-    return jsonify({"is_admin": is_admin, "role": role, "building": building, "email": email})
+    if not name:
+        name = auth._load_accounts().get(email, {}).get("name", "")
+    return jsonify({"is_admin": is_admin, "role": role, "building": building, "email": email, "name": name})
 
 # --------------------------------------------------------------------------- #
 # Admin config (Apps Script URL, API key sync)

@@ -192,6 +192,29 @@ def change_password(email, old_password, new_password):
     return result
 
 
+def update_name(email, name):
+    """Change the logged-in user's display name (self-service - email itself is
+    never editable this way, only an admin can change it). Uses the password
+    already saved locally for this account, same trust model as periodic
+    re-validation - no need to make the user re-type it just to rename themselves."""
+    if not _get_api_url():
+        return {"status": "error", "message": "Auth not configured"}
+    accounts = _load_accounts()
+    acct = accounts.get(email)
+    if not acct:
+        return {"status": "error", "message": "Not logged in."}
+    result = _api_call({
+        "action": "update_name",
+        "email": email,
+        "password": acct.get("password", ""),
+        "name": name,
+    })
+    if result.get("status") == "name_changed":
+        acct["name"] = name
+        _save_accounts(accounts)
+    return result
+
+
 def register(email, password, name=""):
     """Register a new account. Returns status dict."""
     if not _get_api_url():
