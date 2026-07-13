@@ -1496,6 +1496,11 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     f"({total_links} results across {page_num} pages)")
             return {"status": "found", "matches": matches, "pages": page_num}
         if blocked_incomplete:
+            max_retries = CONFIG.get("max_block_retries", 3)
+            if _try < max_retries:
+                add_log(f"'{keyword}': search cut short by a block at page {page_num} - "
+                        f"restarting keyword from page 1 (retry {_try + 1}/{max_retries})")
+                continue
             add_log(f"'{keyword}': search cut short by a block at page {page_num} - "
                     f"ranking may exist deeper ({total_links} results seen)")
             return {"status": f"not_found (incomplete - blocked at page {page_num})",
