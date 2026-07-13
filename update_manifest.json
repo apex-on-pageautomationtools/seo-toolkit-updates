@@ -34,7 +34,7 @@
       "path": "web_app_batch.py",
       "hash": "7ccc70ffc7eedea24a0220919af4fd4692554f7675deb31f5a05ae427ea739f6",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py",
-      "sha256": "3a9d251622c075c9ecb0a6c3910ef4e2c228d4bc7d6f0eb8617bdadeab69859d"
+      "sha256": "2487ded512039ea56e4f11bcd990a36b1bc22e6d3a03b272b49d095e0ed0b1e3"
     },
     {
       "path": "updater.py",
@@ -141,7 +141,7 @@
       "path": "templates/index.html",
       "hash": "0c6c70609b361a874941cb1406d0d08737553c73cb8e6aec0e9b099c882c4f9e",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html",
-      "sha256": "c4357e330a20df61f1683dcfa2981b6975d45726d0cbe4ff80c076f4b068e207"
+      "sha256": "a354eea9ad2c5263bce1020d2c6508ca164a163b59c7cf20ac90854e56fcacb7"
     },
     {
       "path": "brief_analysis.py",

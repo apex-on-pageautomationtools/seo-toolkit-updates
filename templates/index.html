@@ -1131,10 +1131,10 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       </div>
       <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Submits each URL to the Wayback Machine's Save Page Now to create a fresh, dated snapshot - useful as a trusted citation/backup independent of the SEO reports. Rotates through your proxy pool since archive.org blocks by IP; each URL gets up to 3 tries.</p>
       <div class="field">
-        <label>URLs <span class="hint">(one per line)</span></label>
+        <label>URLs <span class="hint">(one per line, max 20 per batch)</span></label>
         <textarea id="wb-urls" rows="8" placeholder="https://example.com/&#10;https://example.com/about/"></textarea>
       </div>
-      <div class="note">Pure HTTP - no browser needed. Speed depends on archive.org, typically a few seconds per URL.</div>
+      <div class="note">Max 20 URLs per batch - archive.org rate-limits/blocks bulk submissions. Run additional batches for more. Pure HTTP - no browser needed.</div>
     </section>
 
     <section class="card panel" id="panel-seranking" style="display:none">
@@ -2194,6 +2194,8 @@ async function doStart(){
   }else if(mode==='wayback'){
     p.urls=$('wb-urls').value.trim();
     if(!p.urls){toast('Enter at least one URL');return;}
+    const _wbLineCount=p.urls.split('\n').filter(l=>l.trim()).length;
+    if(_wbLineCount>20){toast('Max 20 URLs per batch (archive.org blocks bulk submissions) - split into smaller batches');return;}
     const rw=await fetch('/api/wayback/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
     const dw=await rw.json();
     if(dw.error){toast(dw.error);return;}

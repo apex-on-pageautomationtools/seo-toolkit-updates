@@ -3261,6 +3261,9 @@ def api_wayback_start():
     urls = [u.strip() for u in raw.splitlines() if u.strip()]
     if not urls:
         return jsonify({"error": "At least one URL required."}), 400
+    if len(urls) > 20:
+        return jsonify({"error": "Max 20 URLs per batch - archive.org blocks bulk submissions. "
+                                  "Split into smaller batches."}), 400
     t = threading.Thread(target=_run_wayback_submit, args=(urls,), daemon=True)
     t.start()
     return jsonify({"status": "started", "count": len(urls)})
