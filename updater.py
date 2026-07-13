@@ -73,17 +73,20 @@ def _download_file(url, dest, timeout=90):
             os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
             with open(tmp, "wb") as f:
                 shutil.copyfileobj(r, f)
-        # Antivirus real-time scanning can briefly lock a just-written file before
-        # the rename, especially for .zip/.exe-adjacent paths - retry the rename a
-        # few times instead of failing outright on a transient PermissionError.
-        for _r in range(5):
+        # Antivirus real-time scanning can lock a just-written file before the
+        # rename - confirmed on a real machine to sometimes outlast a few seconds
+        # of backoff (site-packages/*.zip paths are a common AV/EDR scan target).
+        # 10 tries with growing backoff, capped at ~2s/try (~20s total worst case),
+        # gives real headroom without hanging a launch indefinitely if the lock
+        # truly never clears (in which case the exclusion is the actual fix).
+        for _r in range(10):
             try:
                 os.replace(tmp, dest)
                 break
             except PermissionError:
-                if _r == 4:
+                if _r == 9:
                     raise
-                time.sleep(0.5 * (_r + 1))
+                time.sleep(min(2.0, 0.4 * (_r + 1)))
         return True, ""
     except Exception as e:
         try:
