@@ -1566,6 +1566,8 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
                     row[f"serp_url{suffix}"] = m["serp_url"]
                 if matches[0].get("screenshot"):
                     row["screenshot"] = matches[0]["screenshot"]
+                if matches[0].get("screenshot_url"):
+                    row["screenshot_url"] = matches[0]["screenshot_url"]
                 return row
             row = {"keyword": kw, "position": "-", "serp_url": "",
                    "status": result.get("status", "not_found")}
@@ -2773,12 +2775,18 @@ def api_export_csv():
             for k in r:
                 if k not in base and k not in extra:
                     extra.add(k)
-        # Sort extra columns: position_2, serp_url_2, position_3, ...
+        # Sort extra columns: position_2, serp_url_2, position_3, ...; screenshot
+        # columns fixed at the end (filename then its shareable URL) instead of
+        # relying on set-iteration order, which isn't deterministic.
         def _col_sort(c):
             for i, prefix in enumerate(["position_", "serp_url_"]):
                 if c.startswith(prefix):
                     num = c[len(prefix):]
                     return (int(num) if num.isdigit() else 99, i)
+            if c == "screenshot":
+                return (100, 0)
+            if c == "screenshot_url":
+                return (100, 1)
             return (99, 99)
         fields = base + sorted(extra, key=_col_sort)
     elif m == "backlink":
