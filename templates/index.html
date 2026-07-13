@@ -2288,13 +2288,24 @@ async function doStart(){
     p.lang=$('i-lang').value||'en';
     if(!p.keywords){toast('Enter at least one URL');return;}
   }
-  await saveEngineOpts();
   const m=p.mode;   // pin to the tool being started (user may switch tabs mid-request)
-  const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
-  const d=await r.json();
-  if(d.error){toast(d.error);return;}   // rejected (this tool already running) - keep existing results on screen
-  clearResults(m);lastCounts[m]=0;applyPrev[m]='starting';  // only clear once the new run is actually accepted
-  toast('Started');startPoll(m);setButtons('running',m);
+  // Instant feedback - don't wait on 2 sequential network round-trips (saveEngineOpts
+  // then /api/start) before the button/UI shows anything is happening.
+  toast('Starting...');
+  setButtons('starting',m);
+  try{
+    await saveEngineOpts();
+    const r=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
+    let d;
+    try{ d=await r.json(); }
+    catch(parseErr){ toast('Server error (HTTP '+r.status+') - could not start.'); setButtons('idle',m); return; }
+    if(!r.ok||d.error){ toast(d.error||('Failed to start (HTTP '+r.status+')')); setButtons('idle',m); return; }
+    clearResults(m);lastCounts[m]=0;applyPrev[m]='starting';  // only clear once the new run is actually accepted
+    toast('Started');startPoll(m);setButtons('running',m);
+  }catch(netErr){
+    toast('Could not reach the server - try again.');
+    setButtons('idle',m);
+  }
 }
 const _mkbody=m=>({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:m})});
 async function doPause(){if(mode==='crawl'){crawlPause();return;}const m=mode;await fetch('/api/pause',_mkbody(m));setButtons('paused',m);}
