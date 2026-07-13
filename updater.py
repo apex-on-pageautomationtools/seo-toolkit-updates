@@ -21,13 +21,17 @@ UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/apex-on-pageautomationt
 
 
 def _file_hash(filepath):
-    """SHA-256 hash of a local file."""
-    h = hashlib.sha256()
+    """SHA-256 hash of a local file, line-ending normalized (CRLF -> LF) - this
+    matches exactly how the manifest's own hashes are generated. Some networks
+    (corporate proxy / antivirus / SSL-inspection) silently rewrite line endings in
+    transit, which produced a permanent false 'hash mismatch' on affected machines
+    even though the downloaded content was functionally identical. Normalizing here
+    makes the comparison immune to that regardless of what's altering bytes in
+    transit."""
     try:
         with open(filepath, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                h.update(chunk)
-        return h.hexdigest()
+            data = f.read()
+        return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
     except Exception:
         return ""
 
