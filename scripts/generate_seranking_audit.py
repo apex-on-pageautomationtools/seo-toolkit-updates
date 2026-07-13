@@ -157,10 +157,46 @@ def _looks_like_real_text(s):
     return (printable / len(s)) > 0.85
 
 
+def _ensure_pdfminer():
+    """pdfminer.six properly decodes embedded custom font glyph encodings that
+    the lightweight stdlib extractor below can't - confirmed against a real
+    SEranking PDF export where the stdlib path recovered ~0 real words and
+    pdfminer recovered the full report cleanly. Installed on first use into
+    this same embedded interpreter (pure top-level import check, no restart
+    needed); if pip/PyPI isn't reachable (offline machine, blocked network),
+    this just returns None and the caller falls back to the stdlib extractor."""
+    try:
+        from pdfminer.high_level import extract_text
+        return extract_text
+    except ImportError:
+        pass
+    try:
+        import subprocess
+        subprocess.run([sys.executable, "-m", "pip", "install", "pdfminer.six", "--quiet"],
+                        timeout=120, capture_output=True, check=True)
+        from pdfminer.high_level import extract_text
+        return extract_text
+    except Exception:
+        return None
+
+
 def extract_pdf_text(path):
-    """Return the PDF's visible text as a list of lines, grouped loosely by the
-    order strings appear in the file (approximates reading order for the simple,
-    mostly-linear layouts these audit-summary PDFs use)."""
+    """Return the PDF's visible text as a list of lines. Tries pdfminer.six
+    first (handles real-world custom-font-encoded PDFs correctly); falls back
+    to a lightweight stdlib-only extraction (works for PDFs with literal text
+    strings, e.g. simpler/older exports) if pdfminer is unavailable or fails."""
+    extract_text = _ensure_pdfminer()
+    if extract_text is not None:
+        try:
+            import logging
+            logging.getLogger("pdfminer").setLevel(logging.ERROR)
+            text = extract_text(path)
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            if lines:
+                return lines
+        except Exception:
+            pass
+
     with open(path, "rb") as f:
         raw = f.read()
     lines = []
@@ -179,19 +215,24 @@ def build_pdf_summary_rows(pdf_path):
     summary-style PDF rarely has enough per-URL structure to safely auto-suggest
     from without risking wrong/invented claims.
 
-    Some PDFs (confirmed with real SEMrush exports) render their visible text
-    through an embedded custom font's glyph encoding rather than literal text
-    strings in the content stream - a lightweight stdlib extractor can only
-    recover font metadata noise from those, never the actual words. Showing that
-    noise as if it were real content would be actively misleading, so a quality
-    check here refuses to return it and reports the limitation honestly instead."""
+    extract_pdf_text() tries pdfminer.six first, which correctly decodes the
+    embedded custom font glyph encodings some PDFs (confirmed with real
+    SEranking/SEMrush exports) use instead of literal text strings - the
+    lightweight stdlib fallback can only recover font metadata noise from
+    those, never the actual words. The quality check below is a last-resort
+    safety net for when even pdfminer can't get real text (e.g. a genuinely
+    scanned/image-only PDF, or pdfminer/PyPI unavailable on this machine) -
+    showing that noise as if it were real content would be actively
+    misleading, so it refuses to return it and reports the limitation
+    honestly instead."""
     lines = extract_pdf_text(pdf_path)
     words = " ".join(lines).split()
     has_real_words = sum(1 for w in words if w.isalpha() and len(w) > 2)
     if not lines or has_real_words < 5:
         return [[1, "This PDF's text could not be reliably extracted - it likely renders "
                     "text through an embedded custom font rather than literal text (common "
-                    "in SEMrush/design-tool exports). Please review the PDF manually, or "
+                    "in SEMrush/design-tool exports), and pdfminer.six could not be installed "
+                    "or failed to decode it either. Please review the PDF manually, or "
                     "provide the underlying data as an .xlsx export instead."]]
     return [[i + 1, line] for i, line in enumerate(lines)]
 
@@ -361,7 +402,97 @@ def _write_sheet(wb_out, name, headers, rows):
     ws.freeze_panes = "A2"
 
 
-def process_workbook(in_path, out_path, brand, pdf_path=None):
+# --------------------------------------------------------------------------- #
+# Zip-of-.xls input (SEranking's "Pages" export downloaded per-issue, zipped
+# together by the team instead of the single combined .xlsx). Each file is a
+# legacy binary .xls (Composite Document / BIFF format, not .xlsx) named just
+# "pages_<domain>_<timestamp>.xls" - no issue name in the filename or inside
+# the file, so which issue each one covers has to be inferred from its column
+# set instead of a sheet name (the way the combined-.xlsx path infers it).
+# --------------------------------------------------------------------------- #
+def _ensure_xlrd():
+    """xlrd is the only maintained reader for legacy binary .xls (openpyxl only
+    reads .xlsx). Installed on first use into this same embedded interpreter,
+    same pattern as _ensure_pdfminer()."""
+    try:
+        import xlrd
+        return xlrd
+    except ImportError:
+        pass
+    try:
+        import subprocess
+        subprocess.run([sys.executable, "-m", "pip", "install", "xlrd==2.0.1", "--quiet"],
+                        timeout=120, capture_output=True, check=True)
+        import xlrd
+        return xlrd
+    except Exception:
+        return None
+
+
+def _read_seranking_zip(zip_path):
+    """Returns [(filename, headers, rows), ...] for every .xls/.xlsx member.
+    ignore_workbook_corruption=True is required - confirmed against a real
+    SEranking zip export where 3 of 5 files raised a CompDocError without it
+    despite being perfectly readable files (a known false-positive in xlrd's
+    strict OLE2 stream validation, not actual corruption)."""
+    import zipfile
+    xlrd = _ensure_xlrd()
+    out = []
+    with zipfile.ZipFile(zip_path) as zf:
+        names = [n for n in zf.namelist() if n.lower().endswith((".xls", ".xlsx")) and not n.startswith("__MACOSX")]
+        for name in names:
+            data = zf.read(name)
+            try:
+                if name.lower().endswith(".xlsx"):
+                    import io
+                    wb_in = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
+                    ws_in = wb_in[wb_in.sheetnames[0]]
+                    headers, rows = _read_sheet(ws_in)
+                elif xlrd is not None:
+                    wb_in = xlrd.open_workbook(file_contents=data, ignore_workbook_corruption=True)
+                    sh = wb_in.sheet_by_index(0)
+                    headers = [str(v).strip() if v is not None else "" for v in sh.row_values(0)]
+                    rows = [list(sh.row_values(r)) for r in range(1, sh.nrows)
+                            if any(v not in (None, "") for v in sh.row_values(r))]
+                else:
+                    log(f"   [warn] xlrd unavailable - skipping '{name}'")
+                    continue
+            except Exception as e:
+                log(f"   [warn] could not read '{name}': {type(e).__name__}: {e}")
+                continue
+            if headers:
+                out.append((name, headers, rows))
+    return out
+
+
+# Column-signature -> display name. Matched against a normalized set of header
+# names; order matters (more specific signatures checked first). The chosen
+# name is fed into the SAME _apply_suggestions()/_NAME_JUDGMENT_RULES path the
+# combined-.xlsx sheets use, so e.g. "Title Issues" still gets a real
+# "Suggested Title" column generated - no separate suggestion logic needed.
+def _classify_xls_report(headers):
+    cols = {_norm(h) for h in headers}
+    has = lambda *names: all(n in cols for n in names)
+    if has("title", "duplicate title"):
+        return "Title Issues"
+    if has("description", "duplicate description"):
+        return "Description Issues"
+    if has("h1", "duplicate h1"):
+        return "H1 Issues"
+    if "target url" in cols and "target url http status code" in cols:
+        return "Redirect Chains"
+    if any(n in cols for n in ("blocked by robots.txt", "robots meta tag", "x-robots-tag")):
+        return "Robots Blocking Issues"
+    if "page http status code" in cols:
+        return "4XX HTTP Status Codes"
+    # Unrecognized column set - name it from whatever non-generic column it has,
+    # so it's still identifiable in the output rather than a bare "Sheet".
+    distinctive = [h for h in headers if _norm(h) not in
+                   ("page url", "referring pages", "is in sitemap", "url length")]
+    return (distinctive[0] if distinctive else "Pages") + " Issues"
+
+
+def process_workbook(in_path, out_path, brand, pdf_path=None, zip_path=None):
     wb_out = openpyxl.Workbook()
     wb_out.remove(wb_out.active)
 
@@ -377,6 +508,17 @@ def process_workbook(in_path, out_path, brand, pdf_path=None):
             headers, rows = _apply_suggestions(sheet_name, headers, rows, brand)
             _write_sheet(wb_out, sheet_name, headers, rows)
 
+    if zip_path:
+        log(f"Reading zip: {zip_path}")
+        members = _read_seranking_zip(zip_path)
+        for i, (fname, headers, rows) in enumerate(members):
+            display_name = _classify_xls_report(headers)
+            log(f"[{i + 1}/{len(members)}] '{fname}' -> '{display_name}' ({len(rows)} row(s))...")
+            if not headers:
+                continue
+            headers, rows = _apply_suggestions(display_name, headers, rows, brand)
+            _write_sheet(wb_out, display_name, headers, rows)
+
     if pdf_path:
         log(f"Reading PDF: {pdf_path}")
         rows = build_pdf_summary_rows(pdf_path)
@@ -391,12 +533,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="in_path", default=None, help="SEranking Site Audit .xlsx export")
     ap.add_argument("--pdf", dest="pdf_path", default=None, help="A PDF audit export (e.g. SEMrush overview)")
+    ap.add_argument("--zip", dest="zip_path", default=None,
+                     help="A zip of per-issue SEranking 'Pages' .xls exports")
     ap.add_argument("--out", dest="out_path", required=True, help="Output .xlsx path")
     ap.add_argument("--brand", default="", help="Brand name for suggested titles/descriptions")
     args = ap.parse_args()
-    if not args.in_path and not args.pdf_path:
-        ap.error("Provide --in (.xlsx) and/or --pdf")
-    process_workbook(args.in_path, args.out_path, args.brand, args.pdf_path)
+    if not args.in_path and not args.pdf_path and not args.zip_path:
+        ap.error("Provide --in (.xlsx) and/or --pdf and/or --zip")
+    process_workbook(args.in_path, args.out_path, args.brand, args.pdf_path, args.zip_path)
 
 
 if __name__ == "__main__":

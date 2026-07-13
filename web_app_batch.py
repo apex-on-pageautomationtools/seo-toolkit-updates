@@ -3457,12 +3457,12 @@ sr_lock = threading.Lock()
 sr_stop = threading.Event()
 
 
-def _run_seranking_audit(in_path, pdf_path, brand):
+def _run_seranking_audit(in_path, pdf_path, brand, zip_path=None):
     with sr_lock:
         sr_state.update({"status": "running", "log": [], "output_file": "",
                          "output_file_backup": "", "error_msg": ""})
     sr_stop.clear()
-    src_name = os.path.basename(in_path or pdf_path)
+    src_name = os.path.basename(in_path or zip_path or pdf_path)
     activity(f"SEranking audit started ({src_name})")
 
     def _log(msg):
@@ -3481,6 +3481,8 @@ def _run_seranking_audit(in_path, pdf_path, brand):
         cmd += ["--in", in_path]
     if pdf_path:
         cmd += ["--pdf", pdf_path]
+    if zip_path:
+        cmd += ["--zip", zip_path]
 
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -3513,7 +3515,7 @@ def _run_seranking_audit(in_path, pdf_path, brand):
             sr_state["status"] = "error"
             sr_state["error_msg"] = str(e)
     finally:
-        for _p in (in_path, pdf_path):
+        for _p in (in_path, pdf_path, zip_path):
             if _p:
                 try:
                     os.remove(_p)
@@ -3528,24 +3530,32 @@ def api_seranking_start():
             return jsonify({"error": "SEranking audit already running."}), 400
     xf = request.files.get("file")
     pf = request.files.get("pdf")
-    if (not xf or not xf.filename) and (not pf or not pf.filename):
-        return jsonify({"error": "Upload a SEranking .xlsx export and/or a PDF audit export."}), 400
+    zf = request.files.get("zip")
+    if (not xf or not xf.filename) and (not pf or not pf.filename) and (not zf or not zf.filename):
+        return jsonify({"error": "Upload a SEranking .xlsx export, a PDF audit export, "
+                                  "and/or a zip of per-issue .xls exports."}), 400
     if xf and xf.filename and not xf.filename.lower().endswith((".xlsx", ".xls")):
         return jsonify({"error": "The Excel file must be .xlsx/.xls."}), 400
     if pf and pf.filename and not pf.filename.lower().endswith(".pdf"):
         return jsonify({"error": "The PDF file must be .pdf."}), 400
+    if zf and zf.filename and not zf.filename.lower().endswith(".zip"):
+        return jsonify({"error": "The zip file must be .zip."}), 400
     brand = (request.form.get("brand") or "").strip()
     os.makedirs(UPLOADS_DIR, exist_ok=True)
     ts = int(time.time())
     in_path = None
     pdf_path = None
+    zip_path = None
     if xf and xf.filename:
         in_path = os.path.join(UPLOADS_DIR, f"seranking_{ts}_{os.path.basename(xf.filename)}")
         xf.save(in_path)
     if pf and pf.filename:
         pdf_path = os.path.join(UPLOADS_DIR, f"seranking_{ts}_{os.path.basename(pf.filename)}")
         pf.save(pdf_path)
-    t = threading.Thread(target=_run_seranking_audit, args=(in_path, pdf_path, brand), daemon=True)
+    if zf and zf.filename:
+        zip_path = os.path.join(UPLOADS_DIR, f"seranking_{ts}_{os.path.basename(zf.filename)}")
+        zf.save(zip_path)
+    t = threading.Thread(target=_run_seranking_audit, args=(in_path, pdf_path, brand, zip_path), daemon=True)
     t.start()
     return jsonify({"status": "started"})
 
