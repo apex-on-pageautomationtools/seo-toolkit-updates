@@ -32,10 +32,24 @@ def _file_hash(filepath):
         return ""
 
 
+def _cache_busted(url):
+    """Append a unique query param so no proxy/CDN/ISP cache between here and GitHub
+    can ever serve a stale response - a stuck cache was confirmed to be why updater.py
+    itself went nearly a week without ever picking up a real update: hash comparisons
+    were silently running against a frozen-in-time manifest."""
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}_cb={int(time.time() * 1000)}"
+
+
+_NO_CACHE_HEADERS = {"User-Agent": "SEOToolkitPro-Updater/1.0",
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache"}
+
+
 def _fetch_json(url, timeout=30):
     """Fetch JSON from a URL."""
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "SEOToolkitPro-Updater/1.0"})
+        req = urllib.request.Request(_cache_busted(url), headers=_NO_CACHE_HEADERS)
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))
     except Exception:
@@ -50,7 +64,7 @@ def _download_file(url, dest, timeout=90):
     did - a swallowed exception was making every failure look identical/unexplained."""
     tmp = dest + ".part"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "SEOToolkitPro-Updater/1.0"})
+        req = urllib.request.Request(_cache_busted(url), headers=_NO_CACHE_HEADERS)
         with urllib.request.urlopen(req, timeout=timeout) as r:
             os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
             with open(tmp, "wb") as f:

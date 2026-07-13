@@ -40,7 +40,7 @@
       "path": "updater.py",
       "hash": "a47a34902baf1f1242edce81b84efee1c922dcf062b8ab785b2dc21f89f71277",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/updater.py",
-      "sha256": "4dc5cc3ac251ee36a03852d2f7fc4afde31574b09887b7c2968217b151aa4c57"
+      "sha256": "d21a3867e76c3b9d253f2c1ac89d117065e2474147c31ddc2536f83aace1b2e2"
     },
     {
       "path": "static/manifest.webmanifest",
