@@ -2243,6 +2243,63 @@ def _shared_proxies():
 
 
 # --------------------------------------------------------------------------- #
+# Runtime API keys (central sheet, admin-managed; optional per-building
+# overrides) - synced automatically in the background for every user, mirroring
+# the shared-proxy pool above, instead of requiring a manual admin button press.
+# --------------------------------------------------------------------------- #
+RUNTIME_KEYS_TTL = 900
+
+
+def _fetch_runtime_keys_now():
+    """Merge central-sheet keys with this user's building override, if any, and
+    write straight into CONFIG. Central keys come from the auth-gated
+    runtime_keys action on the central gateway; the per-building override (if the
+    building's own GSC-tracker sheet has a "Keys" tab) comes from that building's
+    own GSC script - each building's admin manages their own override there
+    without needing any central-sheet access."""
+    global CONFIG
+    email, password = auth.get_any_credentials()
+    if not email:
+        return
+    keys = {}
+    try:
+        result = auth._api_call({"action": "runtime_keys", "email": email, "password": password})
+        if result.get("success"):
+            keys.update({k: v for k, v in result.get("keys", {}).items() if v})
+    except Exception:
+        pass
+    try:
+        webapp_url = _gsc_webapp_url()
+        if webapp_url:
+            resp = http_requests.post(webapp_url, json={"action": "get_keys"}, timeout=15)
+            data = resp.json()
+            if data.get("success"):
+                keys.update({k: v for k, v in data.get("keys", {}).items() if v})
+    except Exception:
+        pass
+    if keys:
+        changed = any(CONFIG.get(k) != v for k, v in keys.items())
+        for k, v in keys.items():
+            CONFIG[k] = v.strip() if isinstance(v, str) else v
+        if changed:
+            save_config(CONFIG)
+
+
+def _runtime_keys_sync_loop():
+    """Waits for a logged-in user, fetches/merges runtime keys in the background,
+    then refreshes every RUNTIME_KEYS_TTL seconds for the life of the app - so a
+    key added centrally (or overridden per-building) reaches every machine
+    automatically, without anyone needing to click 'Sync Keys'."""
+    while True:
+        email, _pw = auth.get_any_credentials()
+        if email:
+            _fetch_runtime_keys_now()
+            time.sleep(RUNTIME_KEYS_TTL)
+        else:
+            time.sleep(15)
+
+
+# --------------------------------------------------------------------------- #
 # Helpers for request parsing
 # --------------------------------------------------------------------------- #
 def _proxies_from_request(data):
@@ -4026,26 +4083,18 @@ def api_admin_save_config():
 
 @app.route("/api/admin/sync_keys", methods=["POST"])
 def api_admin_sync_keys():
-    global CONFIG
-    webapp_url = _gsc_webapp_url()
-    if not webapp_url:
-        return jsonify({"ok": False, "error": "Apps Script URL not configured"})
+    """Manual trigger for the same central+per-building merge the background
+    loop (_runtime_keys_sync_loop) already does automatically every
+    RUNTIME_KEYS_TTL seconds - useful right after adding/changing a key in a
+    sheet, so an admin doesn't have to wait for the next scheduled sync."""
     try:
-        resp = http_requests.post(webapp_url, json={"action": "get_keys"}, timeout=20)
-        data = resp.json()
-        if not data.get("success"):
-            return jsonify({"ok": False, "error": data.get("error", "Sheet returned error")})
-        keys = data.get("keys", {})
-        for k, v in keys.items():
-            if v and isinstance(v, str):
-                CONFIG[k] = v.strip()
-        projects = data.get("gsc_projects", [])
-        if projects:
-            CONFIG["gsc_projects"] = projects
-        save_config(CONFIG)
-        masked_keys = {k: ("****" + v[-4:] if len(v) > 4 else "****") for k, v in keys.items() if v}
-        activity(f"API keys synced: {', '.join(masked_keys.keys())}; {len(projects)} GSC project(s)")
-        return jsonify({"ok": True, "keys": masked_keys, "gsc_projects_count": len(projects)})
+        before = dict(CONFIG)
+        _fetch_runtime_keys_now()
+        changed_keys = {k: v for k, v in CONFIG.items() if k in SENSITIVE_KEYS and v and before.get(k) != v}
+        masked_keys = {k: ("****" + v[-4:] if isinstance(v, str) and len(v) > 4 else "****")
+                        for k, v in CONFIG.items() if k in SENSITIVE_KEYS and v}
+        activity(f"API keys synced: {', '.join(masked_keys.keys())}")
+        return jsonify({"ok": True, "keys": masked_keys, "changed": list(changed_keys.keys())})
     except Exception as e:
         activity(f"Key sync error: {e}", "error")
         return jsonify({"ok": False, "error": str(e)})
@@ -4606,6 +4655,10 @@ def main():
     # Audit's domain lookup is instant by the time someone opens those tabs,
     # instead of a live Sheets read on first use.
     threading.Thread(target=_gsc_mapping_prefetch_loop, daemon=True).start()
+
+    # Keep runtime API keys (ImgBB, PSI, Gemini, etc.) synced for every user
+    # automatically - see _runtime_keys_sync_loop for the central+per-building merge.
+    threading.Thread(target=_runtime_keys_sync_loop, daemon=True).start()
 
     try:
         from werkzeug.serving import make_server
