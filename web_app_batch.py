@@ -3265,7 +3265,16 @@ def api_wayback_start():
             return jsonify({"error": "Wayback submission already running."}), 400
     data = request.get_json(silent=True) or {}
     raw = (data.get("urls") or "").strip()
-    urls = [u.strip() for u in raw.splitlines() if u.strip()]
+    seen = set()
+    urls = []
+    for u in raw.splitlines():
+        u = u.strip()
+        if not u:
+            continue
+        key = u.rstrip("/").lower()
+        if key not in seen:
+            seen.add(key)
+            urls.append(u)
     if not urls:
         return jsonify({"error": "At least one URL required."}), 400
     if len(urls) > 20:

@@ -2206,20 +2206,37 @@ async function doStart(){
     startSrPoll();
     return;
   }else if(mode==='wayback'){
-    p.urls=$('wb-urls').value.trim();
-    if(!p.urls){toast('Enter at least one URL');return;}
-    const _wbLineCount=p.urls.split('\n').filter(l=>l.trim()).length;
-    if(_wbLineCount>20){toast('Max 20 URLs per batch (archive.org blocks bulk submissions) - split into smaller batches');return;}
-    const rw=await fetch('/api/wayback/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
-    const dw=await rw.json();
-    if(dw.error){toast(dw.error);return;}
-    toast('Wayback submission started ('+dw.count+' URL(s))');
+    const _wbRaw=$('wb-urls').value.trim();
+    if(!_wbRaw){toast('Enter at least one URL');return;}
+    const _wbSeen=new Set();
+    const _wbLines=[];
+    _wbRaw.split('\n').map(l=>l.trim()).filter(l=>l).forEach(l=>{
+      const key=l.replace(/\/+$/,'').toLowerCase();
+      if(!_wbSeen.has(key)){_wbSeen.add(key);_wbLines.push(l);}
+    });
+    if(_wbLines.length>20){toast('Max 20 URLs per batch (archive.org blocks bulk submissions) - split into smaller batches');return;}
+    p.urls=_wbLines.join('\n');
+    // Instant feedback - don't wait on the network round-trip before the UI reacts.
+    toast('Starting Wayback submission ('+_wbLines.length+' URL(s))...');
     $('empty-wayback').style.display='none';
     $('wayback-active').classList.remove('hidden');
     $('wb-results-body').innerHTML='';
     $('btn-wb-export').disabled=true;
+    $('wb-progress').textContent='Starting...';$('wb-progress').className='tag t-yes';
+    $('wb-log').textContent='Starting submission of '+_wbLines.length+' URL(s)...';
     setButtons('running');
-    startWbPoll();
+    try{
+      const rw=await fetch('/api/wayback/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
+      let dw;
+      try{ dw=await rw.json(); }
+      catch(parseErr){ toast('Server error (HTTP '+rw.status+') - could not start. Try restarting the tool.'); wbReset(); return; }
+      if(!rw.ok||dw.error){ toast(dw.error||('Failed to start (HTTP '+rw.status+')')); wbReset(); return; }
+      toast('Wayback submission started ('+dw.count+' URL(s))');
+      startWbPoll();
+    }catch(netErr){
+      toast('Could not reach the server - try again.');
+      wbReset();
+    }
     return;
   }else if(mode==='crawl'){
     crawlStart();return;
