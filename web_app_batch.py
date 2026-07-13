@@ -1238,52 +1238,14 @@ def _upload_ranking_screenshot(path):
     can carry a real shareable URL instead of the /api/screenshot/<file> link,
     which only resolves while this app's local server is running.
 
-    Tries the no-signup hosts first (transfer.sh, storage.to, Pixeldrain - all free,
-    no API key), then falls back to ImgBB only if an API key has been configured
-    (Admin -> Sync API Keys). catbox.moe/0x0.st were dropped: 0x0.st disabled
-    uploads entirely ('nothing but AI botnet spam'), and catbox.moe is unreachable
-    from some networks."""
-    fname = os.path.basename(path)
-
-    # transfer.sh - PUT the raw file, get a plain-text URL back. 14-day retention.
-    try:
-        with open(path, "rb") as f:
-            r = http_requests.put(f"https://transfer.sh/{fname}", data=f, timeout=25)
-        url = r.text.strip()
-        if r.status_code in (200, 201) and url.startswith("http"):
-            return url
-        add_log(f"Screenshot upload (transfer.sh) returned unexpected response: {r.status_code} {url[:80]}")
-    except Exception as e:
-        add_log(f"Screenshot upload (transfer.sh) failed: {type(e).__name__}: {e}")
-
-    # storage.to - multipart POST, plain-text or JSON URL back. ~30-day retention.
-    try:
-        with open(path, "rb") as f:
-            r = http_requests.post("https://storage.to", files={"file": f}, timeout=25)
-        url = ""
-        try:
-            data = r.json()
-            url = data.get("url") or data.get("data", {}).get("url", "")
-        except Exception:
-            url = r.text.strip()
-        if r.status_code in (200, 201) and url.startswith("http"):
-            return url
-        add_log(f"Screenshot upload (storage.to) returned unexpected response: {r.status_code} {url[:80]}")
-    except Exception as e:
-        add_log(f"Screenshot upload (storage.to) failed: {type(e).__name__}: {e}")
-
-    # Pixeldrain - image-focused, no key needed, ~30 days and resets on each view.
-    try:
-        with open(path, "rb") as f:
-            r = http_requests.post("https://pixeldrain.com/api/file", files={"file": f}, timeout=20)
-        data = r.json()
-        if r.status_code in (200, 201) and data.get("success") and data.get("id"):
-            return "https://pixeldrain.com/u/" + data["id"]
-        add_log(f"Screenshot upload (Pixeldrain) failed: {data.get('message', r.text[:120])}")
-    except Exception as e:
-        add_log(f"Screenshot upload (Pixeldrain) failed: {type(e).__name__}: {e}")
-
-    # ImgBB - real image host, essentially permanent - last resort, needs a key.
+    ImgBB (real, purpose-built image host) is tried FIRST when a key is configured
+    (Admin -> Sync API Keys) - it's the only option confirmed reliable, and checking
+    it first avoids burning 30+ seconds per screenshot on dead hosts before reaching
+    it. Pixeldrain is a no-key fallback for when no key is set. Dropped entirely:
+    catbox.moe/0x0.st (unreachable/uploads disabled), transfer.sh (connection
+    actively refused - service appears dead), storage.to (Cloudflare bot-challenge
+    page instead of an upload response - can never work via a plain HTTP request,
+    on any network) - all confirmed on a real machine, not just this sandbox."""
     imgbb_key = CONFIG.get("imgbb_api_key", "").strip()
     if imgbb_key:
         try:
@@ -1298,6 +1260,20 @@ def _upload_ranking_screenshot(path):
             add_log(f"Screenshot upload (ImgBB) failed: {data.get('error', {}).get('message', r.text[:120])}")
         except Exception as e:
             add_log(f"Screenshot upload (ImgBB) failed: {type(e).__name__}: {e}")
+        return ""
+
+    # No ImgBB key configured - Pixeldrain as a no-key fallback (shorter timeout
+    # since it's a fallback of last resort, not worth a long wait if it's blocked
+    # on this network too).
+    try:
+        with open(path, "rb") as f:
+            r = http_requests.post("https://pixeldrain.com/api/file", files={"file": f}, timeout=10)
+        data = r.json()
+        if r.status_code in (200, 201) and data.get("success") and data.get("id"):
+            return "https://pixeldrain.com/u/" + data["id"]
+        add_log(f"Screenshot upload (Pixeldrain) failed: {data.get('message', r.text[:120])}")
+    except Exception as e:
+        add_log(f"Screenshot upload (Pixeldrain) failed: {type(e).__name__}: {e}")
     return ""
 
 
