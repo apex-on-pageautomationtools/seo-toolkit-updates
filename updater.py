@@ -132,7 +132,17 @@ def check_and_update(log_fn=None):
             except Exception:
                 pass
 
-    manifest = _fetch_json(UPDATE_MANIFEST_URL)
+    # A transient network blip used to kill the ENTIRE update check for that launch -
+    # someone who only restarts occasionally could go a long time genuinely never
+    # getting updates just from bad luck on one attempt. Retry the manifest fetch
+    # itself a few times before giving up for this launch.
+    manifest = None
+    for _attempt in range(3):
+        manifest = _fetch_json(UPDATE_MANIFEST_URL)
+        if manifest:
+            break
+        if _attempt < 2:
+            time.sleep(1.5 * (_attempt + 1))
     if not manifest:
         _unlock()
         return {"updated": False, "reason": "Could not reach update server"}
