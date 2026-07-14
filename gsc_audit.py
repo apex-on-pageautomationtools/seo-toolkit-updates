@@ -614,8 +614,14 @@ def resolve_property(token, domain):
             if domain_clean in url.lower():
                 result = url
                 break
-    if not result and props:
-        result = props[0].get("siteUrl", "")
+    # No exact or substring match in this account's properties - do NOT fall
+    # back to props[0] (the account's first property, whatever domain it
+    # happens to be). Confirmed live: this silently returned a completely
+    # unrelated domain's property (checking myplacebar.com.au's indexing
+    # status actually queried freebounty.io's GSC data) whenever the caller's
+    # chosen account didn't have this specific domain - wrong data with zero
+    # indication anything was off. Raising here surfaces it as a normal "no
+    # GSC access" note instead of a silently incorrect report.
     if not result:
         raise Exception(f"No GSC property found for '{domain}'. Make sure the domain is added to Google Search Console.")
     _property_cache[domain_clean] = (result, time.time() + _PROPERTY_CACHE_TTL)

@@ -3239,6 +3239,14 @@ def _run_onpage_report(domain, targets_json, fmt, no_capture):
         cmd.extend(["--targets", targets_file])
     if no_capture:
         cmd.append("--no-capture")
+    # Without this, the script picks an arbitrary connected GSC account (confirmed
+    # live: it silently returned a completely unrelated domain's GSC data - "no
+    # match" was falling back to that account's first property instead of
+    # reporting "not found"). Resolve the account that actually manages this
+    # domain via the same cached mapping GSC Audit/Health Audit already use.
+    gsc_account = (_gsc_mapping().get(domain.strip().lower()) or {}).get("email", "")
+    if gsc_account:
+        cmd.extend(["--account", gsc_account])
 
     def _log(msg):
         with onpage_lock:
