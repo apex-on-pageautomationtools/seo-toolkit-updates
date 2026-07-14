@@ -1313,12 +1313,50 @@ def audit_site(domain, pages_data, dry_run=False):
     return f
 
 
-def capture_onpage_screenshots(domain, sitemap_url=None):
+def _render_external_links_image(domain, detail, path):
+    """Render the external-links list as a clean image for the report - same
+    look as health_audit's broken-links image. `detail` is findings["external_links_detail"]
+    (list of {"page":..., "link":...})."""
+    from PIL import Image, ImageDraw, ImageFont
+    rows = (detail or [])[:25]
+    W = 1180
+    H = 130 + (len(rows) + 1) * 30 + 30
+    img = Image.new("RGB", (W, max(H, 190)), "#FFFFFF")
+    d = ImageDraw.Draw(img)
+    try:
+        bold = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 26)
+        f = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 18)
+        fs = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 15)
+    except Exception:
+        bold = f = fs = ImageFont.load_default()
+    d.text((26, 24), f"External Links Check — {domain}", fill=(31, 41, 55), font=bold)
+    if not rows:
+        d.text((26, 74), "No external links found on the target pages checked.",
+                fill=(22, 128, 67), font=f)
+    else:
+        d.text((26, 74), f"{len(detail)} external link(s) found on the target pages checked:",
+                fill=(31, 41, 55), font=f)
+        y = 116
+        d.text((26, y), "Found On", fill=(120, 120, 120), font=fs)
+        d.text((W // 2, y), "External Link", fill=(120, 120, 120), font=fs)
+        y += 28
+        for row in rows:
+            d.text((26, y), str(row.get("page", ""))[:70], fill=(40, 40, 40), font=fs)
+            d.text((W // 2, y), str(row.get("link", ""))[:70], fill=(40, 40, 40), font=fs)
+            y += 28
+    img.save(str(path))
+
+
+def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=None):
     """Live, HEADLESS screenshots for the report - all public pages/tools, so no
     Google login is needed. Captured with selenium + Chrome via CDP: the embedded
     python ships selenium but NOT patchright/playwright, so the old patchright
     capture path silently produced NO screenshots on user machines. The sitemap
-    shot is taken of the ACTUAL found sitemap (only if one exists)."""
+    shot is taken of the ACTUAL found sitemap (only if one exists).
+
+    Every shot is retried once on failure before falling back to a plain
+    viewport screenshot - a transient network hiccup or slow page load should
+    never silently leave a report slot empty when a retry would have worked."""
     import base64, tempfile
     import time as _t
 
@@ -1357,7 +1395,7 @@ def capture_onpage_screenshots(domain, sitemap_url=None):
             _t.sleep(step)
             elapsed += step
 
-    def _shot(key, url, height=900, view_source=False, sucuri=False):
+    def _shot(key, url, height=900, view_source=False, sucuri=False, _attempt=1):
         p = path(key)
         try:
             driver.get(("view-source:" + url) if view_source else url)
@@ -1416,7 +1454,13 @@ def capture_onpage_screenshots(domain, sitemap_url=None):
             out[key] = p
             log(f"   -> captured [{key}]")
         except Exception as e:
-            log(f"   [warn] capture {key} failed: {type(e).__name__}: {e}")
+            log(f"   [warn] capture {key} failed (attempt {_attempt}): {type(e).__name__}: {e}")
+            if _attempt < 2:
+                # a slow/transient page load shouldn't permanently leave a report
+                # slot empty - one retry catches most flaky failures.
+                _t.sleep(1.5)
+                return _shot(key, url, height=height, view_source=view_source,
+                             sucuri=sucuri, _attempt=_attempt + 1)
             try:                                   # last resort: plain viewport shot
                 driver.save_screenshot(p)
                 out[key] = p
@@ -1455,6 +1499,16 @@ def capture_onpage_screenshots(domain, sitemap_url=None):
         log(f"   -> broken-link check: {checked} links, {out['_broken']} broken")
     except Exception as e:
         log(f"   [warn] broken-link check failed: {type(e).__name__}: {e}")
+
+    # External-links image - every format's builder calls shot("externallinks")
+    # for this slot, but nothing used to produce that key, so it was ALWAYS
+    # silently missing from every generated report regardless of format.
+    try:
+        _render_external_links_image(domain, external_links_detail, path("externallinks"))
+        out["externallinks"] = path("externallinks")
+        log(f"   -> captured [externallinks] ({len(external_links_detail or [])} link(s))")
+    except Exception as e:
+        log(f"   [warn] external-links image failed: {type(e).__name__}: {e}")
 
     _close_op_driver()
     return out
@@ -6804,7 +6858,9 @@ def main():
     if not (args.dry_run or args.no_capture):
         log("[4/5] Capturing screenshots (Sucuri, robots, indexing, wayback...)")
         try:
-            captured = capture_onpage_screenshots(domain, sitemap_url=sitemap_url)
+            captured = capture_onpage_screenshots(
+                domain, sitemap_url=sitemap_url,
+                external_links_detail=findings.get("external_links_detail"))
         except Exception as e:
             log(f"   [warn] screenshot capture skipped: {type(e).__name__}: {e}")
 

@@ -349,9 +349,44 @@ def check_dummy_content(domain, driver=None):
     return result
 
 
+def _suggest_redirect_for_broken(url, headers):
+    """For a dead link, try a couple of cheap same-URL variants a real 404 often
+    has a working replacement for (trailing slash toggled, query string dropped,
+    a trailing /index.html or /index.php stripped) and return the first one that
+    actually resolves (200). Mirrors what a human checking brokenlinkcheck.com
+    results would try by hand - not a full crawl, just the obvious candidates."""
+    from urllib.parse import urlsplit, urlunsplit
+    parts = urlsplit(url)
+    candidates = []
+    path = parts.path
+    if path.endswith("/index.html") or path.endswith("/index.php"):
+        candidates.append(path.rsplit("/", 1)[0] + "/")
+    if path.endswith("/") and path != "/":
+        candidates.append(path.rstrip("/"))
+    elif not path.endswith("/"):
+        candidates.append(path + "/")
+    if parts.query:
+        candidates.append(path)  # same path, query string dropped
+    seen = set()
+    for cand_path in candidates:
+        cand = urlunsplit((parts.scheme, parts.netloc, cand_path, "", ""))
+        if cand == url or cand in seen:
+            continue
+        seen.add(cand)
+        try:
+            req = _ur.Request(cand, headers=headers, method="HEAD")
+            if _ur.urlopen(req, timeout=8).status == 200:
+                return cand
+        except Exception:
+            continue
+    return None
+
+
 def check_broken_links(domain, target_pages=None):
     """Check all links on every target page (or homepage if none given).
-    No artificial limit - every link on each page is checked."""
+    No artificial limit - every link on each page is checked. Each broken link
+    records which page(s) it was found on (like brokenlinkcheck.com shows) and,
+    where a working replacement URL can be found, a suggested redirect target."""
     from urllib.parse import urljoin
     headers = {"User-Agent": _UA}
 
@@ -363,6 +398,7 @@ def check_broken_links(domain, target_pages=None):
 
     all_links = []
     seen = set()
+    found_on = {}
     for page_url in pages:
         try:
             html = _ur.urlopen(_ur.Request(page_url, headers=headers), timeout=20).read().decode("utf-8", "ignore")
@@ -373,9 +409,11 @@ def check_broken_links(domain, target_pages=None):
             if href.startswith(("mailto:", "tel:", "javascript:", "#", "data:")):
                 continue
             u = urljoin(page_url, href)
-            if u.startswith("http") and u not in seen:
-                seen.add(u)
-                all_links.append(u)
+            if u.startswith("http"):
+                found_on.setdefault(u, []).append(page_url)
+                if u not in seen:
+                    seen.add(u)
+                    all_links.append(u)
 
     def _check_one(u):
         code = None
@@ -400,6 +438,7 @@ def check_broken_links(domain, target_pages=None):
     broken = []
     if all_links:
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+            dead = []
             for u, code in pool.map(_check_one, all_links):
                 # Only genuinely dead links count as broken: 404 (Not Found) / 410 (Gone).
                 # 429 (rate-limited), 403/401/405 (bot-blocked), 5xx (temporary server
@@ -407,7 +446,11 @@ def check_broken_links(domain, target_pages=None):
                 # refusing the automated request, so flagging them gives false
                 # "broken link" counts.
                 if code in (404, 410):
-                    broken.append((u, code))
+                    dead.append((u, code))
+            redirects = list(pool.map(lambda uc: _suggest_redirect_for_broken(uc[0], headers), dead))
+            for (u, code), redirect in zip(dead, redirects):
+                broken.append({"url": u, "code": code, "found_on": found_on.get(u, [])[:3],
+                                "suggested_redirect": redirect})
     return len(all_links), broken
 
 
@@ -799,11 +842,15 @@ def _render_table_image(title, headers, rows, col_widths, path):
 
 
 def _render_broken_links_image(domain, checked, broken, path):
+    """`broken` is a list of dicts: {"url","code","found_on","suggested_redirect"}
+    (older tuple form (url, code) is still accepted for compatibility)."""
     from PIL import Image, ImageDraw, ImageFont
-    rows = broken[:25]
+    rows = [b if isinstance(b, dict) else {"url": b[0], "code": b[1], "found_on": [], "suggested_redirect": None}
+            for b in broken[:25]]
+    ROW_H = 46
     W = 1180
-    H = 130 + (len(rows) + 1) * 30 + 30
-    img = Image.new("RGB", (W, H), "#FFFFFF")
+    H = 130 + (len(rows) + 1) * ROW_H + 30
+    img = Image.new("RGB", (W, max(H, 190)), "#FFFFFF")
     d = ImageDraw.Draw(img)
     try:
         bold = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 26)
@@ -817,13 +864,21 @@ def _render_broken_links_image(domain, checked, broken, path):
     else:
         d.text((26, 74), f"Checked {checked} links - {len(broken)} broken:", fill=(200, 40, 60), font=f)
         y = 116
-        d.text((26, y), "URL", fill=(120, 120, 120), font=fs)
-        d.text((W - 150, y), "Status", fill=(120, 120, 120), font=fs)
-        y += 28
-        for u, code in rows:
-            d.text((26, y), u[:135], fill=(40, 40, 40), font=fs)
-            d.text((W - 150, y), str(code), fill=(200, 40, 60), font=fs)
-            y += 28
+        d.text((26, y), "Broken URL / Status", fill=(120, 120, 120), font=fs)
+        d.text((26, y + 22), "Found On / Suggested Redirect", fill=(120, 120, 120), font=fs)
+        y += 28 + 22
+        for row in rows:
+            u, code = row["url"], row["code"]
+            found_on = ", ".join(row.get("found_on") or []) or "-"
+            redirect = row.get("suggested_redirect")
+            d.text((26, y), f"{u[:110]}", fill=(40, 40, 40), font=fs)
+            d.text((W - 90, y), str(code), fill=(200, 40, 60), font=fs)
+            y += 22
+            note = f"Found on: {found_on[:90]}"
+            if redirect:
+                note += f"   ->  Suggested redirect: {redirect[:90]}"
+            d.text((26, y), note, fill=(90, 90, 90), font=fs)
+            y += ROW_H - 22
     img.save(str(path))
 
 
