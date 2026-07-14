@@ -3744,6 +3744,12 @@ def build_content_suggestion_docx(domain, pages_data, targets, out_path, capture
             "unique and relevant content (containing targeted keywords) in following pages up to "
             "100-120 words. Use the keyword respective to the pages as suggested below-", bold=True)
 
+    # Real paragraph-content word count per page (excludes headings/nav/footer
+    # and any fragment under 10 words - see _paragraph_word_count) - lets the
+    # reader see which of these shared target pages already carry substantial
+    # content versus which are genuinely thin, instead of guessing.
+    words_by_url = {pd["url"]: pd.get("content_word_count", 0) for pd in (pages_data or [])}
+
     for i, t in enumerate(targets):
         page_url = t.get("page", "")
         keywords = t.get("keywords", [])
@@ -3759,6 +3765,11 @@ def build_content_suggestion_docx(domain, pages_data, targets, out_path, capture
         p = doc.add_paragraph()
         _run(p, "Keywords: ", bold=True)
         _run(p, kw_str)
+
+        if page_url in words_by_url:
+            p = doc.add_paragraph()
+            _run(p, "Content Word Count: ", bold=True)
+            _run(p, f"{words_by_url[page_url]} words found on the page")
 
         p = doc.add_paragraph()
         _run(p, "Section", bold=True, color=RGBColor(0xFF, 0x00, 0x00))
@@ -6740,6 +6751,8 @@ def _build_docx_sigma(domain, pages_data, findings, captured, brand, out_path):
     body("No pages with critically low keyword density were found." if not findings.get("target_pages")
          else "Please review the target pages listed above for opportunities to naturally "
               "reinforce the primary keyword.")
+    for wc in findings.get("content_word_counts", []) or []:
+        body(f"{wc['url']} - {wc['status']}")
 
     # ---- Image Alt Tags ----
     section("Image Alt Tag Suggestion")
