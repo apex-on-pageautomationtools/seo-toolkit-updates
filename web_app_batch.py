@@ -3719,7 +3719,7 @@ geo_lock = threading.Lock()
 geo_stop = threading.Event()
 
 
-def _run_geo_report(domain, targets_path, check_visibility, keywords):
+def _run_geo_report(domain, targets_path, check_visibility, keywords, pages):
     with geo_lock:
         geo_state.update({"status": "running", "log": [], "domain": domain,
                           "output_file": "", "error_msg": ""})
@@ -3738,6 +3738,8 @@ def _run_geo_report(domain, targets_path, check_visibility, keywords):
     cmd = [python_exe, "-u", script, domain, "--out", out_dir]
     if targets_path:
         cmd += ["--targets", targets_path]
+    elif pages:
+        cmd += ["--pages", pages]
     if not check_visibility:
         cmd += ["--no-visibility-check"]
     if keywords:
@@ -3793,13 +3795,22 @@ def api_geo_start():
         return jsonify({"error": "Domain is required."}), 400
     check_visibility = request.form.get("check_visibility", "1") != "0"
     keywords = (request.form.get("keywords") or "").strip() or None
-    targets_path = None
+    pages = (request.form.get("pages") or "").strip() or None
     tf = request.files.get("targets")
+    # GEO's work is done per-page, not just per-domain (team builds FAQs/schema/
+    # etc for actual pages) - require at least one page URL or a targets file,
+    # never silently auto-discover pages the team never specified. Checked here
+    # too, not just client-side, since a hidden/disabled button doesn't stop a
+    # direct API call.
+    if not pages and not (tf and tf.filename):
+        return jsonify({"error": "At least one target page is required - enter the homepage URL "
+                                  "(or more pages) below, or upload a targets file."}), 400
+    targets_path = None
     if tf and tf.filename:
         os.makedirs(UPLOADS_DIR, exist_ok=True)
         targets_path = os.path.join(UPLOADS_DIR, f"geo_{int(time.time())}_{os.path.basename(tf.filename)}")
         tf.save(targets_path)
-    t = threading.Thread(target=_run_geo_report, args=(domain, targets_path, check_visibility, keywords), daemon=True)
+    t = threading.Thread(target=_run_geo_report, args=(domain, targets_path, check_visibility, keywords, pages), daemon=True)
     t.start()
     return jsonify({"status": "started"})
 

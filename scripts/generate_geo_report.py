@@ -744,8 +744,11 @@ def build_internal_linking_docx(domain, pages_data, brand, out_path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("domain")
-    ap.add_argument("--targets", help="targets.json or .xlsx (target pages). "
-                                       "If omitted, target pages are auto-discovered.")
+    ap.add_argument("--targets", help="targets.json or .xlsx (target pages).")
+    ap.add_argument("--pages", default=None,
+                     help="One or more target page URLs (newline or comma separated) - the team's "
+                          "GEO work is done per-page, so at least one page (the homepage if that's "
+                          "all there is) is required unless --targets is given instead.")
     ap.add_argument("--out", default=str(OUTPUT_DIR))
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-visibility-check", action="store_true",
@@ -771,11 +774,19 @@ def main():
         shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
 
+    if not args.targets and not args.pages:
+        log("[ERROR] At least one target page is required - the team's GEO work is done per-page, "
+            "not just per-domain. Provide --pages (e.g. just the homepage URL if that's all there "
+            "is) or --targets.")
+        sys.exit(2)
+
     if args.targets:
         targets = op.load_targets(args.targets, domain)
     else:
-        log("[*] No targets file - auto-discovering target pages...")
-        targets = op.discover_targets(domain, dry_run=args.dry_run)
+        page_urls = [op.normalize_url(u.strip(), domain)
+                     for u in re.split(r"[,\n]", args.pages) if u.strip()]
+        page_urls = list(dict.fromkeys(u for u in page_urls if u))
+        targets = [{"page": u, "keywords": []} for u in page_urls]
     if not targets:
         log("[ERROR] No target pages found.")
         sys.exit(2)

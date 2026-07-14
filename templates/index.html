@@ -1183,11 +1183,15 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <input type="text" id="geo-domain" placeholder="example.com" autocomplete="off">
       </div>
       <div class="field">
+        <label>Target Pages <span class="hint">(required - the team's GEO work is done per-page; enter at least the homepage URL if that's all there is)</span></label>
+        <textarea id="geo-pages" rows="3" placeholder="https://example.com/&#10;https://example.com/course/lone-worker-safety/"></textarea>
+      </div>
+      <div class="field">
         <label>SEO Keywords <span class="hint">(optional, one per line or comma-separated - your existing target keywords)</span></label>
         <textarea id="geo-keywords" rows="3" placeholder="lone worker safety courses Canada&#10;drone operator training courses"></textarea>
       </div>
       <div class="field">
-        <label>Target pages <span class="hint">(targets.json/.xlsx, optional - auto-discovers if omitted)</span></label>
+        <label>Target pages file <span class="hint">(targets.json/.xlsx - alternative to typing pages above)</span></label>
         <input type="file" id="geo-targets" accept=".json,.xlsx">
       </div>
       <label class="switch-row">
@@ -2280,12 +2284,18 @@ async function doStart(){
   }else if(mode==='geo'){
     const geoDomain=$('geo-domain').value.trim();
     if(!geoDomain){toast('Enter a domain');return;}
+    const geoPages=$('geo-pages').value.trim();
+    const geoTargetsFile=$('geo-targets').files[0];
+    // GEO's work is done per-page, not just per-domain - never silently
+    // auto-discover pages the team never specified. At least the homepage URL,
+    // or a targets file, is required before this can proceed.
+    if(!geoPages&&!geoTargetsFile){toast('Enter at least one target page (e.g. the homepage URL), or upload a targets file');return;}
     const geoFd=new FormData();
     geoFd.append('domain',geoDomain);
     geoFd.append('check_visibility',$('geo-check-visibility').checked?'1':'0');
+    if(geoPages)geoFd.append('pages',geoPages);
     const geoKeywords=$('geo-keywords').value.trim();
     if(geoKeywords)geoFd.append('keywords',geoKeywords);
-    const geoTargetsFile=$('geo-targets').files[0];
     if(geoTargetsFile)geoFd.append('targets',geoTargetsFile);
     const rg=await fetch('/api/geo/start',{method:'POST',body:geoFd});
     const dg=await rg.json();
@@ -2904,6 +2914,7 @@ function geoReset(){
   $('btn-geo-download').disabled=true;
   $('geo-targets').value='';
   $('geo-keywords').value='';
+  $('geo-pages').value='';
   setButtons('idle','geo');stopGeoPoll();
 }
 
@@ -3768,9 +3779,15 @@ function crawlUpdateProgress(){
   }
 }
 
-const CRAWL_CONCURRENCY=5; // property/account was already resolved once in the /api/crawl/validate
+const CRAWL_CONCURRENCY=18; // property/account was already resolved once in the /api/crawl/validate
                             // batch call -- each /api/crawl/inspect below is an independent,
                             // unlocked API round-trip, so running several at once is safe.
+                            // 18, not 5: the URL Inspection API's real quota is 600 queries/min
+                            // per property (well over 2000/day) - each call just takes ~30s to
+                            // respond regardless of concurrency, so 18 concurrent only works out
+                            // to ~36 completions/min, nowhere near that ceiling. Capped below
+                            // Apps Script's own ~30 simultaneous-executions-per-user limit, since
+                            // each call triggers a fresh Apps Script execution.
 
 async function crawlWorker(){
   while(crawlIdx<crawlItems.length){
