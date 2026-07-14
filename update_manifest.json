@@ -177,6 +177,11 @@
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seranking_audit.py"
     },
     {
+      "path": "scripts/generate_geo_report.py",
+      "hash": "9da7fd5d3ea6f8b449518f361ec328eac4c5b11fda10ef6195ff70baa9fdfdb2",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_geo_report.py"
+    },
+    {
       "path": "scripts/covers/cover_deltafl.png",
       "hash": "ccaef68296aafecc2e69562f03169647cc676eace0d7ff8c96a201c4c7db74c1",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_deltafl.png"
