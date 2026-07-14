@@ -2206,10 +2206,11 @@ async function doStart(){
     p.format=$('op-format').value;
     p.no_capture=$('op-capture').value==='no';
     if(!p.domain){toast('Enter a website URL');return;}
+    setButtons('starting');   // instant feedback, before the network round-trip
     await saveEngineOpts();
     const r=await fetch('/api/onpage/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
     const d=await r.json();
-    if(d.error){toast(d.error);return;}
+    if(d.error){toast(d.error);setButtons('idle');return;}
     toast('On-page report started');
     $('empty-onpage').style.display='none';
     $('onpage-active').classList.remove('hidden');
@@ -2224,18 +2225,19 @@ async function doStart(){
     p.no_capture=$('ha-capture').value==='no';
     p.include_psi=$('ha-include-psi').checked;
     if(!p.domain){toast('Enter a domain');return;}
+    setButtons('starting');   // instant feedback, before the network round-trip
     try{
       const gc=await(await fetch('/api/gsc/check-for-domain?domain='+encodeURIComponent(p.domain))).json();
       if(gc.connected){
         toast('GSC connected ('+gc.email+') - screenshots will be included');
       }else if(gc.available){
         const proceed=confirm('GSC screenshots available!\n\n'+gc.message+'\n\nClick OK to continue without GSC screenshots, or Cancel to connect first.');
-        if(!proceed)return;
+        if(!proceed){setButtons('idle');return;}
       }
     }catch(e){}
     const r2=await fetch('/api/health-audit/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
     const d2=await r2.json();
-    if(d2.error){toast(d2.error);return;}
+    if(d2.error){toast(d2.error);setButtons('idle');return;}
     toast('Health audit started');
     $('empty-health').style.display='none';
     $('health-active').classList.remove('hidden');
@@ -2251,9 +2253,10 @@ async function doStart(){
     p.targets=$('ba-targets').value.trim();
     p.format=$('ba-format').value;
     if(!p.domain){toast('Enter a domain');return;}
+    setButtons('starting');   // instant feedback, before the network round-trip
     const rb=await fetch('/api/brief/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
     const db=await rb.json();
-    if(db.error){toast(db.error);return;}
+    if(db.error){toast(db.error);setButtons('idle');return;}
     toast('Brief analysis started');
     $('empty-brief').style.display='none';
     $('brief-active').classList.remove('hidden');
@@ -2271,9 +2274,10 @@ async function doStart(){
     if(pdfFile)fd.append('pdf',pdfFile);
     if(zipFile)fd.append('zip',zipFile);
     fd.append('brand',$('sr-brand').value.trim());
+    setButtons('starting');   // instant feedback, before the network round-trip
     const rs=await fetch('/api/seranking/start',{method:'POST',body:fd});
     const ds=await rs.json();
-    if(ds.error){toast(ds.error);return;}
+    if(ds.error){toast(ds.error);setButtons('idle');return;}
     toast('SEranking audit started');
     $('empty-seranking').style.display='none';
     $('seranking-active').classList.remove('hidden');
@@ -2297,9 +2301,10 @@ async function doStart(){
     const geoKeywords=$('geo-keywords').value.trim();
     if(geoKeywords)geoFd.append('keywords',geoKeywords);
     if(geoTargetsFile)geoFd.append('targets',geoTargetsFile);
+    setButtons('starting');   // instant feedback, before the network round-trip
     const rg=await fetch('/api/geo/start',{method:'POST',body:geoFd});
     const dg=await rg.json();
-    if(dg.error){toast(dg.error);return;}
+    if(dg.error){toast(dg.error);setButtons('idle');return;}
     toast('GEO report started');
     $('empty-geo').style.display='none';
     $('geo-active').classList.remove('hidden');
@@ -2348,9 +2353,10 @@ async function doStart(){
     p.format=$('gsc-format').value;
     if(!p.domain){toast('Enter a domain');return;}
     if(!p.email){toast('Connect a Google account first');gscConnect();return;}
+    setButtons('starting');   // instant feedback, before the network round-trip
     const rg=await fetch('/api/gsc/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
     const dg=await rg.json();
-    if(dg.error){toast(dg.error);return;}
+    if(dg.error){toast(dg.error);setButtons('idle');return;}
     toast('GSC audit started');
     $('empty-gsc').style.display='none';
     $('gsc-active').classList.remove('hidden');
@@ -2519,6 +2525,31 @@ function setButtons(s, m){
   $('btn-pause').disabled=cur!=='running';
   $('btn-resume').disabled=cur!=='paused';
   $('btn-stop').disabled=!active;
+  // Light up the top status badge INSTANTLY whenever the state change is for
+  // the tab currently on screen - every doStart() branch calls setButtons()
+  // synchronously (before or right after its network call), but previously
+  // only a couple of branches also separately touched the badge, and only
+  // AFTER their fetch resolved - so most tools showed no "Running" light at
+  // all until a poll loop or tab switch happened to refresh it. Centralizing
+  // it here means every call site gets this for free, including any future
+  // one, and 'starting' (set synchronously, before the network round-trip)
+  // lights it up before the request has even been sent.
+  if(m===mode) _applyStatusBadge(cur);
+}
+function _applyStatusBadge(st){
+  if(['running','starting'].includes(st)){
+    $('badge').className='badge b-running';$('dot').className='dot d-running';
+    $('status-txt').textContent=st==='starting'?'Starting...':'Running...';
+  }else if(st==='completed'){
+    $('badge').className='badge b-idle';$('dot').className='dot d-idle';
+    $('status-txt').textContent='Completed';
+  }else if(st==='error'||st==='stopped'){
+    $('badge').className='badge b-idle';$('dot').className='dot d-idle';
+    $('status-txt').textContent=st==='error'?'Error':'Stopped';
+  }else{
+    $('badge').className='badge b-idle';$('dot').className='dot d-idle';
+    $('status-txt').textContent='Idle';
+  }
 }
 function showAlert(show,msg){
   $('alert').classList.toggle('show',!!show);
