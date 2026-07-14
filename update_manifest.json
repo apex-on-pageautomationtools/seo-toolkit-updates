@@ -103,7 +103,7 @@
     },
     {
       "path": "scripts/generate_seo_onpage_phase2.py",
-      "hash": "3385c1edcf2af59cc924e5f1222d5c7a7d52e3b0b295c18efa35c11bb59e1bfb",
+      "hash": "3adc4c81d8c8f23afa8840d05fd3c898acafa642d16c9e415bade51bbb747a12",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seo_onpage_phase2.py"
     },
     {
@@ -133,7 +133,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "9aa716d60f9a91888d6e4ced9b606d90dde0512b1e2360d74d06301dfd4323ba",
+      "hash": "a789e5f14ce1d141b2d1906f4484f8b4c470222a64f1a1723a9df8516b4b4335",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {
@@ -225,6 +225,16 @@
       "path": "scripts/covers/cover_gamma.png",
       "hash": "f7c0e3de671861a60c519209e23e3c93caf6d0b7f318c1b8d9e295ea5a12725a",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_gamma.png"
+    },
+    {
+      "path": "scripts/covers/cover_sigma.jpg",
+      "hash": "3186d498e38a3bdcff56f8969aa075b4e84fa5aa17ae4e034f00df6c2281d9cb",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_sigma.jpg"
+    },
+    {
+      "path": "scripts/covers/cover_neon.png",
+      "hash": "9915fa9df46326b84ff006759699b36d25b2976ac69faf697e5273ea733f4853",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_neon.png"
     }
   ]
 }

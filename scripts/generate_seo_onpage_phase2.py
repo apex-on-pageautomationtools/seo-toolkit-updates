@@ -939,6 +939,67 @@ def write_targets_xlsx(targets, out_path):
     wb.save(out_path)
 
 
+def _format_crawl_time(iso_ts):
+    """GSC's lastCrawlTime is ISO8601 UTC ('2026-06-23T13:19:47Z') - format to
+    match the reference sheet's style ('Jun 23, 2026, 1:19:47 PM')."""
+    if not iso_ts:
+        return ""
+    try:
+        dt = datetime.datetime.strptime(iso_ts.split(".")[0].replace("Z", ""), "%Y-%m-%dT%H:%M:%S")
+        return dt.strftime("%b %d, %Y, %I:%M:%S %p").replace(" 0", " ")
+    except Exception:
+        return iso_ts
+
+
+def write_crawl_status_xlsx(domain, gsc_indexing, out_path, country=None):
+    """Target Page / Last Crawl Date sheet - verified against the real reference
+    "Crawling status - graceperfumes.ae.xlsx" (Xenon format's own extra
+    deliverable). Generated for EVERY format (not just Xenon) whenever GSC
+    access is available, since knowing when Google last actually crawled each
+    target page is useful regardless of which report format was selected."""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Target Pages"
+
+    navy = PatternFill("solid", fgColor="1F3864")
+    light = PatternFill("solid", fgColor="DEEAF6")
+    white_bold_16 = Font(bold=True, size=16, color="FFFFFF")
+    white_bold_11 = Font(bold=True, size=11, color="FFFFFF")
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    ws.merge_cells("A1:B1")
+    ws["A1"] = "Target Pages"
+    ws["A1"].font = white_bold_16
+    ws["A1"].fill = navy
+    ws["A1"].alignment = left
+
+    ws.merge_cells("A2:B2")
+    subtitle = f"{domain}   |   Target Area: {country}" if country else domain
+    ws["A2"] = subtitle
+    ws["A2"].fill = light
+    ws["A2"].alignment = left
+
+    ws.append([])
+    ws["A3"] = "Target Page"
+    ws["B3"] = "Last Crawl Date"
+    for cell in (ws["A3"], ws["B3"]):
+        cell.font = white_bold_11
+        cell.fill = navy
+        cell.alignment = left
+
+    for item in (gsc_indexing or []):
+        ws.append([item.get("url", ""), _format_crawl_time(item.get("lastCrawlTime", ""))])
+
+    ws.column_dimensions["A"].width = 54
+    ws.column_dimensions["B"].width = 46
+    for row in ws.iter_rows(min_row=4, max_row=ws.max_row):
+        for cell in row:
+            cell.alignment = left
+    wb.save(out_path)
+
+
 # --------------------------------------------------------------- sitemap output
 def find_existing_sitemap(domain, dry_run=False):
     """Look for the site's REAL sitemap (robots.txt 'Sitemap:' line, then common
@@ -2432,13 +2493,16 @@ def _build_docx_neon(domain, pages_data, findings, captured, brand, out_path):
     Broken-Link "Conclusion") are bold black. Section order + wording mirror the
     Sjjanarrabeen.com.au reference. Result/Conclusion text stays data-driven
     (good vs issue) using the shared ``findings`` fields. Rendered inline with a
-    local ``header`` helper so it never emits the shared navy ribbon.
+    local ``header`` helper so it never emits the shared navy ribbon. Has its
+    own real header image (cream-background analytics-dashboard illustration,
+    extracted from the Massaristanbul.com reference) - not onpage_cover.png.
     """
     from docx.shared import Pt, RGBColor
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
+    _insert_format_cover(doc, "cover_neon.png", page_break=False)
     # Neon has NO page background - do not call _set_page_background().
     home = next((pd for pd in pages_data if urllib.parse.urlparse(pd["url"]).path in ("", "/")),
                 pages_data[0] if pages_data else {})
@@ -2752,12 +2816,14 @@ def _build_docx_xenon(domain, pages_data, findings, captured, brand, out_path):
     ribbon), F2F7FC status badges with a bold "Issue " (orange B45309) or "Good "
     (green 1E7A3C) lead word, blue 2E75B6 suggestion/label runs and navy 1F3864
     field labels. Result/Good-vs-Issue wording stays data-driven from ``findings``.
+    No cover image in the reference - the navy title bar built below (from
+    scratch, in code) IS its cover; onpage_cover.png must not be prepended.
     """
     from docx.shared import Pt, RGBColor
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
     _set_page_background(doc, "D9E2F3")  # light-blue page background, per the reference
     home = next((pd for pd in pages_data if urllib.parse.urlparse(pd["url"]).path in ("", "/")),
                 pages_data[0] if pages_data else {})
@@ -6381,6 +6447,252 @@ def _build_docx_theta(domain, pages_data, findings, captured, brand, out_path):
     doc.save(out_path)
 
 
+def _build_docx_sigma(domain, pages_data, findings, captured, brand, out_path):
+    """Sigma - verified against "OnpageReportSigmaTemplate.docx" (found in a
+    sibling W3era tool's PyInstaller extraction, same lineage as this script -
+    a Jinja2-templated docx with {{ }}/{% %} placeholders, confirming that
+    tool uses a real template engine rather than hand-built paragraphs).
+    Own header image (a colorful "SEO" logo, 6.5in wide - not the shared
+    onpage_cover.png). Title is "On-Page Analysis Report" in mixed colors
+    (green #00B050 for "On"/"Page", navy #002060 for "Analysis", black for
+    the rest), centered, 28pt. Section titles are centered, bold navy
+    (#002060), 16pt, no shaded banner. Labels ("Result:"/"Sitemap Url:"/
+    "Canonical Link:"/"Status:") are bold navy (#1D5489). Redirection Issue
+    Check is a real 4-column table (S.No. / URL / Redirect / Status Code) in
+    the reference."""
+    from docx.shared import Pt, RGBColor
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    doc, h = _setup_docx(domain, use_cover=False)
+    _insert_format_cover(doc, "cover_sigma.jpg", page_break=False)
+    root = h["root"]; d = h["d"]; FONT = h["FONT"]
+
+    BLACK = RGBColor(0x00, 0x00, 0x00)
+    GREEN = RGBColor(0x00, 0xB0, 0x50)
+    NAVY_TITLE = RGBColor(0x00, 0x20, 0x60)
+    NAVY_LABEL = RGBColor(0x1D, 0x54, 0x89)
+    RED = RGBColor(0xFF, 0x1A, 0x1A)
+
+    def _run(p, text, bold=False, color=BLACK, size=12):
+        r = p.add_run(text)
+        r.font.name = FONT
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        if color is not None:
+            r.font.color.rgb = color
+        return r
+
+    def section(text):
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.space_before = Pt(14)
+        p.paragraph_format.space_after = Pt(6)
+        _run(p, text, bold=True, color=NAVY_TITLE, size=16)
+        return p
+
+    def body(text, bold=False, color=BLACK):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, text, bold=bold, color=color)
+        return p
+
+    def label(name, text, color=NAVY_LABEL):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_after = Pt(4)
+        _run(p, name + ": ", bold=True, color=color)
+        _run(p, text, bold=False, color=BLACK)
+        return p
+
+    def shot(key):
+        src = (captured or {}).get(key)
+        if src and Path(src).exists():
+            try:
+                hr._add_bordered_image(doc, src)
+            except Exception:
+                pass
+
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    # ---- Title ----
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _run(p, "On", bold=True, color=GREEN, size=28)
+    _run(p, "-", bold=True, color=BLACK, size=28)
+    _run(p, "Page", bold=True, color=GREEN, size=28)
+    _run(p, " Analysis", bold=True, color=NAVY_TITLE, size=28)
+    _run(p, " Report", bold=True, color=BLACK, size=28)
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _run(p, root + "/", bold=True, color=BLACK, size=22)
+
+    # ---- Title / H1 / Meta Description suggestions (per target page) ----
+    section("Title Tag Suggestion")
+    for pd in pages_data:
+        s = suggest_meta(pd, [], brand)
+        body(f"URL - {pd['url']}")
+        body(f"Existing Title Tag - {pd.get('title') or '(missing)'}")
+        label("Suggested Title Tag", s.get("suggested_title", "No changes needed."))
+
+    section("Heading Tag Suggestion")
+    for pd in pages_data:
+        s = suggest_meta(pd, [], brand)
+        body(f"URL - {pd['url']}")
+        body(f"Existing H1 Tag - {pd.get('h1') or '(missing)'}")
+        label("Suggested H1 Tag", s.get("suggested_h1", "No changes needed."))
+
+    section("Meta Description Suggestion")
+    for pd in pages_data:
+        s = suggest_meta(pd, [], brand)
+        body(f"URL - {pd['url']}")
+        body(f"Existing Meta Description - {pd.get('description') or '(missing)'}")
+        label("Suggested Meta Description", s.get("suggested_description", "No changes needed."))
+
+    # ---- Content ----
+    section("Content Suggestion (Low Keywords Density)")
+    body("We reviewed the content on the target pages for keyword density and relevance "
+         "to the page topic.")
+    body("No pages with critically low keyword density were found." if not findings.get("target_pages")
+         else "Please review the target pages listed above for opportunities to naturally "
+              "reinforce the primary keyword.")
+
+    # ---- Image Alt Tags ----
+    section("Image Alt Tag Suggestion")
+    alt_missing = findings.get("alt_missing", 0)
+    if alt_missing:
+        label("Result", f"{alt_missing} image(s) missing appropriate ALT tags on the website's "
+                         "target pages.")
+    else:
+        label("Result", "Appropriate ALT tags were found on the website's target pages.")
+
+    # ---- Hyperlinking ----
+    section("Hyperlinking Suggestion")
+    body("We have found that linking of the pages on the navigation and footer is "
+         "well-structured, which is good from an SEO point of view.")
+
+    # ---- External Linking ----
+    section("External Linking Suggestion")
+    ext_count = findings.get("ext_count", 0)
+    if ext_count:
+        body(f"{ext_count} external link(s) found on the website. It is not harmful and will "
+             "not affect SEO if used appropriately (nofollow where relevant).")
+    else:
+        body("No external links found on the website's target pages.")
+
+    # ---- Page Speed ----
+    section("Page Speed Suggestion")
+    body("Page speed directly affects both user experience and search engine rankings. "
+         "Please review Core Web Vitals in Google PageSpeed Insights / Search Console "
+         "for the latest score.")
+
+    # ---- Robots.txt ----
+    section("Robots.txt Suggestion")
+    if findings.get("robots_found"):
+        label("Result", "robots.txt file found and correctly configured.")
+    else:
+        body("An optimized robots.txt file was created; please find it attached and upload "
+             "it in the root folder of the website.")
+    shot("robots")
+
+    # ---- Sitemap ----
+    section("Sitemap.xml Suggestion")
+    if findings.get("sitemap_found"):
+        label("Sitemap Url", findings.get("sitemap_url") or (root + "/sitemap.xml"))
+        label("Sitemap Status", "Found and accessible.")
+    else:
+        label("Sitemap Url", "Not found.")
+        label("Sitemap Status", "Please create and upload a sitemap.xml file.")
+    shot("sitemap")
+
+    # ---- Mixed Content ----
+    section("Mixed Content optimization")
+    mixed = findings.get("mixed_content_pages") or []
+    if mixed:
+        label("Mixed Content Links", f"{len(mixed)} page(s) load HTTP resources over HTTPS.")
+        label("Result", "Please update these resources to HTTPS.", color=RED)
+    else:
+        label("Mixed Content Links", "None found.")
+        label("Result", "No mixed content issues detected.")
+
+    # ---- Mobile Friendly ----
+    section("Website Mobile Friendly Check")
+    body("The website is mobile friendly. It is good from search engine point of view.")
+    shot("homepage")
+
+    # ---- URL Structure ----
+    section("URL Structure Suggestion")
+    url_changes = findings.get("url_changes") or []
+    if url_changes:
+        for existing, recommended in url_changes:
+            body(f"Page URL - {existing}")
+            label("Result", f"URL structure could be improved -> {recommended}")
+    else:
+        for pd in pages_data:
+            body(f"Page URL - {pd['url']}")
+            label("Result", "Clean and well-optimized URL structure.")
+
+    # ---- Broken Links ----
+    section("Broken Link Check")
+    broken = findings.get("broken_links") or []
+    if broken:
+        for url in broken:
+            body(f"Link: - {url}")
+            label("Server Response", "Broken / unreachable", color=RED)
+    else:
+        label("Result", "No broken links found on the website's target pages.")
+    shot("brokenlinks")
+
+    # ---- Canonical ----
+    section("Canonical Suggestion")
+    if findings.get("canonical_issue"):
+        label("Page URL", root + "/")
+        label("Canonical Link", findings.get("home_canonical") or "(mismatched)")
+        label("Status", "Canonical tag does not match the live URL - please review.", color=RED)
+    else:
+        label("Status", "All canonical tags are correctly configured.")
+    shot("canonical")
+
+    # ---- Redirection ----
+    section("Redirection Issue Check")
+    if findings.get("www_redirect_issue"):
+        label("Result", "Both www and non-www versions serve content without a single 301 "
+                         "redirect to one canonical version - please fix.", color=RED)
+        table = doc.add_table(rows=1, cols=4)
+        table.style = "Table Grid"
+        hdr = table.rows[0].cells
+        for i, t in enumerate(["S.No.", "URL", "Redirect", "Status Code"]):
+            _run(hdr[i].paragraphs[0], t, bold=True, color=BLACK, size=11)
+        row = table.add_row().cells
+        _run(row[0].paragraphs[0], "1", size=11)
+        _run(row[1].paragraphs[0], f"https://www.{d}/", size=11)
+        _run(row[2].paragraphs[0], root + "/", size=11)
+        _run(row[3].paragraphs[0], "200 (should be 301)", size=11)
+        doc.add_paragraph()
+    else:
+        label("Result", "No redirection issue found on the website.")
+
+    # ---- Security ----
+    section("Security Issue Check")
+    body("The SucuriSiteCheck scanner helps to prevent security threats. It will scan the "
+         "site for malware, blacklisting status and injected spam.")
+    if findings.get("sucuri_clean") is False:
+        label("Result", "Security issues were detected - please review and fix them.", color=RED)
+    else:
+        label("Result", "No malware or blacklist issues found.")
+    shot("sucuri")
+
+    # ---- No-Index ----
+    section("No Index on Robots Meta Tag Check")
+    noindex = findings.get("noindex_pages") or []
+    if noindex:
+        body(f"Noindex found on {len(noindex)} target page(s) of the website. Please remove it.",
+             color=RED)
+    else:
+        body("No noindex directive found on the robots of the target pages of the website.")
+
+    doc.save(out_path)
+
+
 def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, fmt="james"):
     """Dispatch to the format-specific DOCX builder - builds EXACTLY the selected
     format, or raises rather than silently defaulting to another one."""
@@ -6393,7 +6705,7 @@ def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, f
         "deltaup": _build_docx_deltaup, "octal": _build_docx_octal,
         "camila": _build_docx_camila, "alpha": _build_docx_alpha,
         "eta": _build_docx_eta, "kappa": _build_docx_kappa,
-        "theta": _build_docx_theta,
+        "theta": _build_docx_theta, "sigma": _build_docx_sigma,
     }
     fn = builders.get(str(fmt or "").strip().lower())
     if not fn:
@@ -6411,11 +6723,13 @@ def main():
     ap.add_argument("--out", default=str(OUTPUT_DIR))
     ap.add_argument("--dry-run", action="store_true", help="use mock crawl data (no network)")
     ap.add_argument("--no-capture", action="store_true", help="skip live screenshots (text-only docx)")
-    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma", "sara", "peta", "deltafl", "deltafvr", "deltaup", "octal", "camila", "alpha", "eta", "kappa", "theta"],
+    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma", "sara", "peta", "deltafl", "deltafvr", "deltaup", "octal", "camila", "alpha", "eta", "kappa", "theta", "sigma"],
                     help="Report sub-format: james (Driftzine), omega (alltechco), neon (sumitechengineers), xenon, gamma (Hawkeev), sara (teal template)")
     ap.add_argument("--gsc-token", default=None, help="GSC API access token for URL inspection")
     ap.add_argument("--property-url", default=None, help="GSC property URL (e.g. sc-domain:example.com)")
     ap.add_argument("--account", default=None, help="Connected GSC account email to resolve a token/property from")
+    ap.add_argument("--country", default=None, help="Target area/country label for the crawl-status sheet's "
+                                                      "subtitle (optional - omitted if not provided)")
     args, _ = ap.parse_known_args()
 
     raw_domain = args.domain.strip()           # used verbatim for the output filename (glob match)
@@ -6521,6 +6835,14 @@ def main():
         write_alt_xlsx(all_self_hosted, all_external_cdn, alt_x)
         targets_x = work / f"Target Pages & Keywords Report - {domain}.xlsx"
         write_targets_xlsx(targets, targets_x)
+
+    # Crawl status (Target Page / Last Crawl Date) - generated for EVERY format
+    # when GSC access is available, not just Xenon (whose own reference has this
+    # as a separate deliverable). Skipped entirely (no blank/fake sheet) when
+    # there's no GSC access, matching this script's "never fabricate" rule.
+    if findings.get("gsc_indexing"):
+        crawl_x = work / f"Crawling status - {domain}.xlsx"
+        write_crawl_status_xlsx(domain, findings["gsc_indexing"], crawl_x, country=args.country)
 
     # robots.txt: attach the existing one
     if findings.get("robots_body"):
