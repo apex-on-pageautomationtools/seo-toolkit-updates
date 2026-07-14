@@ -3841,9 +3841,13 @@ def _run_gsc_audit(domain, email, fmt, headless, browser_name):
         # shared-profile browser here - that shared profile isn't signed in and was
         # screenshotting the Google sign-in page instead of real GSC data.
         _log("[1/2] Running GSC audit (API data + session screenshots)...")
+        # Same normalization getConfigForExtension() uses for its mapping keys
+        # (domain.toString().trim().toLowerCase()) - just for the alert email's
+        # "Access Level" display, not anything access-critical.
+        access_level = (_gsc_mapping().get(domain.strip().lower()) or {}).get("accessLevel", "")
         path = gsc_audit.run_gsc_audit(
             domain, email, fmt=fmt, out_dir=out_folder, log_fn=_log,
-            webapp_url=_gsc_webapp_url(),
+            webapp_url=_gsc_webapp_url(), access_level=access_level,
         )
 
         with gsc_lock:

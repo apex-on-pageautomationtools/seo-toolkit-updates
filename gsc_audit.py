@@ -12,6 +12,7 @@ import hashlib
 import tempfile
 import threading
 import urllib.request
+import urllib.error
 
 # One lock per browser-session profile directory. Chrome locks a --user-data-dir, so two
 # GSC screenshot captures on the SAME account/session must serialize - but captures on
@@ -513,13 +514,31 @@ def capture_gsc_with_session(session_id, property_url, email, out_dir,
 # GSC API helpers
 # ---------------------------------------------------------------------------
 
+def _raise_with_api_detail(e, url):
+    """urllib's default HTTPError message is just 'HTTP Error 403: Forbidden' -
+    it never reads the response body, which is where Google's API actually
+    explains WHY (wrong scope, no permission on this property, API not
+    enabled, etc.) - that detail is essential for diagnosing a 403/404 that
+    only affects one domain/account, not a generic unhelpful message."""
+    try:
+        body = e.read().decode("utf-8", "ignore")
+        detail = json.loads(body).get("error", {})
+        reason = detail.get("message") or body[:300]
+    except Exception:
+        reason = str(e)
+    raise Exception(f"GSC API {e.code} on {url.split('?')[0]}: {reason}") from e
+
+
 def _api_get(url, token, timeout=15):
     req = urllib.request.Request(url, headers={
         "Authorization": f"Bearer {token}",
         "User-Agent": "SEOToolkitPro-GSC/1.0",
     })
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        _raise_with_api_detail(e, url)
 
 
 def _fmt_date(val):
@@ -552,8 +571,11 @@ def _api_post(url, token, body, timeout=30):
         "Content-Type": "application/json",
         "User-Agent": "SEOToolkitPro-GSC/1.0",
     })
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        _raise_with_api_detail(e, url)
 
 
 def list_properties(token):
@@ -749,6 +771,140 @@ def _detect_page_status(driver, key):
     return ""
 
 
+def _extract_removals_detail(driver):
+    """Rich, per-URL breakdown of active GSC removal requests (URL / Type /
+    Requested date / Status), scraped from the Removals page's rendered text -
+    ported from the gsc-audit-studio extension's innerText-parsing strategy
+    (D:\\Working Extensions\\gsc-audit-studio\\dashboard.js), which produced the
+    detailed alert emails this is meant to restore. Returns None if nothing
+    found (caller falls back to the short _detect_page_status string)."""
+    try:
+        text = driver.find_element("tag name", "body").text
+    except Exception:
+        return None
+    if not text:
+        return None
+    lower = text.lower()
+
+    url_matches = re.findall(r"https?://\S+", text)
+    removal_urls = [u for u in url_matches
+                    if "google.com" not in u and "support." not in u and "goo.gl" not in u]
+    has_active = bool(re.search(r"processing request|temporarily remove|clear cached|outdated|filtered", lower))
+    if not removal_urls or not has_active:
+        return None
+
+    lines = []
+    for url in removal_urls[:5]:
+        idx = text.find(url)
+        context = text[idx:idx + 200]
+        status_m = re.search(r"(Processing request|Active|Approved|Expired|"
+                              r"Temporarily remove URL|Clear cached URL)", context, re.I)
+        date_m = re.search(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d+, \d{4}", context, re.I)
+        type_m = re.search(r"(Temporarily remove URL|Clear cached URL)", context, re.I)
+        line = f"  • {url}"
+        if type_m:
+            line += f"\n    Type: {type_m.group(0)}"
+        if date_m:
+            line += f"  | Requested: {date_m.group(0)}"
+        if status_m:
+            line += f"  | Status: {status_m.group(0)}"
+        lines.append(line)
+
+    return ("Active removal request(s) found in GSC Removals tool:\n\n"
+            + "\n".join(lines) + "\n\nReview and confirm these removals are intentional.")
+
+
+# Robots.txt analysis - ported from gsc-audit-studio's analyseRobotsTxt(), a
+# pure HTTP fetch + parse (no DOM/Selenium needed), same rule set: flags a
+# hard block of the whole site, an inaccessible/erroring robots.txt (Google
+# treats that as a full crawl block too), and short/suspicious Disallow
+# patterns that block important paths (search, tag, author pages etc.) while
+# staying quiet about common, safe blocks (wp-admin, login, checkout...).
+_ROBOTS_SAFE_DISALLOWS = ("/wp-admin", "/wp-includes", "/cgi-bin", "/admin", "/login",
+                          "/cart", "/checkout", "/account", "/my-account", "/wp-json", "/xmlrpc.php")
+
+
+def _analyse_robots_txt(text):
+    issues = []
+    if not text or not text.strip():
+        return issues
+    lines = [l.replace("\r", "").strip() for l in text.split("\n")]
+    blocks = []
+    current = None
+    for line in lines:
+        if not line or line.startswith("#"):
+            continue
+        lc = line.lower()
+        if lc.startswith("user-agent:"):
+            agent = line.split(":", 1)[1].strip().lower()
+            if current is None:
+                current = {"agents": [agent], "disallows": []}
+            elif not current["disallows"]:
+                current["agents"].append(agent)
+            else:
+                blocks.append(current)
+                current = {"agents": [agent], "disallows": []}
+        elif lc.startswith("disallow:") and current is not None:
+            current["disallows"].append(line.split(":", 1)[1].strip())
+    if current is not None:
+        blocks.append(current)
+
+    for block in blocks:
+        applies_all = "*" in block["agents"]
+        applies_google = any(a in ("googlebot", "googlebot-news", "googlebot-image") for a in block["agents"])
+        if not applies_all and not applies_google:
+            continue
+        agent_label = "all crawlers (*)" if applies_all else ", ".join(block["agents"])
+        for disallow in block["disallows"]:
+            if disallow == "/":
+                issues.append({"type": "Robots.txt Blocks All Crawling",
+                               "detail": f'robots.txt has "Disallow: /" for {agent_label}. This blocks Google '
+                                         f'from crawling ALL pages on the site. This is a critical SEO issue.'})
+            elif disallow and not any(disallow.startswith(s) for s in _ROBOTS_SAFE_DISALLOWS) and len(disallow) <= 3:
+                issues.append({"type": "Robots.txt Suspicious Block",
+                               "detail": f'robots.txt has "Disallow: {disallow}" for {agent_label}. This may be '
+                                         f'blocking important pages from being crawled.'})
+    return issues
+
+
+def check_robots_txt(property_url, log_fn=None):
+    """Fetch and analyse this property's robots.txt. Never raises - a network
+    failure just yields no issues rather than breaking the whole audit."""
+    if log_fn is None:
+        log_fn = print
+    try:
+        base = ("https://" + property_url.replace("sc-domain:", "")
+                 if property_url.startswith("sc-domain:")
+                 else (property_url if property_url.endswith("/") else property_url + "/"))
+        robots_url = urllib.parse.urljoin(base, "/robots.txt")
+        req = urllib.request.Request(robots_url, headers={"User-Agent": "SEOToolkitPro-GSC/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            code = r.getcode()
+            body = r.read().decode("utf-8", "ignore")
+    except urllib.error.HTTPError as e:
+        code = e.code
+        body = ""
+    except Exception as e:
+        log_fn(f"  [warn] robots.txt check failed: {e}")
+        return []
+
+    if code == 404:
+        return []   # missing robots.txt = fully open, that's fine
+    if code in (401, 403):
+        return [{"type": "Robots.txt Access Denied",
+                 "detail": f"robots.txt returned HTTP {code}. Google treats this as a complete block "
+                           f"and will not crawl ANY page on the site until robots.txt is accessible."}]
+    if code >= 500:
+        return [{"type": "Robots.txt Server Error",
+                 "detail": f"robots.txt returned HTTP {code} (server error). Google may temporarily "
+                           f"stop crawling until the server error is resolved."}]
+    if code >= 400:
+        return [{"type": "Robots.txt Error",
+                 "detail": f"robots.txt returned HTTP {code}. Google may have trouble reading crawl "
+                           f"rules for this site."}]
+    return _analyse_robots_txt(body)
+
+
 def _looks_like_signin(driver):
     """True if the current page is a Google sign-in / account-chooser screen
     rather than real GSC content. The browser can pass the ONE upfront login
@@ -833,6 +989,13 @@ def capture_gsc_screenshots(driver, property_url, email, out_dir, pages=None, lo
                 if status:
                     statuses[p["key"]] = status
                     log_fn(f"  {p['key']} status: {status}")
+                    if status_key == "removals" and status.lower() not in ("no removals found", ""):
+                        # Rich per-URL breakdown for the alert email only - the
+                        # short `status` above stays as-is for the PPTX slide's
+                        # single-line "Status: ..." text.
+                        detail = _extract_removals_detail(driver)
+                        if detail:
+                            statuses["removals_detail"] = detail
             ss_path = os.path.join(out_dir, f"gsc_{p['key']}.png")
             driver.save_screenshot(ss_path)
             screenshots[p["key"]] = ss_path
@@ -2023,17 +2186,24 @@ _GSC_STATUS_LABELS = {
 }
 
 
-def _send_gsc_alert(webapp_url, domain, statuses, email, log_fn=None):
+def _send_gsc_alert(webapp_url, domain, statuses, email, log_fn=None,
+                    extra_issues=None, access_level=None):
     """POST the Apps Script's send_alert action for any real GSC issue found
-    (manual action, security issue, removals) - handleSendAlert already
-    exists and works server-side, it just had no caller."""
+    (manual action, security issue, removals, robots.txt) - handleSendAlert
+    already exists and works server-side, it just had no caller."""
     if log_fn is None:
         log_fn = print
     issues = []
     for key, label in _GSC_STATUS_LABELS.items():
-        status = (statuses.get(key) or "").strip()
+        if key == "removals":
+            # Prefer the rich per-URL breakdown (statuses["removals_detail"])
+            # over the short "Removals Found" status used for the PPTX slide.
+            status = (statuses.get("removals_detail") or statuses.get(key) or "").strip()
+        else:
+            status = (statuses.get(key) or "").strip()
         if status and status.lower() not in _GSC_STATUS_OK:
             issues.append({"type": label, "detail": status})
+    issues.extend(extra_issues or [])
     if not issues:
         return
     payload = {
@@ -2042,6 +2212,7 @@ def _send_gsc_alert(webapp_url, domain, statuses, email, log_fn=None):
         "issues": issues,
         "timestamp": datetime.now().isoformat(),
         "accountEmail": email or "",
+        "accessLevel": access_level or "",
     }
     try:
         req = urllib.request.Request(
@@ -2058,7 +2229,8 @@ def _send_gsc_alert(webapp_url, domain, statuses, email, log_fn=None):
 
 
 def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
-                  period_days=28, end_offset=3, log_fn=None, webapp_url=None):
+                  period_days=28, end_offset=3, log_fn=None, webapp_url=None,
+                  access_level=None):
     """Run a complete GSC audit: fetch data, capture screenshots, build PPTX."""
     if log_fn is None:
         log_fn = print
@@ -2144,11 +2316,13 @@ def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
     report_data["screenshots"] = screenshots
 
     # Email the admin when a real issue is found (manual action, security
-    # issue, or removals) - the Apps Script's handleSendAlert already builds
-    # and sends this email, but nothing was ever calling it, so these alerts
-    # never went out.
+    # issue, removals, or robots.txt) - the Apps Script's handleSendAlert
+    # already builds and sends this email, but nothing was ever calling it,
+    # so these alerts never went out.
     if webapp_url:
-        _send_gsc_alert(webapp_url, domain, screenshots.get("_statuses", {}), email, log_fn)
+        robots_issues = check_robots_txt(property_url, log_fn)
+        _send_gsc_alert(webapp_url, domain, screenshots.get("_statuses", {}), email, log_fn,
+                        extra_issues=robots_issues, access_level=access_level)
 
     # Build PPTX
     format_info = GSC_FORMATS[fmt]   # validated above - build the selected format
