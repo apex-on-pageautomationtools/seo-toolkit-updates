@@ -230,6 +230,7 @@ def _mock_page(url, keywords):
         "external_links": [],
         "status": 200,
         "body_text": "",
+        "content_word_count": 0,
     }
 
 
@@ -389,6 +390,34 @@ def _crawl_requests(url, keywords):
         return _mock_page(url, keywords)
 
 
+MIN_PARAGRAPH_WORDS = 10  # a block below this isn't real body copy - a nav label,
+                          # button text, or a one-line caption that happens to sit
+                          # in a <p>/<li> tag, not actual paragraph content.
+
+
+def _paragraph_word_count(html):
+    """Word count of REAL paragraph content only: <p>/<li> text, excluding
+    headings (h1-h6 are never counted here) and anything inside nav/header/footer
+    chrome, and only counting a block once it has at least MIN_PARAGRAPH_WORDS
+    words together - short fragments (labels, single-line CTAs) don't count as
+    content even if they're technically inside a <p> tag."""
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        return 0
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+    total = 0
+    for block in soup.find_all(["p", "li"]):
+        if block.find_parent(["nav", "header", "footer"]):
+            continue
+        words = block.get_text(" ", strip=True).split()
+        if len(words) >= MIN_PARAGRAPH_WORDS:
+            total += len(words)
+    return total
+
+
 def _parse_html(html, url, status):
     try:
         from bs4 import BeautifulSoup
@@ -463,11 +492,14 @@ def _parse_html(html, url, status):
     except Exception:
         body_text = ""
 
+    content_word_count = _paragraph_word_count(html)
+
     return {
         "url": url, "title": title, "description": desc, "h1": h1, "h1s": h1s,
         "og_site_name": og_site, "canonical": canonical, "lang": lang, "viewport": viewport,
         "images": images, "headings": headings, "internal_links": list(dict.fromkeys(internal)),
         "external_links": list(dict.fromkeys(external)), "status": status, "body_text": body_text,
+        "content_word_count": content_word_count,
     }
 
 
@@ -485,7 +517,8 @@ def _regex_parse(html, url, status):
     return {"url": url, "title": re.sub("<[^>]+>", "", title), "description": desc,
             "h1": re.sub("<[^>]+>", "", h1), "h1s": [], "canonical": canonical, "lang": lang,
             "viewport": "viewport" in html.lower(), "images": [], "headings": [],
-            "internal_links": [], "external_links": [], "status": status, "body_text": body_text}
+            "internal_links": [], "external_links": [], "status": status, "body_text": body_text,
+            "content_word_count": _paragraph_word_count(html)}
 
 
 # ----------------------------------------------------------------- deliverables
@@ -1239,6 +1272,15 @@ def audit_site(domain, pages_data, dry_run=False):
         for pd in pages_data for u in pd.get("external_links", [])
     ]
     f["ext_count"] = len(f["external_links_detail"])
+
+    # Content length - real paragraph copy only (headings and short/nav fragments
+    # excluded by _paragraph_word_count itself). One entry per target page, plus a
+    # ready-made status string per page for report sections that want to quote it.
+    f["content_word_counts"] = [
+        {"url": pd["url"], "words": pd.get("content_word_count", 0),
+         "status": f"{pd.get('content_word_count', 0)} words found on the page"}
+        for pd in pages_data
+    ]
     f["lang"] = home.get("lang", "") or ""
     f["viewport"] = any(pd.get("viewport") for pd in pages_data)
 
