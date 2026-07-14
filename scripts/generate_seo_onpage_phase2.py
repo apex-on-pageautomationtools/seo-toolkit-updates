@@ -498,7 +498,10 @@ def _ai_suggest(prompt):
         return None
     try:
         import urllib.request
-        model = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+        # gemini-1.5-flash was retired by Google (confirmed live: 404 "models/
+        # gemini-1.5-flash is not found for API version v1beta") - gemini-2.5-flash
+        # confirmed working (200 OK) against a real key on 2026-07-14.
+        model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
         url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
                f"{model}:generateContent?key={key}")
         body = json.dumps({
