@@ -49,12 +49,17 @@ def log(msg):
 # --------------------------------------------------------------------------- #
 # Step 1: content-grounded AI-searchable keyword + FAQ generation
 # --------------------------------------------------------------------------- #
-def generate_ai_faqs(page_data, brand, n=5):
+def generate_ai_faqs(page_data, brand, n=5, seed_keywords=None):
     """AI-searchable keyword + long-tail/NLP FAQ query + answer, per page - grounded
     in that page's own crawled content (title/H1/body text), matching the real
     reference xlsx's columns exactly: AI-Searchable Keyword | Long-Tail/NLP Query
     (FAQ) | Answers. Falls back to a simple heuristic (from title/H1) if no Gemini
-    key is configured or the call fails - same fallback philosophy as suggest_meta()."""
+    key is configured or the call fails - same fallback philosophy as suggest_meta().
+
+    seed_keywords: optional list of keywords the team already targets for this
+    site (given up front instead of only auto-discovered from content) - when
+    given, generation is steered to build FAQs around THOSE terms first, so the
+    team doesn't have to separately go find AI-searchable phrasing themselves."""
     title = page_data.get("title") or ""
     h1 = page_data.get("h1") or ""
     body = (page_data.get("body_text") or "")[:2500]
@@ -62,11 +67,19 @@ def generate_ai_faqs(page_data, brand, n=5):
 
     result = None
     if body or title or h1:
+        seed_line = ""
+        if seed_keywords:
+            seed_line = (
+                "\nThe team already targets these existing SEO keywords for this site - "
+                "ground the entries around these terms where relevant to this page, rather "
+                f"than only inventing new topics: {', '.join(seed_keywords)}\n"
+            )
         prompt = (
             "You are an AI-search (GEO/answer-engine) optimization specialist writing "
             f"content for {brand}'s page at {url}.\n"
             f"Page title: {title}\nPage H1: {h1}\n"
-            f"Page content excerpt: {body or '(not available)'}\n\n"
+            f"Page content excerpt: {body or '(not available)'}\n"
+            f"{seed_line}\n"
             f"Generate exactly {n} distinct entries. Each entry needs:\n"
             '- "keyword": a short AI-searchable keyword phrase someone would type into '
             "ChatGPT/Perplexity/Google AI Overview to find this page's topic\n"
@@ -195,14 +208,20 @@ def check_ai_visibility(driver, query, domain):
 # --------------------------------------------------------------------------- #
 # Step 3: combine into the reference-matching xlsx
 # --------------------------------------------------------------------------- #
-def build_geo_keywords_xlsx(domain, pages_data, brand, out_path, check_visibility=True):
+def build_geo_keywords_xlsx(domain, pages_data, brand, out_path, check_visibility=True, seed_keywords=None):
+    """seed_keywords: optional list of SEO keywords the team already has for this
+    domain (given up front, e.g. from their existing keyword research) - these
+    steer the per-page FAQ generation toward those terms AND are checked directly
+    for AI-citation as their own rows, so the team can see right away whether a
+    keyword they already have is already showing up in AI answers, instead of
+    only getting brand-new AI-generated terms."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Keywords"
-    headers = ["URL", "AI-Searchable Keyword", "Long-Tail/NLP Query (FAQ)", "Answers"]
+    headers = ["URL", "AI-Searchable Keyword", "Long-Tail/NLP Query (FAQ)", "Answers", "Source"]
     if check_visibility:
         headers += ["Cited on Perplexity", "Cited on Google AI Overview", "Cited on ChatGPT"]
     ws.append(headers)
@@ -213,24 +232,39 @@ def build_geo_keywords_xlsx(domain, pages_data, brand, out_path, check_visibilit
         cell.alignment = Alignment(wrap_text=True, vertical="center")
 
     driver = op._get_op_driver() if check_visibility else None
+
+    def _visibility_cells(query):
+        if not (check_visibility and driver):
+            return ["Not checked", "Not checked", "Not checked"] if check_visibility else []
+        log(f"   -> checking AI visibility: {query[:70]}")
+        results = check_ai_visibility(driver, query, domain)
+        by_engine = {r["engine"]: r for r in results}
+        return [
+            "Yes" if by_engine["perplexity"]["cited"] else ("Not checked" if not by_engine["perplexity"]["checked"] else "No"),
+            "Yes" if by_engine["google_ai_overview"]["cited"] else ("Not checked" if not by_engine["google_ai_overview"]["checked"] else "No"),
+            "Yes" if by_engine["chatgpt"]["cited"] else ("Not checked" if not by_engine["chatgpt"]["checked"] else "No"),
+        ]
+
     total_rows = 0
     for pd in pages_data:
-        faqs = generate_ai_faqs(pd, brand)
+        faqs = generate_ai_faqs(pd, brand, seed_keywords=seed_keywords)
         for item in faqs:
-            row = [pd["url"], item["keyword"], item["query"], item["answer"]]
-            if check_visibility and driver:
-                log(f"   -> checking AI visibility: {item['query'][:70]}")
-                results = check_ai_visibility(driver, item["query"], domain)
-                by_engine = {r["engine"]: r for r in results}
-                row += [
-                    "Yes" if by_engine["perplexity"]["cited"] else ("Not checked" if not by_engine["perplexity"]["checked"] else "No"),
-                    "Yes" if by_engine["google_ai_overview"]["cited"] else ("Not checked" if not by_engine["google_ai_overview"]["checked"] else "No"),
-                    "Yes" if by_engine["chatgpt"]["cited"] else ("Not checked" if not by_engine["chatgpt"]["checked"] else "No"),
-                ]
-            elif check_visibility:
-                row += ["Not checked", "Not checked", "Not checked"]
+            row = [pd["url"], item["keyword"], item["query"], item["answer"], "Auto-generated from page content"]
+            row += _visibility_cells(item["query"])
             ws.append(row)
             total_rows += 1
+
+    # Direct check of the team's own given keywords, as-typed - not just the
+    # AI-rephrased question derived from them, so they can see their EXACT
+    # existing keyword's current AI-citation status.
+    if seed_keywords:
+        home_url = pages_data[0]["url"] if pages_data else f"https://{domain}/"
+        for kw in seed_keywords:
+            row = [home_url, kw, kw, "", "User-provided keyword (checked as-is)"]
+            row += _visibility_cells(kw)
+            ws.append(row)
+            total_rows += 1
+
     if driver:
         op._close_op_driver()
 
@@ -238,7 +272,8 @@ def build_geo_keywords_xlsx(domain, pages_data, brand, out_path, check_visibilit
     ws.column_dimensions["B"].width = 30
     ws.column_dimensions["C"].width = 45
     ws.column_dimensions["D"].width = 60
-    for col in "EFG":
+    ws.column_dimensions["E"].width = 30
+    for col in "FGH":
         ws.column_dimensions[col].width = 22
     for row in ws.iter_rows(min_row=2, max_col=4):
         for cell in row:
@@ -259,7 +294,14 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-visibility-check", action="store_true",
                      help="skip the live no-login AI-visibility checks (faster, keyword/FAQ generation only)")
+    ap.add_argument("--keywords", default=None,
+                     help="Comma or newline separated SEO keywords the team already has for this domain - "
+                          "used to steer FAQ generation and checked directly for AI-citation as their own rows.")
     args = ap.parse_args()
+
+    seed_keywords = None
+    if args.keywords:
+        seed_keywords = [k.strip() for k in re.split(r"[,\n]", args.keywords) if k.strip()]
 
     domain = op.safe_domain(args.domain)
     out_dir = Path(args.out)
@@ -291,7 +333,8 @@ def main():
     log("[3/3] Generating AI-searchable keywords/FAQs" +
         ("" if args.no_visibility_check else " + checking live AI visibility") + "...")
     build_geo_keywords_xlsx(domain, pages_data, brand, out_path,
-                             check_visibility=not args.no_visibility_check)
+                             check_visibility=not args.no_visibility_check,
+                             seed_keywords=seed_keywords)
     log(f"[DONE] {out_path}")
 
 

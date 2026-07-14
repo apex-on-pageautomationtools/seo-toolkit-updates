@@ -387,6 +387,10 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>
       <span class="sb-label">SEranking Audit</span>
     </button>
+    <button class="sb-item hidden" id="tab-geo" data-tip="GEO / AI Optimization" onclick="switchTab('geo')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
+      <span class="sb-label">GEO / AI Optimization</span>
+    </button>
     <button class="sb-item" id="tab-brief" data-tip="Brief Analysis" onclick="switchTab('brief')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>
       <span class="sb-label">Brief Analysis</span>
@@ -1168,6 +1172,31 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <div class="note">Can take a few minutes - each flagged page's live content is fetched to generate real suggestions. PDF and legacy .xls (zip) reading use a proper parsing library, installed automatically into this app's own Python the first time you use it (needs internet access once); if that install can't complete, PDF falls back to a best-effort text extraction and reports honestly when it can't reliably read a page.</div>
     </section>
 
+    <section class="card panel" id="panel-geo" style="display:none">
+      <div class="card-t">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
+        GEO / AI Optimization <span class="hint">(testing - superadmin only)</span>
+      </div>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Generates AI-searchable keywords + long-tail FAQ questions + answers grounded in each target page's real content, then checks - without login, without any paid API - whether the site is already cited in real AI-answer results for each query. Perplexity's check is reliable; Google AI Overview and ChatGPT are best-effort only (both commonly report "Not checked" - Google blocks headless requests with a captcha, ChatGPT requires a logged-in account for a real answer).</p>
+      <div class="field">
+        <label>Domain</label>
+        <input type="text" id="geo-domain" placeholder="example.com" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>SEO Keywords <span class="hint">(optional, one per line or comma-separated - your existing target keywords)</span></label>
+        <textarea id="geo-keywords" rows="3" placeholder="lone worker safety courses Canada&#10;drone operator training courses"></textarea>
+      </div>
+      <div class="field">
+        <label>Target pages <span class="hint">(targets.json/.xlsx, optional - auto-discovers if omitted)</span></label>
+        <input type="file" id="geo-targets" accept=".json,.xlsx">
+      </div>
+      <label class="switch-row">
+        <span><span class="lbl">Check live AI visibility</span><span class="sub">Query Perplexity/Google/ChatGPT for each generated term (slower) - off generates keywords/FAQs only</span></span>
+        <span class="switch"><input type="checkbox" id="geo-check-visibility" checked><span class="track"></span></span>
+      </label>
+      <div class="note" style="margin-top:12px">Can take several minutes with visibility checking on (one browser query per generated FAQ). Not yet wired into any docx/schema/llms.txt output - keyword/FAQ xlsx only for now.</div>
+    </section>
+
     <section class="card panel" id="panel-brief" style="display:none">
       <div class="card-t">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -1401,6 +1430,27 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
               Download Audit
             </button>
             <button class="btn btn-tonal" onclick="srReset()">New Audit</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- geo / ai optimization -->
+      <div id="tbl-geo" style="flex:1;display:none">
+        <div class="empty" id="empty-geo">
+          <div class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></div>
+          <p>Enter a domain and click <b>Start</b> to generate AI-searchable keywords/FAQs.</p>
+        </div>
+        <div id="geo-active" class="hidden">
+          <div style="margin-bottom:12px">
+            <span class="tag t-yes" id="geo-progress">Starting...</span>
+          </div>
+          <div class="log" id="geo-log" style="height:350px;overflow-y:auto;font-size:12px"></div>
+          <div style="margin-top:14px;display:flex;gap:10px">
+            <button class="btn btn-primary" id="btn-geo-download" onclick="geoDownload()" disabled>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Download Keywords/FAQs
+            </button>
+            <button class="btn btn-tonal" onclick="geoReset()">New Report</button>
           </div>
         </div>
       </div>
@@ -2022,6 +2072,7 @@ function switchTab(m){
   $('panel-brief').style.display=m==='brief'?'':'none';
   $('panel-wayback').style.display=m==='wayback'?'':'none';
   $('panel-seranking').style.display=m==='seranking'?'':'none';
+  $('panel-geo').style.display=m==='geo'?'':'none';
   $('tbl-ranking').style.display=m==='ranking'?'':'none';
   $('tbl-index').style.display=m==='index'?'':'none';
   $('tbl-count').style.display=m==='count'?'':'none';
@@ -2034,7 +2085,8 @@ function switchTab(m){
   $('tbl-brief').style.display=m==='brief'?'':'none';
   $('tbl-wayback').style.display=m==='wayback'?'':'none';
   $('tbl-seranking').style.display=m==='seranking'?'':'none';
-  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',wayback:'Wayback Machine Submitter',seranking:'SEranking Audit',admin:'Admin Panel'};
+  $('tbl-geo').style.display=m==='geo'?'':'none';
+  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',wayback:'Wayback Machine Submitter',seranking:'SEranking Audit',geo:'GEO / AI Optimization',admin:'Admin Panel'};
   const subs={ranking:'Find where your domain ranks on Google - across regions, CAPTCHA-resistant.',
     index:'Check if your URLs are indexed in Google - searches site:url to verify.',
     count:'Get Google\'s total "About N results" number for each keyword - regional, CAPTCHA-resistant.',
@@ -2046,6 +2098,7 @@ function switchTab(m){
     brief:'Quick SEO analysis - indexing, domain age, titles, meta, headers, images, redirects, canonical, sitemap, robots, broken links.',
     wayback:'Submit URLs to the Wayback Machine\'s Save Page Now for a fresh, dated archive snapshot.',
     seranking:'Turn a SEranking Site Audit export into a suggestion-filled final workbook.',
+    geo:'AI-searchable keywords + FAQ suggestions, plus a no-login check of whether the site is already cited in AI answers (Perplexity reliable; Google/ChatGPT best-effort). Testing/superadmin-only.',
     admin:'Manage users, cities, and app configuration.'};
   $('page-title').textContent=titles[m];
   $('page-sub').textContent=subs[m];
@@ -2224,6 +2277,26 @@ async function doStart(){
     setButtons('running');
     startSrPoll();
     return;
+  }else if(mode==='geo'){
+    const geoDomain=$('geo-domain').value.trim();
+    if(!geoDomain){toast('Enter a domain');return;}
+    const geoFd=new FormData();
+    geoFd.append('domain',geoDomain);
+    geoFd.append('check_visibility',$('geo-check-visibility').checked?'1':'0');
+    const geoKeywords=$('geo-keywords').value.trim();
+    if(geoKeywords)geoFd.append('keywords',geoKeywords);
+    const geoTargetsFile=$('geo-targets').files[0];
+    if(geoTargetsFile)geoFd.append('targets',geoTargetsFile);
+    const rg=await fetch('/api/geo/start',{method:'POST',body:geoFd});
+    const dg=await rg.json();
+    if(dg.error){toast(dg.error);return;}
+    toast('GEO report started');
+    $('empty-geo').style.display='none';
+    $('geo-active').classList.remove('hidden');
+    $('btn-geo-download').disabled=true;
+    setButtons('running');
+    startGeoPoll();
+    return;
   }else if(mode==='wayback'){
     const _wbRaw=$('wb-urls').value.trim();
     if(!_wbRaw){toast('Enter at least one URL');return;}
@@ -2336,6 +2409,7 @@ async function doStop(){
   if(mode==='brief'){await baStop();return;}
   if(mode==='wayback'){await wbStop();return;}
   if(mode==='seranking'){await srStop();return;}
+  if(mode==='geo'){await geoStop();return;}
   const m=mode;await fetch('/api/stop',_mkbody(m));setButtons('stopped',m);stopPoll(m);showAlert(false);toast('Stopped');
 }
 async function doReset(){
@@ -2348,6 +2422,7 @@ async function doReset(){
   if(mode==='crawl'){crawlReset();return;}
   if(mode==='wayback'){wbReset();return;}
   if(mode==='seranking'){srReset();return;}
+  if(mode==='geo'){geoReset();return;}
   const m=mode;await fetch('/api/reset',_mkbody(m));setButtons('idle',m);showAlert(false);clearResults(m);updateProgress(0,0,'');setStatus('idle');stopPoll(m);$('log').textContent='';}
 async function loadPrevious(){
   const m=mode;
@@ -2423,7 +2498,7 @@ function updateProgress(cur,tot,kw){
   $('prog-lbl').textContent=cur+' / '+tot;
   $('cur-kw').textContent=(kw&&cur>0&&cur<=tot)?'Checking: "'+kw+'"':'';
 }
-const _modeState={ranking:'idle',index:'idle',count:'idle',backlink:'idle',onpage:'idle',health:'idle',gsc:'idle',crawl:'idle',brief:'idle',wayback:'idle',seranking:'idle',admin:'idle'};
+const _modeState={ranking:'idle',index:'idle',count:'idle',backlink:'idle',onpage:'idle',health:'idle',gsc:'idle',crawl:'idle',brief:'idle',wayback:'idle',seranking:'idle',geo:'idle',admin:'idle'};
 function setButtons(s, m){
   m = m || mode;
   _modeState[m] = s;
@@ -2793,6 +2868,45 @@ function srReset(){
   setButtons('idle','seranking');stopSrPoll();
 }
 
+/* ===================== geo / ai optimization ===================== */
+let geoTimer=null;
+function startGeoPoll(){stopGeoPoll();geoTimer=setInterval(geoPoll,2000);}
+function stopGeoPoll(){if(geoTimer){clearInterval(geoTimer);geoTimer=null;}}
+async function geoPoll(){
+  try{
+    const r=await fetch('/api/geo/status');
+    const d=await r.json();
+    const el=$('geo-log');
+    if(d.log&&d.log.length) el.textContent=d.log.join('\n');
+    el.scrollTop=el.scrollHeight;
+    if(d.status==='completed'){
+      $('geo-progress').textContent='Completed';$('geo-progress').className='tag t-yes';
+      $('btn-geo-download').disabled=!d.has_file;
+      setButtons('completed','geo');stopGeoPoll();toast('GEO report ready');
+    }else if(d.status==='error'){
+      $('geo-progress').className='tag t-not_found';
+      $('geo-progress').textContent='Error: '+(d.error_msg||'failed');
+      setButtons('stopped','geo');stopGeoPoll();
+    }else if(d.status==='stopped'){
+      $('geo-progress').className='tag t-unknown';
+      setButtons('stopped','geo');stopGeoPoll();
+    }else{
+      $('geo-progress').textContent='Running...';$('geo-progress').className='tag t-yes';
+    }
+  }catch(e){}
+}
+function geoDownload(){window.location.href='/api/geo/download';}
+async function geoStop(){await fetch('/api/geo/stop',{method:'POST'});toast('Stopping...');}
+function geoReset(){
+  $('empty-geo').style.display='block';
+  $('geo-active').classList.add('hidden');
+  $('geo-log').textContent='';
+  $('btn-geo-download').disabled=true;
+  $('geo-targets').value='';
+  $('geo-keywords').value='';
+  setButtons('idle','geo');stopGeoPoll();
+}
+
 /* ===================== wayback submitter ===================== */
 let wbTimer=null;
 function startWbPoll(){stopWbPoll();wbTimer=setInterval(wbPoll,2000);}
@@ -3124,7 +3238,7 @@ const ALL_TOOLS=[
   {key:'onpage',label:'SEO On-Page'},{key:'health',label:'Health Audit'},
   {key:'gsc',label:'GSC Audit'},{key:'crawl',label:'Crawl Tracker'},
   {key:'brief',label:'Brief Analysis'},{key:'wayback',label:'Wayback Submitter'},
-  {key:'seranking',label:'SEranking Audit'}];
+  {key:'seranking',label:'SEranking Audit'},{key:'geo',label:'GEO / AI Optimization'}];
 
 async function admCheckAdmin(){
   try{const r=await(await fetch('/api/auth/is_admin')).json();
@@ -3138,6 +3252,10 @@ async function admCheckAdmin(){
       // SEranking Audit is still being tested - admin-only for now, hidden from
       // regular users until it's confirmed working reliably.
       const srTab=$('tab-seranking');if(srTab)srTab.classList.remove('hidden');
+      // GEO / AI Optimization is brand new and untested - superadmin-only for now
+      // (server-side enforced too, in /api/geo/* - GEO_MIN_ROLE in web_app_batch.py).
+      // Promote to admin, then everyone, only once approved.
+      if(admIsSuper()){const geoTab=$('tab-geo');if(geoTab)geoTab.classList.remove('hidden');}
     }
   }catch(e){}
 }
@@ -3212,13 +3330,18 @@ async function admOpenUserModal(email){
 
   $('um-building-list').innerHTML=ADM_BUILDINGS.map(b=>'<option value="'+esc(b.building)+'">').join('');
 
+  // A stored value of the literal string "all" means every checkbox should be
+  // pre-checked (not zero, which .includes('all') against real format/tool keys
+  // would otherwise produce, misleadingly implying no access on edit).
   const existingFmts=(existing&&existing.formats)?String(existing.formats).split(',').map(s=>s.trim()).filter(Boolean):[];
+  const existingFmtsAll=existingFmts.includes('all');
   $('um-formats-grid').innerHTML=ALL_FORMATS.map(f=>admFmtChip(f,f)).join('');
-  $('um-formats-grid').querySelectorAll('input').forEach(cb=>{if(existingFmts.includes(cb.value))cb.checked=true;});
+  $('um-formats-grid').querySelectorAll('input').forEach(cb=>{if(existingFmtsAll||existingFmts.includes(cb.value))cb.checked=true;});
 
   const existingTools=(existing&&existing.tools)?String(existing.tools).split(',').map(s=>s.trim()).filter(Boolean):[];
+  const existingToolsAll=existingTools.includes('all');
   $('um-tools-grid').innerHTML=ALL_TOOLS.map(t=>admFmtChip(t.key,t.label)).join('');
-  $('um-tools-grid').querySelectorAll('input').forEach(cb=>{if(existingTools.includes(cb.value))cb.checked=true;});
+  $('um-tools-grid').querySelectorAll('input').forEach(cb=>{if(existingToolsAll||existingTools.includes(cb.value))cb.checked=true;});
 
   $('user-modal-overlay').classList.add('open');$('user-modal').classList.add('open');
   document.body.style.overflow='hidden';
@@ -3233,8 +3356,14 @@ async function admSaveUser(){
   const role=admIsSuper()?$('um-role').value:'user';
   const building=admIsSuper()?$('um-building').value.trim():MY_ADMIN_BUILDING;
   if(admIsSuper()&&role!=='superadmin'&&!building){toast('Choose a building for this user (or role = Super Admin)');return;}
-  const formats=Array.from($('um-formats-grid').querySelectorAll('input:checked')).map(c=>c.value).join(',');
-  const tools=Array.from($('um-tools-grid').querySelectorAll('input:checked')).map(c=>c.value).join(',');
+  // "Select All" should save as the literal string "all" - not every format/tool
+  // key spelled out - so the sheet stays readable and a user with "all" access
+  // automatically gets any NEW format/tool added later, instead of being stuck
+  // on the list that existed when they were granted access.
+  const formatsChecked=Array.from($('um-formats-grid').querySelectorAll('input:checked')).map(c=>c.value);
+  const formats=(formatsChecked.length>0&&formatsChecked.length===ALL_FORMATS.length)?'all':formatsChecked.join(',');
+  const toolsChecked=Array.from($('um-tools-grid').querySelectorAll('input:checked')).map(c=>c.value);
+  const tools=(toolsChecked.length>0&&toolsChecked.length===ALL_TOOLS.length)?'all':toolsChecked.join(',');
   const body={email,name:$('um-name').value.trim(),notes:$('um-notes').value.trim(),
     approved:$('um-approved').checked,role,building,formats,tools};
   const mac=$('um-mac').value.trim();
@@ -3761,7 +3890,13 @@ async function applyFormatFilter(){
   try{
     const r=await(await fetch('/api/auth/formats')).json();
     if(!r.formats)return;
-    const allowed=r.formats;
+    let allowed=r.formats;
+    // r.formats is the raw stored string (e.g. "james,omega" or "all") - split
+    // into an array before matching. Matching the raw string with .includes()
+    // did SUBSTRING matching, not membership - "beta_bhargu" contains "eta" as
+    // a substring, so a user allowed only beta_bhargu would also see eta.
+    if(typeof allowed==='string')allowed=allowed.split(',').map(s=>s.trim()).filter(Boolean);
+    if(!allowed.length||allowed.includes('all'))return;
     ['op-format','ha-format','gsc-format','ba-format'].forEach(id=>{
       const sel=$(id);if(!sel)return;
       const opts=sel.querySelectorAll('option');
@@ -3782,7 +3917,7 @@ async function applyToolFilter(){
     if(typeof t==='string')t=t.split(',');          // accept comma string
     const allowed=t.map(x=>String(x).trim().toLowerCase()).filter(x=>x);
     if(allowed.length===0||allowed.includes('all'))return;
-    const KEYS=['ranking','index','count','backlink','onpage','health','gsc','crawl','brief','wayback','seranking'];
+    const KEYS=['ranking','index','count','backlink','onpage','health','gsc','crawl','brief','wayback','seranking','geo'];
     KEYS.forEach(key=>{
       if(!allowed.includes(key)){const b=$('tab-'+key);if(b)b.style.display='none';}
     });

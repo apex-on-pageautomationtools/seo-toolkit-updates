@@ -3680,6 +3680,168 @@ def api_seranking_download():
 
 
 # --------------------------------------------------------------------------- #
+# GEO / AI Optimization - runs generate_geo_report.py (subprocess, same pattern
+# as SEranking above). NEW and UNTESTED - superadmin-only for now (server-side
+# enforced below, not just hidden in the UI), per explicit instruction: promote
+# to admin, then everyone, only once approved. Each stage is a one-line change
+# to the role check in _require_geo_role().
+# --------------------------------------------------------------------------- #
+GEO_MIN_ROLE = "superadmin"  # -> "admin" once approved for admins, then remove the check entirely
+
+
+def _current_user_role():
+    """Same role resolution as /api/auth/is_admin, without the account-caching
+    side effects - just what's needed to gate a route."""
+    accounts = auth.list_logged_in()
+    if not accounts:
+        return "", ""
+    email = accounts[0]["email"]
+    try:
+        result = auth._api_call({"action": "is_admin", "email": email})
+    except Exception:
+        return "", email
+    return (result.get("role") or ""), email
+
+
+def _require_geo_role():
+    """Returns None if the current logged-in user is allowed to use GEO, else a
+    (response, status_code) tuple to return immediately. Server-side check - a
+    hidden UI tab alone doesn't stop someone calling the API directly."""
+    role, email = _current_user_role()
+    allowed = {"superadmin"} if GEO_MIN_ROLE == "superadmin" else {"superadmin", "admin"}
+    if role not in allowed:
+        return jsonify({"error": "GEO/AI Optimization is not available for your account yet."}), 403
+    return None
+
+
+geo_state = {"status": "idle", "log": [], "domain": "", "output_file": "", "error_msg": ""}
+geo_lock = threading.Lock()
+geo_stop = threading.Event()
+
+
+def _run_geo_report(domain, targets_path, check_visibility, keywords):
+    with geo_lock:
+        geo_state.update({"status": "running", "log": [], "domain": domain,
+                          "output_file": "", "error_msg": ""})
+    geo_stop.clear()
+    activity(f"GEO report started ({domain})")
+
+    def _log(msg):
+        with geo_lock:
+            geo_state["log"].append(msg)
+
+    out_dir = os.path.join(UPLOADS_DIR, "geo_out")
+    os.makedirs(out_dir, exist_ok=True)
+
+    python_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "python", "python.exe")
+    script = os.path.join(SCRIPTS_DIR, "generate_geo_report.py")
+    cmd = [python_exe, "-u", script, domain, "--out", out_dir]
+    if targets_path:
+        cmd += ["--targets", targets_path]
+    if not check_visibility:
+        cmd += ["--no-visibility-check"]
+    if keywords:
+        cmd += ["--keywords", keywords]
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, bufsize=1, cwd=SCRIPTS_DIR,
+                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        for line in proc.stdout:
+            if geo_stop.is_set():
+                proc.kill()
+                _log("Stopped by user.")
+                with geo_lock:
+                    geo_state["status"] = "stopped"
+                return
+            _log(line.rstrip())
+        proc.wait()
+        out_path = os.path.join(out_dir, f"{domain} - Keywords and Content (FAQs) Work for GEO.xlsx")
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            with geo_lock:
+                geo_state["status"] = "error"
+                geo_state["error_msg"] = f"Script failed (exit code {proc.returncode})"
+            _log(f"Script exited with code {proc.returncode}")
+            return
+        with geo_lock:
+            geo_state["status"] = "completed"
+            geo_state["output_file"] = out_path
+        _log("Done.")
+    except Exception as e:
+        _log(f"Error: {e}")
+        with geo_lock:
+            geo_state["status"] = "error"
+            geo_state["error_msg"] = str(e)
+    finally:
+        if targets_path:
+            try:
+                os.remove(targets_path)
+            except Exception:
+                pass
+
+
+@app.route("/api/geo/start", methods=["POST"])
+def api_geo_start():
+    denied = _require_geo_role()
+    if denied:
+        return denied
+    with geo_lock:
+        if geo_state["status"] == "running":
+            return jsonify({"error": "GEO report already running."}), 400
+    domain = (request.form.get("domain") or "").strip()
+    if not domain:
+        return jsonify({"error": "Domain is required."}), 400
+    check_visibility = request.form.get("check_visibility", "1") != "0"
+    keywords = (request.form.get("keywords") or "").strip() or None
+    targets_path = None
+    tf = request.files.get("targets")
+    if tf and tf.filename:
+        os.makedirs(UPLOADS_DIR, exist_ok=True)
+        targets_path = os.path.join(UPLOADS_DIR, f"geo_{int(time.time())}_{os.path.basename(tf.filename)}")
+        tf.save(targets_path)
+    t = threading.Thread(target=_run_geo_report, args=(domain, targets_path, check_visibility, keywords), daemon=True)
+    t.start()
+    return jsonify({"status": "started"})
+
+
+@app.route("/api/geo/status")
+def api_geo_status():
+    denied = _require_geo_role()
+    if denied:
+        return denied
+    with geo_lock:
+        return jsonify({
+            "status": geo_state["status"],
+            "log": geo_state["log"][-200:],
+            "error_msg": geo_state["error_msg"],
+            "has_file": bool(geo_state["output_file"]),
+        })
+
+
+@app.route("/api/geo/stop", methods=["POST"])
+def api_geo_stop():
+    denied = _require_geo_role()
+    if denied:
+        return denied
+    geo_stop.set()
+    return jsonify({"status": "stopping"})
+
+
+@app.route("/api/geo/download")
+def api_geo_download():
+    denied = _require_geo_role()
+    if denied:
+        return denied
+    with geo_lock:
+        out_path = geo_state.get("output_file", "")
+    if not out_path or not os.path.exists(out_path):
+        return jsonify({"error": "No report available for download."}), 404
+    resp = send_file(out_path, as_attachment=True, download_name=os.path.basename(out_path))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+# --------------------------------------------------------------------------- #
 # Health Audit - runs checks + optional Selenium screenshots, builds report
 # --------------------------------------------------------------------------- #
 ha_state = {
