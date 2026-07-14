@@ -2418,6 +2418,42 @@ def _runtime_keys_sync_loop():
 # --------------------------------------------------------------------------- #
 # Helpers for request parsing
 # --------------------------------------------------------------------------- #
+def _least_recently_used(candidates):
+    """Pick among the candidates that have gone longest without being used,
+    with light randomization across the tied-oldest group instead of a single
+    deterministic winner - the shared proxies cache only refreshes every
+    SHARED_PROXIES_TTL seconds, so many independent local apps could otherwise
+    all read the exact same 'last_used' snapshot and stampede onto the same
+    'most idle' proxy at once. A proxy with no last_used value yet (never
+    used, or the sheet predates the column) sorts first."""
+    def _key(p):
+        ts = (p.get("last_used") or "").strip()
+        if not ts:
+            return ""
+        return ts
+    ranked = sorted(candidates, key=_key)
+    oldest_ts = _key(ranked[0])
+    tied = [p for p in ranked if _key(p) == oldest_ts]
+    return random.choice(tied)
+
+
+def _mark_proxy_used_async(pick):
+    """Fire-and-forget: tell the central sheet this proxy was just picked, so
+    other users' independent local apps prefer a different one next time.
+    Runs in a background thread with a short timeout - a slow/failed write
+    here must never delay the actual run that's about to use this proxy."""
+    def _do():
+        try:
+            email, password = auth.get_any_credentials()
+            if not email:
+                return
+            auth._api_call({"action": "proxies_mark_used", "email": email, "password": password,
+                            "host": pick.get("host", ""), "port": pick.get("port", "")}, timeout=8)
+        except Exception:
+            pass
+    threading.Thread(target=_do, daemon=True).start()
+
+
 def _proxies_from_request(data, country=None):
     proxies = list(CONFIG.get("proxies", []))
     ph = (data.get("proxy_host") or "").strip()
@@ -2433,15 +2469,18 @@ def _proxies_from_request(data, country=None):
             matched = [p for p in shared if _region_matches_country(p.get("region", ""), country)]
             pick = None
             if matched and random.random() < SHARED_PROXY_USE_CHANCE_MATCHED:
-                pick = random.choice(matched)
+                pick = _least_recently_used(matched)
                 add_log(f"Using a shared {(country or '').upper()}-region proxy for this run "
-                        f"(geo-matched - protects the office IP and keeps results consistent).")
+                        f"(geo-matched, least-recently-used - protects the office IP, keeps results "
+                        f"consistent, and spreads load across the pool so no single static-IP proxy "
+                        f"gets hit by everyone at once).")
             elif random.random() < SHARED_PROXY_USE_CHANCE:
-                pick = random.choice(shared)
+                pick = _least_recently_used(shared)
                 add_log("Using a shared proxy for this run (occasional rotation to protect the office IP).")
             if pick:
                 proxies = [{"type": pick.get("type", "http"), "host": pick["host"], "port": pick["port"],
                             "user": pick.get("user", ""), "pass": pick.get("pass", "")}]
+                _mark_proxy_used_async(pick)
     return proxies
 
 # --------------------------------------------------------------------------- #
