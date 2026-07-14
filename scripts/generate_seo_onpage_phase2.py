@@ -18,8 +18,8 @@ The .xlsx are produced by CLONING the templates in backend/ (template_*.xlsx) so
 formatting matches the house style exactly. The .docx is built from scratch (dynamic
 narrative + live screenshots). Page 1 is the branded cover (backend/onpage_cover.png,
 A4 full-bleed; per-domain override seo_onpage_screens/<domain>/cover.png; text cover if
-absent). Suggested meta copy uses Google Gemini's FREE tier when GEMINI_API_KEY is set,
-else a heuristic - no paid APIs.
+absent). Suggested meta copy uses a free-tier AI fallback chain (Gemini -> Groq ->
+OpenRouter, whichever has a key configured), else a heuristic - no paid APIs.
 
 Run:
     python generate_seo_onpage_phase2.py --domain example.com --targets targets.json
@@ -522,10 +522,13 @@ def _regex_parse(html, url, status):
 
 
 # ----------------------------------------------------------------- deliverables
-def _ai_suggest(prompt):
-    """Suggestion copy via Google Gemini's FREE tier when GEMINI_API_KEY is set
-    (free key: https://aistudio.google.com/apikey). Plain REST, no SDK, no paid API.
-    Returns parsed JSON or None (→ heuristic fallback)."""
+def _extract_json(text):
+    return json.loads(re.search(r"\{.*\}|\[.*\]", text, re.S).group(0))
+
+
+def _ai_suggest_gemini(prompt):
+    """Google Gemini's FREE tier when GEMINI_API_KEY is set (free key:
+    https://aistudio.google.com/apikey). Plain REST, no SDK, no paid API."""
     key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
         return None
@@ -544,11 +547,82 @@ def _ai_suggest(prompt):
         req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=40) as r:
             data = json.loads(r.read())
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
-        return json.loads(re.search(r"\{.*\}|\[.*\]", text, re.S).group(0))
+        return _extract_json(data["candidates"][0]["content"]["parts"][0]["text"])
     except Exception as e:
-        log(f"   [warn] Gemini meta suggestion failed, using heuristic: {e}")
+        log(f"   [warn] Gemini suggestion failed: {e}")
         return None
+
+
+def _ai_suggest_groq(prompt):
+    """Groq's FREE tier when GROQ_API_KEY is set (free key:
+    https://console.groq.com/keys) - OpenAI-compatible chat completions API,
+    very fast inference. Second fallback tier after Gemini."""
+    key = os.environ.get("GROQ_API_KEY", "").strip()
+    if not key:
+        return None
+    try:
+        import urllib.request
+        model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        body = json.dumps({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+        }).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+        })
+        with urllib.request.urlopen(req, timeout=40) as r:
+            data = json.loads(r.read())
+        return _extract_json(data["choices"][0]["message"]["content"])
+    except Exception as e:
+        log(f"   [warn] Groq suggestion failed: {e}")
+        return None
+
+
+def _ai_suggest_openrouter(prompt):
+    """OpenRouter's free-tier models when OPENROUTER_API_KEY is set (free key:
+    https://openrouter.ai/keys) - last AI tier before the heuristic fallback,
+    since free-tier models there are more rate-limited/less consistently
+    available than Gemini/Groq."""
+    key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if not key:
+        return None
+    try:
+        import urllib.request
+        model = os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        body = json.dumps({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+        }).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+            "HTTP-Referer": "https://apex-on-pageautomationtools.github.io",
+            "X-Title": "SEOToolkitPro",
+        })
+        with urllib.request.urlopen(req, timeout=40) as r:
+            data = json.loads(r.read())
+        return _extract_json(data["choices"][0]["message"]["content"])
+    except Exception as e:
+        log(f"   [warn] OpenRouter suggestion failed: {e}")
+        return None
+
+
+def _ai_suggest(prompt):
+    """Suggestion copy via a free-tier AI fallback chain: Gemini -> Groq ->
+    OpenRouter -> None (caller falls back to its own heuristic). Each tier is
+    skipped instantly if its API key isn't configured (CONFIG's Keys sheet /
+    GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY env vars), so a site with
+    only a Gemini key behaves exactly as before. Returns parsed JSON or None."""
+    for fn in (_ai_suggest_gemini, _ai_suggest_groq, _ai_suggest_openrouter):
+        result = fn(prompt)
+        if result is not None:
+            return result
+    return None
 
 
 _GENERIC_TITLES = {
@@ -625,9 +699,9 @@ def _best_rank_for_page(keywords, keyword_ranks):
 
 def suggest_meta(page_data, keywords, brand, keyword_ranks=None):
     """Existing title/desc/H1 from the crawl, plus a SUGGESTED title/description built
-    from the page's own content + its target keyword(s) - via free Gemini
-    (GEMINI_API_KEY) when available, else a content-aware heuristic (never a bare
-    "keyword | brand" slam-together).
+    from the page's own content + its target keyword(s) - via the free-tier AI
+    fallback chain (Gemini -> Groq -> OpenRouter) when a key is configured, else
+    a content-aware heuristic (never a bare "keyword | brand" slam-together).
 
     A title is only suggested when it's missing, a short generic nav-label (e.g.
     "Home", "About", "Service"), or missing its target keyword entirely - length on
@@ -6880,7 +6954,7 @@ def main():
                        homepage.get("h1") if homepage else None,
                        homepage.get("og_site_name") if homepage else None)
 
-    # deliverable data - Meta = existing + suggested (free Gemini if GEMINI_API_KEY,
+    # deliverable data - Meta = existing + suggested (free AI fallback chain if configured,
     # else heuristic); plus alt suggestions + canonical recommendations.
     metas = [suggest_meta(pd, pd["keywords"], brand, pd.get("keyword_ranks")) for pd in pages_data]
     all_self_hosted, all_external_cdn = [], []

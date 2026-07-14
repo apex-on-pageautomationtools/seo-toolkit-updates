@@ -260,6 +260,22 @@ def save_config(cfg):
 
 CONFIG = load_config()
 
+
+def _ai_key_env():
+    """Base subprocess env plus GEMINI_API_KEY/GROQ_API_KEY/OPENROUTER_API_KEY,
+    whichever are configured centrally (Admin -> Sync API Keys) - shared by every
+    report generator that calls generate_seo_onpage_phase2._ai_suggest()'s free-
+    tier fallback chain (On-Page, GEO), so a key added once reaches all of them."""
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    for cfg_key, env_key in (("gemini_api_key", "GEMINI_API_KEY"),
+                              ("groq_api_key", "GROQ_API_KEY"),
+                              ("openrouter_api_key", "OPENROUTER_API_KEY")):
+        val = CONFIG.get(cfg_key, "").strip()
+        if val:
+            env[env_key] = val
+    return env
+
+
 # Load custom cities into engine dicts so they survive restarts
 for _disp, _canon in CONFIG.get("custom_cities", {}).items():
     engine.CITY_CANONICAL[_disp] = _canon
@@ -3258,13 +3274,11 @@ def _run_onpage_report(domain, targets_json, fmt, no_capture):
     _log(f"Output dir: {out_dir}")
 
     try:
-        # GEMINI_API_KEY is synced centrally (Admin -> Sync API Keys, same as the PSI
-        # key) into CONFIG, not a machine env var - pass it through to the subprocess so
-        # suggest_meta()'s Gemini call works team-wide without per-machine setup.
-        proc_env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-        gemini_key = CONFIG.get("gemini_api_key", "").strip()
-        if gemini_key:
-            proc_env["GEMINI_API_KEY"] = gemini_key
+        # GEMINI_API_KEY/GROQ_API_KEY/OPENROUTER_API_KEY are synced centrally (Admin
+        # -> Sync API Keys, same as the PSI key) into CONFIG, not machine env vars -
+        # pass them through to the subprocess so _ai_suggest()'s fallback chain
+        # (Gemini -> Groq -> OpenRouter) works team-wide without per-machine setup.
+        proc_env = _ai_key_env()
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1, cwd=SCRIPTS_DIR,
@@ -3748,7 +3762,7 @@ def _run_geo_report(domain, targets_path, check_visibility, keywords, pages):
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, bufsize=1, cwd=SCRIPTS_DIR,
-                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                                env=_ai_key_env())
         for line in proc.stdout:
             if geo_stop.is_set():
                 proc.kill()
@@ -4431,7 +4445,8 @@ def api_auth_is_admin():
 # --------------------------------------------------------------------------- #
 # Admin config (Apps Script URL, API key sync)
 # --------------------------------------------------------------------------- #
-SENSITIVE_KEYS = {"psi_api_key", "gemini_api_key", "imgbb_api_key", "gsc_client_id", "gsc_client_secret",
+SENSITIVE_KEYS = {"psi_api_key", "gemini_api_key", "groq_api_key", "openrouter_api_key",
+                  "imgbb_api_key", "gsc_client_id", "gsc_client_secret",
                   "auth_api_url", "user_auth_url", "gsc_projects"}
 
 @app.route("/api/admin/save_config", methods=["POST"])
@@ -4466,6 +4481,7 @@ def api_admin_sync_keys():
 @app.route("/api/admin/keys_status")
 def api_admin_keys_status():
     key_names = {"psi_api_key": "PageSpeed API Key", "gemini_api_key": "Gemini API Key",
+                "groq_api_key": "Groq API Key", "openrouter_api_key": "OpenRouter API Key",
                 "imgbb_api_key": "ImgBB API Key (ranking screenshot URLs)"}
     status = {}
     for k, label in key_names.items():
