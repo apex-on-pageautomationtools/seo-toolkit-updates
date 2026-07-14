@@ -2295,7 +2295,40 @@ def run_backlink_analysis(urls, domain, delay, headless, country, proxies,
 _shared_proxies_cache = {"data": [], "ts": 0}
 _shared_proxies_lock = threading.Lock()
 SHARED_PROXIES_TTL = 600
-SHARED_PROXY_USE_CHANCE = 0.2   # only when the user has no proxy of their own configured
+SHARED_PROXY_USE_CHANCE = 0.2         # baseline chance - no proxy in the pool matches the search's target country
+SHARED_PROXY_USE_CHANCE_MATCHED = 0.7  # much higher chance when a pool proxy actually matches the target country -
+                                        # this is the ideal case (an office-IP-hiding proxy that's ALSO geo-consistent
+                                        # with the search), so use it far more often than the blind/random fallback.
+
+# Common aliases so a human-entered "Region" value (e.g. "United Kingdom", "USA")
+# still matches the 2-letter country codes the app uses internally (engine.GOOGLE_DOMAINS).
+_REGION_COUNTRY_ALIASES = {
+    "uk": "gb", "united kingdom": "gb", "great britain": "gb", "britain": "gb",
+    "usa": "us", "united states": "us", "united states of america": "us", "america": "us",
+    "australia": "au", "canada": "ca", "india": "in", "germany": "de", "france": "fr",
+    "spain": "es", "italy": "it", "netherlands": "nl", "brazil": "br", "mexico": "mx",
+    "japan": "jp", "korea": "kr", "south korea": "kr", "russia": "ru",
+}
+
+
+def _region_matches_country(region, country):
+    """True if a proxy's free-text Region field (admin-entered) refers to the
+    same country as the search's target `country` code. Tolerant of common
+    naming variants (2-letter code, full name, "USA"/"UK") since Region isn't
+    a validated/constrained field."""
+    if not region or not country:
+        return False
+    r = region.strip().lower()
+    c = country.strip().lower()
+    if r == c:
+        return True
+    if _REGION_COUNTRY_ALIASES.get(r) == c:
+        return True
+    # Datacenter-proxy-style naming: "us-east", "us1", "US - New York"
+    import re as _re_local
+    if _re_local.match(rf"^{_re_local.escape(c)}([^a-z]|$)", r):
+        return True
+    return False
 
 
 def _fetch_shared_proxies_now():
@@ -2385,7 +2418,7 @@ def _runtime_keys_sync_loop():
 # --------------------------------------------------------------------------- #
 # Helpers for request parsing
 # --------------------------------------------------------------------------- #
-def _proxies_from_request(data):
+def _proxies_from_request(data, country=None):
     proxies = list(CONFIG.get("proxies", []))
     ph = (data.get("proxy_host") or "").strip()
     pp = (data.get("proxy_port") or "").strip()
@@ -2396,11 +2429,19 @@ def _proxies_from_request(data):
             "pass": (data.get("proxy_pass") or "").strip()})
     if not proxies:
         shared = _shared_proxies()
-        if shared and random.random() < SHARED_PROXY_USE_CHANCE:
-            pick = random.choice(shared)
-            proxies = [{"type": pick.get("type", "http"), "host": pick["host"], "port": pick["port"],
-                        "user": pick.get("user", ""), "pass": pick.get("pass", "")}]
-            add_log("Using a shared proxy for this run (occasional rotation to protect the office IP).")
+        if shared:
+            matched = [p for p in shared if _region_matches_country(p.get("region", ""), country)]
+            pick = None
+            if matched and random.random() < SHARED_PROXY_USE_CHANCE_MATCHED:
+                pick = random.choice(matched)
+                add_log(f"Using a shared {(country or '').upper()}-region proxy for this run "
+                        f"(geo-matched - protects the office IP and keeps results consistent).")
+            elif random.random() < SHARED_PROXY_USE_CHANCE:
+                pick = random.choice(shared)
+                add_log("Using a shared proxy for this run (occasional rotation to protect the office IP).")
+            if pick:
+                proxies = [{"type": pick.get("type", "http"), "host": pick["host"], "port": pick["port"],
+                            "user": pick.get("user", ""), "pass": pick.get("pass", "")}]
     return proxies
 
 # --------------------------------------------------------------------------- #
@@ -2558,7 +2599,7 @@ def api_start():
     longitude = None
     if city and city in engine.CITY_COORDS:
         latitude, longitude = engine.CITY_COORDS[city]
-    proxies = _proxies_from_request(data)
+    proxies = _proxies_from_request(data, country=country)
 
     if vpn_method == "proxy" and not proxies:
         add_log(f"Fetching a free proxy for {country.upper()}...")
