@@ -1292,17 +1292,27 @@ def audit_site(domain, pages_data, dry_run=False):
         except Exception:
             f["sucuri_clean"] = None
 
-    # broken links - check each external link for 404/5xx
+    # broken links - reuse health_audit's more accurate checker (only 404/410 count
+    # as broken; 403/429/5xx are the server blocking an automated request, not a
+    # dead link - the old homepage-only, "any 4xx/5xx" check here disagreed with the
+    # "brokenlinks" screenshot section, which already used the correct logic) and
+    # across every target page, not just the homepage's first 30 external links.
+    # Also records which page each broken link was found on and a suggested
+    # redirect target, available to any format via findings["broken_links_detail"].
     broken_links = []
+    f["broken_links_detail"] = []
     if not dry_run:
-        ext_links = list(dict.fromkeys(home.get("external_links", [])[:30]))  # cap at 30
-        for link in ext_links:
-            try:
-                lst, _, _ = _http(link)
-                if lst and lst >= 400:
-                    broken_links.append(link)
-            except Exception:
-                pass
+        try:
+            import sys as _sys
+            _repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if _repo not in _sys.path:
+                _sys.path.insert(0, _repo)
+            import health_audit as _ha
+            _, broken_detail = _ha.check_broken_links(domain, [pd["url"] for pd in pages_data])
+            f["broken_links_detail"] = broken_detail
+            broken_links = [b["url"] for b in broken_detail]
+        except Exception:
+            pass
     f["broken_links"] = broken_links
 
     f["url_changes"] = []
@@ -3431,6 +3441,7 @@ def _build_docx_gamma(domain, pages_data, findings, captured, brand, out_path):
                 "While broken links may not directly impact SEO, they do affect user experience. If "
                 "users can't find the information they need, they are less likely to return, and search "
                 "engines may eventually view the website as less useful, affecting rankings.")
+    broken_detail = findings.get("broken_links_detail") or []
     broken_links = findings.get("broken_links", []) or []
     if broken_links:
         conclusion(f"When we analyzed your website, we found {len(broken_links)} broken link(s). It is "
@@ -3443,12 +3454,16 @@ def _build_docx_gamma(domain, pages_data, findings, captured, brand, out_path):
             _shade(c._tc.get_or_add_tcPr(), "FFC000")
             c.text = ""
             _run(c.paragraphs[0], htext, bold=True, color=BLACK, size=11)
+        by_url = {b.get("url"): b for b in broken_detail if isinstance(b, dict)}
         for ri, bl in enumerate(broken_links, start=1):
-            if isinstance(bl, dict):
-                vals = (bl.get("url", ""), bl.get("source", ""),
-                        str(bl.get("status", "")), bl.get("solution", root + "/"))
+            det = by_url.get(bl) if isinstance(bl, str) else (bl if isinstance(bl, dict) else None)
+            if det:
+                found_on = ", ".join(det.get("found_on") or []) or home.get("url", root + "/")
+                solution = det.get("suggested_redirect") or "Remove or redirect this link to a working page."
+                vals = (det.get("url", ""), found_on, str(det.get("code", "")), solution)
             else:
-                vals = (str(bl), home.get("url", root + "/"), "404", root + "/")
+                vals = (str(bl), home.get("url", root + "/"), "404",
+                        "Remove or redirect this link to a working page.")
             for ci, val in enumerate(vals):
                 c = btbl.rows[ri].cells[ci]
                 c.text = ""
