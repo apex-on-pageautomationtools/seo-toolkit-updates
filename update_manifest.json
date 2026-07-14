@@ -103,7 +103,7 @@
     },
     {
       "path": "scripts/generate_seo_onpage_phase2.py",
-      "hash": "36628d403f4f2604c6fc795f922898782ed4c16728f9c318c922e38825241ceb",
+      "hash": "4fbb0eb0e4eb8f17cc2ee3f845f18889cb7d9dbd66ec82a15d1b8b019e0c4255",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seo_onpage_phase2.py"
     },
     {
@@ -175,6 +175,46 @@
       "path": "scripts/generate_seranking_audit.py",
       "hash": "6e74386504e4910120908c6a235c87f5032f900a2b2e1742ca4c266135fe4bd4",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seranking_audit.py"
+    },
+    {
+      "path": "scripts/covers/cover_deltafl.png",
+      "hash": "ccaef68296aafecc2e69562f03169647cc676eace0d7ff8c96a201c4c7db74c1",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_deltafl.png"
+    },
+    {
+      "path": "scripts/covers/cover_deltafvr.png",
+      "hash": "758c4ad5e70ed2c7e09385fbcb22e69e51cb03f698569dd77748d964d1d12dc1",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_deltafvr.png"
+    },
+    {
+      "path": "scripts/covers/cover_deltaup.jpg",
+      "hash": "39cecbefc6df2252fd96c8d726eb69bbd201433b917e55458a350d629566bc26",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_deltaup.jpg"
+    },
+    {
+      "path": "scripts/covers/cover_eta.jpg",
+      "hash": "0bea0d444f2edda6a97858b54f146ded4fe7b6aac2319374c046f3c397c862c8",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_eta.jpg"
+    },
+    {
+      "path": "scripts/covers/cover_kappa.jpg",
+      "hash": "efb765bbaaea04e8b34c0652826ad0d6c1bc39dfec236d46c811e30d6c62a4f7",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_kappa.jpg"
+    },
+    {
+      "path": "scripts/covers/cover_sara.png",
+      "hash": "c61827168e86e747a82ade823cbe1248e2997d75977f6a8da0ea7b6683782737",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_sara.png"
+    },
+    {
+      "path": "scripts/covers/cover_alpha.png",
+      "hash": "77f2eb238b5fbae27ca3d62783a399a32b820654efb278e342ebe1ca83513573",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_alpha.png"
+    },
+    {
+      "path": "scripts/covers/cover_theta.png",
+      "hash": "cbd6ff3f591f52aeb013426bdba86c559a13a2dc6b3e6a7ecd70b2bc00b990cb",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_theta.png"
     }
   ]
 }

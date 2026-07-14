@@ -1493,8 +1493,17 @@ def _text_cover(doc, domain):
     ri.font.size = Pt(11)
 
 
-def _setup_docx(domain):
-    """Create a Document with cover page and return (doc, helpers_dict)."""
+def _setup_docx(domain, use_cover=True):
+    """Create a Document with cover page and return (doc, helpers_dict).
+
+    use_cover=False skips BOTH the shared onpage_cover.png image and the
+    generic "ON-PAGE SEO REPORT" text cover - just sets normal margins and
+    returns, so the caller builds its own title block. Needed because
+    onpage_cover.png was being applied to every format regardless of what
+    that format's own verified reference actually looks like (confirmed:
+    Camila's real reference has no cover image at all, just a centered
+    "On Page Audit Report" title in Candara - the generic cover was being
+    incorrectly mixed into its output)."""
     import generate_health_report as hr
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -1518,33 +1527,39 @@ def _setup_docx(domain):
 
     sec = doc.sections[0]
     sec.page_width, sec.page_height = A4_W, A4_H
-    cover = _cover_source(domain)
-    if cover:
-        sec.left_margin = sec.right_margin = sec.top_margin = sec.bottom_margin = Cm(0)
-        try:
-            composed = _compose_cover(cover, domain)
-            cp = doc.add_paragraph()
-            cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            cp.paragraph_format.space_before = Pt(0)
-            cp.paragraph_format.space_after = Pt(0)
-            cp.paragraph_format.line_spacing = 1.0
-            cp.add_run().add_picture(composed, width=A4_W)
-            try:
-                os.unlink(composed)
-            except OSError:
-                pass
-        except Exception as e:
-            log(f"   [warn] cover compose failed: {type(e).__name__}: {e}")
-        body = doc.add_section(WD_SECTION.NEW_PAGE)
-        body.page_width, body.page_height = A4_W, A4_H
-        body.left_margin = body.right_margin = Inches(0.49)
-        body.top_margin = body.bottom_margin = Inches(1)
-    else:
-        log("   [info] no cover image (backend/onpage_cover.png) - using a text cover.")
+    if not use_cover:
+        # This format builds its own title block matching its own verified
+        # reference - no image cover, no generic text cover.
         sec.left_margin = sec.right_margin = Inches(0.49)
         sec.top_margin = sec.bottom_margin = Inches(1)
-        _text_cover(doc, domain)
-        doc.add_page_break()
+    else:
+        cover = _cover_source(domain)
+        if cover:
+            sec.left_margin = sec.right_margin = sec.top_margin = sec.bottom_margin = Cm(0)
+            try:
+                composed = _compose_cover(cover, domain)
+                cp = doc.add_paragraph()
+                cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                cp.paragraph_format.space_before = Pt(0)
+                cp.paragraph_format.space_after = Pt(0)
+                cp.paragraph_format.line_spacing = 1.0
+                cp.add_run().add_picture(composed, width=A4_W)
+                try:
+                    os.unlink(composed)
+                except OSError:
+                    pass
+            except Exception as e:
+                log(f"   [warn] cover compose failed: {type(e).__name__}: {e}")
+            body = doc.add_section(WD_SECTION.NEW_PAGE)
+            body.page_width, body.page_height = A4_W, A4_H
+            body.left_margin = body.right_margin = Inches(0.49)
+            body.top_margin = body.bottom_margin = Inches(1)
+        else:
+            log("   [info] no cover image (backend/onpage_cover.png) - using a text cover.")
+            sec.left_margin = sec.right_margin = Inches(0.49)
+            sec.top_margin = sec.bottom_margin = Inches(1)
+            _text_cover(doc, domain)
+            doc.add_page_break()
 
     def _style_run(run, bold=False):
         run.font.name = FONT
@@ -1670,6 +1685,38 @@ def _setup_docx(domain):
     return doc, {"label_body": label_body, "para": para, "para_red": para_red, "shot": shot,
                  "ribbon": ribbon, "result": result, "green": green, "summary_table": summary_table,
                  "d": d, "root": root, "FONT": FONT, "SIZE": SIZE, "_style_run": _style_run}
+
+
+FORMAT_COVERS_DIR = ROOT / "covers"
+
+
+def _insert_format_cover(doc, filename, page_break=True):
+    """Insert THIS format's own real cover image (extracted from its client
+    reference file), centered, at its own native aspect ratio - never
+    force-scaled to the full A4 page width like the old shared cover logic
+    did. Each format's cover is a distinct file (covers/cover_<format>.png/
+    jpg) - onpage_cover.png (now only used by formats that genuinely own it)
+    was being applied to every format regardless of what its own reference
+    actually looked like. No-op (silently) if the asset is missing, so a
+    report still generates rather than crashing on a missing file."""
+    from docx.shared import Inches, Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    path = FORMAT_COVERS_DIR / filename
+    if not path.exists():
+        return
+    try:
+        w_px, h_px = _img_dims(path)
+        max_w = Inches(6.5)
+        width = min(max_w, Inches(w_px / 96))
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(8)
+        p.add_run().add_picture(str(path), width=width)
+        if page_break:
+            doc.add_page_break()
+    except Exception as e:
+        log(f"   [warn] cover insert failed for {filename}: {type(e).__name__}: {e}")
 
 
 # ---- Reusable section writers ----
@@ -3482,7 +3529,8 @@ def _build_docx_deltafl(domain, pages_data, findings, captured, brand, out_path)
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
+    _insert_format_cover(doc, "cover_deltafl.png", page_break=False)
     root = h["root"]; d = h["d"]; FONT = h["FONT"]
 
     BLACK = RGBColor(0x00, 0x00, 0x00)
@@ -3776,7 +3824,8 @@ def _build_docx_deltafvr(domain, pages_data, findings, captured, brand, out_path
     You !" line instead of a sign-off block."""
     from docx.shared import Pt, RGBColor
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
+    _insert_format_cover(doc, "cover_deltafvr.png", page_break=False)
     root = h["root"]; d = h["d"]; FONT = h["FONT"]
 
     BLACK = RGBColor(0x00, 0x00, 0x00)
@@ -3976,7 +4025,8 @@ def _build_docx_deltaup(domain, pages_data, findings, captured, brand, out_path)
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
+    _insert_format_cover(doc, "cover_deltaup.jpg", page_break=False)
     root = h["root"]; d = h["d"]; FONT = h["FONT"]
 
     BLACK = RGBColor(0x00, 0x00, 0x00)
@@ -4251,10 +4301,11 @@ def _build_docx_octal(domain, pages_data, findings, captured, brand, out_path):
     zeeboo.in.docx": no shaded banners, blue (#4F81BD) title, navy (#002060)
     "Label → description" arrow style for the SEO analysis section (same
     technique as Delta FVR but different palette - title blue, section-title
-    #0070C0, "More Content Require" green #00B050), closing with "Thank You!"."""
+    #0070C0, "More Content Require" green #00B050), closing with "Thank You!".
+    No cover image in the reference - plain text title only."""
     from docx.shared import Pt, RGBColor
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
     root = h["root"]; d = h["d"]; FONT = h["FONT"]
 
     BLACK = RGBColor(0x00, 0x00, 0x00)
@@ -4447,16 +4498,22 @@ def _build_docx_octal(domain, pages_data, findings, captured, brand, out_path):
 
 def _build_docx_camila(domain, pages_data, findings, captured, brand, out_path):
     """Camila - verified against the client reference "On Page Audit Report __
-    electroitsolutions.com.docx": solid BLACK (#000000) 1-cell-table section
-    banners with white bold uppercase text (distinct from every other format's
-    banner color), navy blue (#1D5489) "Result:" labels, black body text,
-    green (#00B050) "Note" callout."""
+    electroitsolutions.com.docx" (D:\\Report Formats\\On-Page Report Formats\\
+    Camila Onpage format): no cover image (the shared onpage_cover.png was
+    being incorrectly applied here too - confirmed against the real reference,
+    which has NO cover page at all), Candara font throughout, centered title
+    ("On Page Audit Report" 26pt / domain 22pt, both bold), solid BLACK
+    (#000000) 1-cell-table section banners with white bold uppercase text,
+    navy blue (#1D5489) "Result:" labels, black body text, green (#00B050)
+    "Note" callout."""
     from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
 
-    doc, h = _setup_docx(domain)
-    root = h["root"]; d = h["d"]; FONT = h["FONT"]
+    doc, h = _setup_docx(domain, use_cover=False)
+    root = h["root"]; d = h["d"]
+    CAMILA_FONT = "Candara"
 
     BLACK = RGBColor(0x00, 0x00, 0x00)
     WHITE = RGBColor(0xFF, 0xFF, 0xFF)
@@ -4465,7 +4522,7 @@ def _build_docx_camila(domain, pages_data, findings, captured, brand, out_path):
 
     def _run(p, text, bold=False, color=BLACK, size=12):
         r = p.add_run(text)
-        r.font.name = FONT
+        r.font.name = CAMILA_FONT
         r.font.size = Pt(size)
         r.font.bold = bold
         if color is not None:
@@ -4507,11 +4564,13 @@ def _build_docx_camila(domain, pages_data, findings, captured, brand, out_path):
 
     home_url = pages_data[0]["url"] if pages_data else root + "/"
 
-    # ---- Title ----
+    # ---- Title (verified against the reference: centered, 26pt/22pt) ----
     p = doc.add_paragraph()
-    _run(p, "On Page Audit Report", bold=True, color=BLACK, size=20)
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _run(p, "On Page Audit Report", bold=True, color=BLACK, size=26)
     p = doc.add_paragraph()
-    _run(p, d.capitalize(), bold=True, color=BLACK, size=16)
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _run(p, d.capitalize(), bold=True, color=BLACK, size=22)
     body("On-page optimization refers to all measures that can be taken directly within the "
          "website in order to improve its position in the search rankings.")
     p = doc.add_paragraph()
@@ -4704,7 +4763,8 @@ def _build_docx_alpha(domain, pages_data, findings, captured, brand, out_path):
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
+    _insert_format_cover(doc, "cover_alpha.png", page_break=False)
     root = h["root"]; d = h["d"]; FONT = h["FONT"]
 
     BLACK = RGBColor(0x00, 0x00, 0x00)
@@ -4974,7 +5034,8 @@ def _build_docx_eta(domain, pages_data, findings, captured, brand, out_path):
     Archive checks beyond the core set."""
     from docx.shared import Pt, RGBColor
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
+    _insert_format_cover(doc, "cover_eta.jpg", page_break=False)
     root = h["root"]; d = h["d"]; FONT = h["FONT"]
 
     BLACK = RGBColor(0x00, 0x00, 0x00)
@@ -5267,7 +5328,8 @@ def _build_docx_kappa(domain, pages_data, findings, captured, brand, out_path):
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
+    _insert_format_cover(doc, "cover_kappa.jpg", page_break=False)
     root = h["root"]; d = h["d"]; FONT = h["FONT"]
 
     BLACK = RGBColor(0x00, 0x00, 0x00)
@@ -5515,12 +5577,14 @@ def _build_docx_peta(domain, pages_data, findings, captured, brand, out_path):
     black Calibri body text. "Additional suggestion:" is a standalone bold red
     label. Broken Links is a real 4-column data table (Broken Link / Link Text /
     source page / Suggestion), not a screenshot. Data-driven Result lines reuse
-    the same `findings` fields as the other builders so this format stays honest."""
+    the same `findings` fields as the other builders so this format stays honest.
+    No cover image in the reference - its own dark title banner is the first
+    content."""
     from docx.shared import Pt, RGBColor
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
     root = h["root"]; d = h["d"]; FONT = h["FONT"]
 
     BLACK = RGBColor(0x00, 0x00, 0x00)
@@ -5783,7 +5847,8 @@ def _build_docx_sara(domain, pages_data, findings, captured, brand, out_path):
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
+    _insert_format_cover(doc, "cover_sara.png", page_break=False)
     # Neon has NO page background - do not call _set_page_background().
     home = next((pd for pd in pages_data if urllib.parse.urlparse(pd["url"]).path in ("", "/")),
                 pages_data[0] if pages_data else {})
@@ -6084,12 +6149,15 @@ def _build_docx_theta(domain, pages_data, findings, captured, brand, out_path):
     teal - both are legitimately different in their own reference files, not a case
     of one copying the other). "Existing/Recommended URL Structure" is red/green
     labeled where the reference shows it. Ends with a Keyword/Landing Page table
-    built from each page's own assigned keywords."""
+    built from each page's own assigned keywords. Its reference has a genuine
+    full-page A4 cover (photo + "ON PAGE OPTIMIZATION" branding) - the only
+    format confirmed to actually want a full-page image cover like this."""
     from docx.shared import Pt, RGBColor
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
+    _insert_format_cover(doc, "cover_theta.png", page_break=True)
     root = h["root"]; d = h["d"]; FONT = h["FONT"]
 
     BLACK = RGBColor(0x00, 0x00, 0x00)
