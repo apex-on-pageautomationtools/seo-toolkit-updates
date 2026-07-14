@@ -1177,7 +1177,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
         GEO / AI Optimization <span class="hint">(testing - superadmin only)</span>
       </div>
-      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Generates AI-searchable keywords + long-tail FAQ questions + answers grounded in each target page's real content, then checks - without login, without any paid API - whether the site is already cited in real AI-answer results for each query. Perplexity's check is reliable; Google AI Overview and ChatGPT are best-effort only (both commonly report "Not checked" - Google blocks headless requests with a captcha, ChatGPT requires a logged-in account for a real answer).</p>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Generates the full monthly GEO deliverable set from just a domain (+ pages/keywords if you have them): a Keywords/FAQ xlsx, llms-full.txt, Schema Suggestions (FAQPage JSON-LD), a Technical Optimization (ALT-tag) report, Content Modification suggestions, and Internal Linking suggestions (checked against the real sitemap, not just the pages in this run). The Keywords xlsx also checks - without login, without any paid API - whether the site is already cited in real AI-answer results for each query. Perplexity's check is reliable; Google AI Overview and ChatGPT are best-effort only (both commonly report "Not checked" - Google blocks headless requests with a captcha, ChatGPT requires a logged-in account for a real answer). Not yet included: the Performance Report (rank tracking / Ahrefs / GA4 screenshots) - separate, bigger scope.</p>
       <div class="field">
         <label>Domain</label>
         <input type="text" id="geo-domain" placeholder="example.com" autocomplete="off">
@@ -1194,7 +1194,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <span><span class="lbl">Check live AI visibility</span><span class="sub">Query Perplexity/Google/ChatGPT for each generated term (slower) - off generates keywords/FAQs only</span></span>
         <span class="switch"><input type="checkbox" id="geo-check-visibility" checked><span class="track"></span></span>
       </label>
-      <div class="note" style="margin-top:12px">Can take several minutes with visibility checking on (one browser query per generated FAQ). Not yet wired into any docx/schema/llms.txt output - keyword/FAQ xlsx only for now.</div>
+      <div class="note" style="margin-top:12px">Can take several minutes - generates 6 files (xlsx, llms-full.txt, and 4 docx), each with its own AI calls and, for the xlsx, one browser query per generated FAQ if visibility checking is on. All suggestions are verified against the page's real crawled content before being included - a suggestion whose text doesn't actually exist on the page is dropped, not guessed.</div>
     </section>
 
     <section class="card panel" id="panel-brief" style="display:none">
@@ -1448,7 +1448,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
           <div style="margin-top:14px;display:flex;gap:10px">
             <button class="btn btn-primary" id="btn-geo-download" onclick="geoDownload()" disabled>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Download Keywords/FAQs
+              Download GEO Report (ZIP)
             </button>
             <button class="btn btn-tonal" onclick="geoReset()">New Report</button>
           </div>
@@ -3074,6 +3074,11 @@ async function openSettings(){
   try{const c=await(await fetch('/api/config')).json();proxyPool=Array.isArray(c.proxies)?c.proxies.filter(p=>p&&p.host&&p.port):[];$('s-downloads-folder').value=c.downloads_folder||'';}
   catch(e){proxyPool=[];}
   renderProxies();
+  // Re-fetch account info every time Settings opens, rather than relying on the
+  // one-shot admCheckAdmin() call from app init (fire-and-forget) - if that
+  // initial fetch was still in flight or hiccupped, Name/Email stayed blank
+  // forever with no way to retry short of a full page reload.
+  admCheckAdmin();
   $('sheet-overlay').classList.add('open');$('sheet').classList.add('open');
   document.body.style.overflow='hidden';
 }

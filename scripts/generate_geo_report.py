@@ -208,13 +208,24 @@ def check_ai_visibility(driver, query, domain):
 # --------------------------------------------------------------------------- #
 # Step 3: combine into the reference-matching xlsx
 # --------------------------------------------------------------------------- #
-def build_geo_keywords_xlsx(domain, pages_data, brand, out_path, check_visibility=True, seed_keywords=None):
+def build_all_faqs(pages_data, brand, seed_keywords=None):
+    """Generate the FAQ/keyword set ONCE per page and reuse it everywhere (xlsx,
+    Schema, llms-full.txt) - matching the real reference, where every deliverable
+    draws from the exact same FAQ data instead of each file inventing its own.
+    Returns {url: [{"keyword","query","answer"}, ...]}."""
+    faqs_by_page = {}
+    for pd in pages_data:
+        log(f"   -> generating FAQs: {pd['url']}")
+        faqs_by_page[pd["url"]] = generate_ai_faqs(pd, brand, seed_keywords=seed_keywords)
+    return faqs_by_page
+
+
+def build_geo_keywords_xlsx(domain, pages_data, faqs_by_page, out_path, check_visibility=True, seed_keywords=None):
     """seed_keywords: optional list of SEO keywords the team already has for this
     domain (given up front, e.g. from their existing keyword research) - these
-    steer the per-page FAQ generation toward those terms AND are checked directly
-    for AI-citation as their own rows, so the team can see right away whether a
-    keyword they already have is already showing up in AI answers, instead of
-    only getting brand-new AI-generated terms."""
+    are also checked directly for AI-citation as their own rows, so the team can
+    see right away whether a keyword they already have is already showing up in
+    AI answers, instead of only getting brand-new AI-generated terms."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
 
@@ -247,8 +258,7 @@ def build_geo_keywords_xlsx(domain, pages_data, brand, out_path, check_visibilit
 
     total_rows = 0
     for pd in pages_data:
-        faqs = generate_ai_faqs(pd, brand, seed_keywords=seed_keywords)
-        for item in faqs:
+        for item in faqs_by_page.get(pd["url"], []):
             row = [pd["url"], item["keyword"], item["query"], item["answer"], "Auto-generated from page content"]
             row += _visibility_cells(item["query"])
             ws.append(row)
@@ -285,6 +295,452 @@ def build_geo_keywords_xlsx(domain, pages_data, brand, out_path, check_visibilit
 
 
 # --------------------------------------------------------------------------- #
+# llms-full.txt - the whole site as markdown (AI-crawler-facing file), ending
+# with the same FAQ set as the xlsx/Schema doc, matching the real reference's
+# structure ("# https://domain/ llms-full.txt", per-page content, "## FAQs").
+# Best-effort rendering: built from what's actually crawled (headings/paragraph
+# text/images), not a pixel-identical clone of whatever dedicated llms.txt
+# plugin/tool produced the reference - that tool has access to the fully
+# rendered page; this reuses the same crawler as every other report here.
+# --------------------------------------------------------------------------- #
+def _fetch_html(url):
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 SEOPhase2Bot"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.read().decode("utf-8", "ignore")
+    except Exception as e:
+        log(f"   [warn] could not fetch {url} for markdown: {e}")
+        return ""
+
+
+def _inline_markdown(el, base_url):
+    import urllib.parse as _up
+    parts = []
+    for node in el.children:
+        if isinstance(node, str):
+            parts.append(str(node))
+        elif getattr(node, "name", None) == "a":
+            href = node.get("href", "")
+            href = _up.urljoin(base_url, href) if href else ""
+            text = node.get_text(" ", strip=True)
+            parts.append(f"[{text}]({href})" if text and href else text)
+        elif getattr(node, "name", None) == "img":
+            src = node.get("src") or node.get("data-src") or ""
+            src = _up.urljoin(base_url, src) if src else ""
+            if src:
+                parts.append(f"![{node.get('alt', '')}]({src})")
+        elif getattr(node, "name", None) in ("strong", "b"):
+            parts.append(f"**{node.get_text(' ', strip=True)}**")
+        elif getattr(node, "name", None) in ("em", "i"):
+            parts.append(f"*{node.get_text(' ', strip=True)}*")
+        elif hasattr(node, "get_text"):
+            parts.append(node.get_text(" ", strip=True))
+    return re.sub(r"\s+", " ", " ".join(parts)).strip()
+
+
+def _html_to_markdown(html, base_url):
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+    body = soup.body or soup
+    out = []
+    for el in body.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "img"]):
+        if el.find_parent(["nav", "header", "footer"]):
+            continue
+        name = el.name
+        if name and len(name) == 2 and name[0] == "h" and name[1].isdigit():
+            text = el.get_text(" ", strip=True)
+            if text:
+                out.append("#" * int(name[1]) + " " + text)
+        elif name == "img":
+            if el.find_parent(["p", "li"]):
+                continue  # already covered inline by its parent block
+            import urllib.parse as _up
+            src = el.get("src") or el.get("data-src") or ""
+            if src:
+                out.append(f"![{el.get('alt', '')}]({_up.urljoin(base_url, src)})")
+        else:
+            text = _inline_markdown(el, base_url)
+            if text and len(text.split()) >= 3:
+                out.append(text)
+    return "\n\n".join(out)
+
+
+def build_llms_full_txt(domain, pages_data, faqs_by_page, out_path):
+    lines = [f"# https://{domain}/ llms-full.txt", ""]
+    for pd in pages_data:
+        html = _fetch_html(pd["url"])
+        title = pd.get("title") or pd.get("h1") or pd["url"]
+        if title and title != op.MISSING:
+            lines.append(f"# {title}")
+            lines.append("")
+        md = _html_to_markdown(html, pd["url"]) if html else (pd.get("body_text") or "")
+        if md:
+            lines.append(md)
+            lines.append("")
+
+    lines.append("## FAQs")
+    lines.append("")
+    for pd in pages_data:
+        for item in faqs_by_page.get(pd["url"], []):
+            lines.append(f"[{item['query']}]({pd['url']})")
+            lines.append("")
+            lines.append(item["answer"])
+            lines.append("")
+
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    log(f"   -> llms-full.txt written to {out_path} ({len(lines)} lines)")
+
+
+# --------------------------------------------------------------------------- #
+# Schema Suggestions - FAQPage JSON-LD per page, built directly from the SAME
+# FAQ data as the Keywords xlsx (no new AI calls) - matches the real reference:
+# title, yellow-highlighted warning note, then per-URL "FAQs Schema" (Heading 2)
+# blocks with a literal <script type="application/ld+json"> block.
+# --------------------------------------------------------------------------- #
+def build_schema_docx(domain, faqs_by_page, out_path):
+    from docx import Document
+    from docx.shared import Pt
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    doc = Document()
+    p = doc.add_paragraph()
+    r = p.add_run(f"Schema - {domain}")
+    r.bold = True
+    r.font.size = Pt(22)
+
+    note_p = doc.add_paragraph()
+    note_r = note_p.add_run(
+        "Note – Before adding the new suggested schema, remove the existing FAQs "
+        "schema from the page and then update the following schema to prevent any conflicts.")
+    note_r.bold = True
+    rpr = note_r._element.get_or_add_rPr()
+    highlight = OxmlElement("w:highlight")
+    highlight.set(qn("w:val"), "yellow")
+    rpr.append(highlight)
+
+    blocks = 0
+    for url, faqs in faqs_by_page.items():
+        if not faqs:
+            continue
+        doc.add_heading("FAQs Schema", level=2)
+        p2 = doc.add_paragraph()
+        r2 = p2.add_run(f"Page URL - {url}")
+        r2.bold = True
+
+        schema_obj = {
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            "mainEntity": [
+                {"@type": "Question", "name": item["query"],
+                 "acceptedAnswer": {"@type": "Answer", "text": item["answer"]}}
+                for item in faqs
+            ],
+        }
+        doc.add_paragraph('<script type="application/ld+json">')
+        for line in json.dumps(schema_obj, indent=2, ensure_ascii=False).split("\n"):
+            doc.add_paragraph(line)
+        doc.add_paragraph("</script>")
+        blocks += 1
+
+    doc.save(out_path)
+    log(f"   -> Schema Suggestions written to {out_path} ({blocks} page block(s))")
+
+
+# --------------------------------------------------------------------------- #
+# Technical Optimization Report - image ALT-tag audit, matching the real
+# reference: title, intro, per-image "Page URL:/Image Source:/Image ALT
+# Suggestion:" bullets, closing green bold "Suggestion:" call-to-action.
+# --------------------------------------------------------------------------- #
+def _suggest_alt_text(page_url, img_src, brand, page_title=""):
+    prompt = (
+        f"Write a concise, descriptive image ALT text (under 125 characters) for an image on "
+        f"{brand}'s page at {page_url} (page topic: {page_title or 'unknown'}). "
+        f"The image file is: {img_src}. Infer what the image likely shows from the filename/page "
+        "topic. Return ONLY the ALT text, no quotes, no extra commentary."
+    )
+    result = op._ai_suggest(f'Return ONLY JSON: {{"alt": "..."}}\n\n{prompt}')
+    if isinstance(result, dict) and result.get("alt"):
+        return str(result["alt"]).strip()
+    # Heuristic fallback - filename-derived
+    name = img_src.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    name = re.sub(r"[-_]+", " ", name).strip() or "image"
+    return f"{name} - {brand}".strip(" -")
+
+
+def build_technical_optimization_docx(domain, pages_data, brand, out_path, max_images=20):
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+
+    missing = []
+    for pd in pages_data:
+        for im in pd.get("images", []):
+            if not (im.get("alt") or "").strip():
+                missing.append((pd["url"], im.get("src", ""), pd.get("title") or pd.get("h1") or ""))
+
+    doc = Document()
+    p = doc.add_paragraph()
+    r = p.add_run("Technical Optimization Suggestions")
+    r.bold = True
+    r.font.size = Pt(22)
+    p = doc.add_paragraph()
+    r = p.add_run("Technical Optimization Analysis:")
+    r.bold = True
+    doc.add_paragraph(
+        "We reviewed the target pages for technical on-page issues that can affect how AI "
+        "crawlers and search engines read and cite this content.")
+    p = doc.add_paragraph()
+    r = p.add_run("Image ALT Optimization:")
+    r.bold = True
+
+    if missing:
+        doc.add_paragraph(
+            f"{len(missing)} image(s) are missing ALT tags across the target pages checked - "
+            "ALT text helps both accessibility and AI/search engines understand image content.")
+        for url, src, title in missing[:max_images]:
+            log(f"   -> ALT suggestion: {src[:70]}")
+            alt = _suggest_alt_text(url, src, brand, title)
+            doc.add_paragraph(f"Page URL: - {url}", style="List Paragraph")
+            doc.add_paragraph(f"Image Source: - {src}", style="List Paragraph")
+            doc.add_paragraph(f"Image ALT Suggestion: - {alt}", style="List Paragraph")
+        if len(missing) > max_images:
+            doc.add_paragraph(f"...and {len(missing) - max_images} more image(s) not shown here.")
+    else:
+        doc.add_paragraph("No missing ALT tags were found on the target pages checked.")
+
+    p = doc.add_paragraph()
+    r = p.add_run("Suggestion: - Please review and approve the above ALT text suggestions for implementation.")
+    r.bold = True
+    r.font.color.rgb = RGBColor(0x00, 0xB0, 0x50)
+    doc.save(out_path)
+    log(f"   -> Technical Optimization Report written to {out_path} ({len(missing)} missing ALT(s))")
+
+
+# --------------------------------------------------------------------------- #
+# Existing Content Modification Suggestions - AI-grounded Find/Replace pairs,
+# each verified to be a REAL exact substring of the page's actual crawled
+# content before being kept (a suggestion whose "find" text doesn't really
+# exist on the page can't be applied, which would defeat the point).
+# --------------------------------------------------------------------------- #
+def generate_content_modifications(page_data, brand, n=2):
+    body = (page_data.get("body_text") or "")[:2500]
+    if not body:
+        return []
+    prompt = (
+        "You are editing existing website copy for AI-search optimization. Below is real text "
+        f"from {brand}'s page at {page_data['url']}.\nContent: {body}\n\n"
+        f"Find up to {n} short passages (1-2 sentences each) in this content that could be "
+        "improved - fixing grammar/typos and/or turning a plain statement into an FAQ-style "
+        "lead-in question naturally answered by the surrounding text. Each passage you pick MUST "
+        "be an EXACT quote copied from the content above (so it can be found with a find/replace) "
+        "- do not paraphrase the 'find' text.\n"
+        'Return ONLY JSON: [{"find": "<exact original passage>", "replace": "<edited passage>"}, ...]'
+    )
+    result = op._ai_suggest(prompt)
+    out = []
+    if isinstance(result, list):
+        for item in result[:n]:
+            if isinstance(item, dict) and item.get("find") and item.get("replace"):
+                find_text = str(item["find"]).strip()
+                if find_text and find_text in body:
+                    out.append({"find": find_text, "replace": str(item["replace"]).strip()})
+    return out
+
+
+def build_content_modification_docx(domain, pages_data, brand, out_path):
+    from docx import Document
+    from docx.shared import Pt
+
+    doc = Document()
+    p = doc.add_paragraph()
+    r = p.add_run("Existing Content Modification Suggestions")
+    r.bold = True
+    r.font.size = Pt(22)
+
+    any_content = False
+    for pd in pages_data:
+        log(f"   -> content modifications: {pd['url']}")
+        mods = generate_content_modifications(pd, brand)
+        if not mods:
+            continue
+        any_content = True
+        p = doc.add_paragraph()
+        r = p.add_run(f"Page URL: - {pd['url']}")
+        r.bold = True
+        for m in mods:
+            p1 = doc.add_paragraph()
+            r1 = p1.add_run(f"Find: - {m['find']}")
+            r1.bold = True
+            p2 = doc.add_paragraph()
+            r2 = p2.add_run(f"Replace With: - {m['replace']}")
+            r2.bold = True
+    if not any_content:
+        doc.add_paragraph("No content modification suggestions were generated for the pages checked.")
+    doc.save(out_path)
+    log(f"   -> Content Modification Suggestions written to {out_path}")
+
+
+# --------------------------------------------------------------------------- #
+# Internal Linking Suggestions - AI-suggested anchor text + target page, again
+# verified against the real crawled content before being kept, with a REAL
+# w:hyperlink run in the "Replace With" paragraph (not just blue text). The
+# candidate target pool is the sitemap (not just the handful of target pages
+# in this run) so a suggestion can point to any real page on the site, not
+# just whichever few pages happen to be in the current batch - and every
+# suggested target_url is verified against that real set before being kept,
+# so a hallucinated/unrelated URL never makes it into the output.
+# --------------------------------------------------------------------------- #
+def get_sitemap_urls(domain, cap=300):
+    """Real page URLs from the site's own sitemap (following one level of
+    sitemap-index nesting, capped to a handful of sub-sitemaps so a huge site
+    doesn't take forever). Returns [] if no sitemap is found."""
+    import xml.etree.ElementTree as ET
+    sitemap_url, body = op.find_existing_sitemap(domain)
+    if not body:
+        return []
+
+    def _locs(xml_body):
+        try:
+            root = ET.fromstring(xml_body.encode("utf-8", "ignore"))
+        except Exception:
+            return [], []
+        ns = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+        urls = [el.text.strip() for el in root.iter(f"{ns}loc") if el.text]
+        if not urls:
+            urls = [el.text.strip() for el in root.iter("loc") if el.text]
+        is_index = root.tag.endswith("sitemapindex")
+        return urls, is_index
+
+    urls, is_index = _locs(body)
+    if not is_index:
+        return urls[:cap]
+
+    # sitemap index - fetch a handful of sub-sitemaps for their real page URLs
+    page_urls = []
+    for sub_url in urls[:5]:
+        _, sub_body, _ = op._http(sub_url)
+        if not sub_body:
+            continue
+        sub_urls, _ = _locs(sub_body)
+        page_urls.extend(sub_urls)
+        if len(page_urls) >= cap:
+            break
+    return page_urls[:cap]
+
+
+def generate_internal_links(page_data, other_pages, sitemap_urls, brand, n=2):
+    body = (page_data.get("body_text") or "")[:2000]
+    candidates = list(other_pages)
+    crawled_urls = {p["url"] for p in other_pages} | {page_data["url"]}
+    extra = [u for u in sitemap_urls if u not in crawled_urls][:20]
+    candidates_display = [f"- {p['url']} ({p.get('h1') or p.get('title') or ''})" for p in other_pages[:8]]
+    candidates_display += [f"- {u}" for u in extra]
+    valid_targets = crawled_urls | set(extra)
+    if not body or not candidates_display:
+        return []
+    targets = "\n".join(candidates_display)
+    prompt = (
+        f"You are adding internal links to existing website copy for {brand}.\n"
+        f"Current page: {page_data['url']}\nContent: {body}\n\n"
+        f"Other REAL pages on the site you could link to (from the sitemap):\n{targets}\n\n"
+        f"Find up to {n} short sentences (EXACT quotes copied from the content above - do not "
+        "paraphrase) where inserting an internal link to ONE OF THE PAGES LISTED ABOVE would make "
+        "sense - the target must be genuinely relevant to what the sentence is about, not just any "
+        "page. Use a natural anchor text that is a substring of that same sentence.\n"
+        'Return ONLY JSON: [{"find": "<exact original sentence>", "anchor_text": "<words within '
+        'find that become the link>", "target_url": "<one of the exact page URLs listed above>"}, ...]'
+    )
+    result = op._ai_suggest(prompt)
+    out = []
+    if isinstance(result, list):
+        for item in result[:n]:
+            if not isinstance(item, dict):
+                continue
+            find_text = str(item.get("find", "")).strip()
+            anchor = str(item.get("anchor_text", "")).strip()
+            target = str(item.get("target_url", "")).strip()
+            # target_url must be a REAL candidate page - not the current page
+            # itself, and not something the AI invented - otherwise the link
+            # goes nowhere relevant, which is worse than no suggestion at all.
+            if (find_text and anchor and target and find_text in body and anchor in find_text
+                    and target in valid_targets and target != page_data["url"]):
+                out.append({"find": find_text, "anchor_text": anchor, "target_url": target})
+    return out
+
+
+def _add_hyperlink(paragraph, text, url):
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    part = paragraph.part
+    r_id = part.relate_to(url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+                           is_external=True)
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("r:id"), r_id)
+    new_run = OxmlElement("w:r")
+    rpr = OxmlElement("w:rPr")
+    color = OxmlElement("w:color")
+    color.set(qn("w:val"), "0563C1")
+    rpr.append(color)
+    u = OxmlElement("w:u")
+    u.set(qn("w:val"), "single")
+    rpr.append(u)
+    new_run.append(rpr)
+    t = OxmlElement("w:t")
+    t.text = text
+    new_run.append(t)
+    hyperlink.append(new_run)
+    paragraph._p.append(hyperlink)
+
+
+def build_internal_linking_docx(domain, pages_data, brand, out_path):
+    from docx import Document
+    from docx.shared import Pt
+
+    log("   -> fetching sitemap for internal-linking candidates...")
+    sitemap_urls = get_sitemap_urls(domain)
+    log(f"   -> {len(sitemap_urls)} URL(s) found in sitemap")
+
+    doc = Document()
+    p = doc.add_paragraph()
+    r = p.add_run("Internal Linking Suggestions")
+    r.bold = True
+    r.font.size = Pt(22)
+
+    any_content = False
+    for pd in pages_data:
+        others = [o for o in pages_data if o["url"] != pd["url"]]
+        log(f"   -> internal linking: {pd['url']}")
+        links = generate_internal_links(pd, others, sitemap_urls, brand)
+        if not links:
+            continue
+        any_content = True
+        p = doc.add_paragraph()
+        r = p.add_run(f"Page URL: - {pd['url']}")
+        r.bold = True
+        for l in links:
+            p1 = doc.add_paragraph()
+            r1 = p1.add_run("Find With: - ")
+            r1.bold = True
+            p1.add_run(l["find"])
+            p2 = doc.add_paragraph()
+            r2 = p2.add_run("Replace With: - ")
+            r2.bold = True
+            before, _, after = l["find"].partition(l["anchor_text"])
+            if before:
+                p2.add_run(before)
+            _add_hyperlink(p2, l["anchor_text"], l["target_url"])
+            if after:
+                p2.add_run(after)
+    if not any_content:
+        doc.add_paragraph("No internal linking suggestions were generated for the pages checked.")
+    doc.save(out_path)
+    log(f"   -> Internal Linking Suggestions written to {out_path}")
+
+
+# --------------------------------------------------------------------------- #
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("domain")
@@ -297,6 +753,9 @@ def main():
     ap.add_argument("--keywords", default=None,
                      help="Comma or newline separated SEO keywords the team already has for this domain - "
                           "used to steer FAQ generation and checked directly for AI-citation as their own rows.")
+    ap.add_argument("--keywords-only", action="store_true",
+                     help="only generate the Keywords/FAQ xlsx - skip llms-full.txt, Schema, Technical, "
+                          "Content Modification, and Internal Linking (faster, fewer AI calls)")
     args = ap.parse_args()
 
     seed_keywords = None
@@ -306,6 +765,11 @@ def main():
     domain = op.safe_domain(args.domain)
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
+    work = out_dir / f"_geo_{domain}"
+    if work.exists():
+        import shutil
+        shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True)
 
     if args.targets:
         targets = op.load_targets(args.targets, domain)
@@ -315,27 +779,53 @@ def main():
     if not targets:
         log("[ERROR] No target pages found.")
         sys.exit(2)
-    log(f"[1/3] Loaded {len(targets)} target page(s)")
+    log(f"[1/4] Loaded {len(targets)} target page(s)")
 
     pages_data = []
     for i, t in enumerate(targets, 1):
         log(f"   -> [crawl {i}/{len(targets)}] {t['page']}")
         pages_data.append(op.crawl_page(t["page"], t.get("keywords", []), dry_run=args.dry_run))
     op._close_op_driver()
-    log(f"[2/3] Crawled {len(pages_data)} page(s)")
+    log(f"[2/4] Crawled {len(pages_data)} page(s)")
 
     homepage = pages_data[0] if pages_data else None
     brand = op.brand_from(domain, homepage.get("title") if homepage else None,
                            homepage.get("h1") if homepage else None,
                            homepage.get("og_site_name") if homepage else None)
 
-    out_path = out_dir / f"{domain} - Keywords and Content (FAQs) Work for GEO.xlsx"
-    log("[3/3] Generating AI-searchable keywords/FAQs" +
+    log("[3/4] Generating AI-searchable keywords/FAQs...")
+    faqs_by_page = build_all_faqs(pages_data, brand, seed_keywords=seed_keywords)
+
+    log("[4/4] Building deliverables" +
         ("" if args.no_visibility_check else " + checking live AI visibility") + "...")
-    build_geo_keywords_xlsx(domain, pages_data, brand, out_path,
+    xlsx_path = work / f"{domain} - Keywords and Content (FAQs) Work for GEO.xlsx"
+    build_geo_keywords_xlsx(domain, pages_data, faqs_by_page, xlsx_path,
                              check_visibility=not args.no_visibility_check,
                              seed_keywords=seed_keywords)
-    log(f"[DONE] {out_path}")
+
+    if not args.keywords_only:
+        build_llms_full_txt(domain, pages_data, faqs_by_page, work / "llms-full.txt")
+        build_schema_docx(domain, faqs_by_page,
+                           work / f"{domain} - (GEO Work) Schema Suggestions.docx")
+        build_technical_optimization_docx(domain, pages_data, brand,
+                                           work / f"{domain} - (GEO Work) Technical Optimization Report.docx")
+        build_content_modification_docx(domain, pages_data, brand,
+                                         work / f"{domain} - (GEO Work) Existing Content Modification Suggestions.docx")
+        build_internal_linking_docx(domain, pages_data, brand,
+                                     work / f"{domain} - (GEO Work) Internal Linking Suggestions.docx")
+
+    # bundle (filename uses the domain so the task-runner's glob matches, same
+    # pattern as generate_seo_onpage_phase2.py's ZIP)
+    import shutil, zipfile
+    zip_path = out_dir / f"GEO Report - {domain}.zip"
+    if zip_path.exists():
+        zip_path.unlink()
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(work.iterdir()):
+            if f.is_file():
+                z.write(f, f.name)
+    shutil.rmtree(work, ignore_errors=True)
+    log(f"[DONE] Bundled -> {zip_path}")
 
 
 if __name__ == "__main__":

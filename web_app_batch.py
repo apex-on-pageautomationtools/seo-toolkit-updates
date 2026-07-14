@@ -3756,7 +3756,7 @@ def _run_geo_report(domain, targets_path, check_visibility, keywords):
                 return
             _log(line.rstrip())
         proc.wait()
-        out_path = os.path.join(out_dir, f"{domain} - Keywords and Content (FAQs) Work for GEO.xlsx")
+        out_path = os.path.join(out_dir, f"GEO Report - {domain}.zip")
         if proc.returncode != 0 or not os.path.exists(out_path):
             with geo_lock:
                 geo_state["status"] = "error"
