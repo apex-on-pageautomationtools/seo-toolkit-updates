@@ -103,7 +103,7 @@
     },
     {
       "path": "scripts/generate_seo_onpage_phase2.py",
-      "hash": "4fbb0eb0e4eb8f17cc2ee3f845f18889cb7d9dbd66ec82a15d1b8b019e0c4255",
+      "hash": "3385c1edcf2af59cc924e5f1222d5c7a7d52e3b0b295c18efa35c11bb59e1bfb",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seo_onpage_phase2.py"
     },
     {
@@ -215,6 +215,16 @@
       "path": "scripts/covers/cover_theta.png",
       "hash": "cbd6ff3f591f52aeb013426bdba86c559a13a2dc6b3e6a7ecd70b2bc00b990cb",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_theta.png"
+    },
+    {
+      "path": "scripts/covers/cover_omega.png",
+      "hash": "a84bae915d03abafa69908b56b24f59b09b7786e7c90f47a49db034fc71c20bc",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_omega.png"
+    },
+    {
+      "path": "scripts/covers/cover_gamma.png",
+      "hash": "f7c0e3de671861a60c519209e23e3c93caf6d0b7f318c1b8d9e295ea5a12725a",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/covers/cover_gamma.png"
     }
   ]
 }

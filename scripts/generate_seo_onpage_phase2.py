@@ -2056,6 +2056,11 @@ def _set_page_background(doc, color):
 
 # ---- Format: James (Driftzine) ----
 def _build_docx_james(domain, pages_data, findings, captured, brand, out_path):
+    """James - confirmed correct: onpage_cover.png IS James's own reference
+    cover (verified against OnpageReportJamesTemplate.docx - same "ON PAGE SEO
+    REPORT" world-map design, composed text baked onto the same base image).
+    It's the OTHER formats that were wrongly inheriting James's cover via
+    _setup_docx's default, not James itself."""
     doc, h = _setup_docx(domain)
     home = next((pd for pd in pages_data if urllib.parse.urlparse(pd["url"]).path in ("", "/")),
                 pages_data[0] if pages_data else {})
@@ -2105,7 +2110,8 @@ def _build_docx_omega(domain, pages_data, findings, captured, brand, out_path):
     """
     from docx.shared import Pt, RGBColor
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
+    _insert_format_cover(doc, "cover_omega.png", page_break=False)
     _set_page_background(doc, "FFF2CC")  # cream page background, per the alltechco reference
     home = next((pd for pd in pages_data if urllib.parse.urlparse(pd["url"]).path in ("", "/")),
                 pages_data[0] if pages_data else {})
@@ -3101,7 +3107,8 @@ def _build_docx_gamma(domain, pages_data, findings, captured, brand, out_path):
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
-    doc, h = _setup_docx(domain)
+    doc, h = _setup_docx(domain, use_cover=False)
+    _insert_format_cover(doc, "cover_gamma.png", page_break=False)
     # Gamma has NO page background (white) - deliberately not calling _set_page_background.
     home = next((pd for pd in pages_data if urllib.parse.urlparse(pd["url"]).path in ("", "/")),
                 pages_data[0] if pages_data else {})
