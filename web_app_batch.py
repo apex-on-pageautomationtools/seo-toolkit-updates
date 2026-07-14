@@ -4793,8 +4793,11 @@ def _crawl_apps_script_post(webapp_url, payload, timeout=180, retries=1):
     (requests.post(json=...) sends application/json instead, which some
     doPost(e) handlers branch on) and a generous timeout - that frontend
     uses no timeout at all, since the URL Inspection API can genuinely take
-    well over 30-60s per URL. One retry, since a slow/cold Apps Script
-    execution is transient, not a hard failure."""
+    well over 30-60s per URL. One retry on Timeout OR ConnectionError
+    (SSLError is a ConnectionError subclass in requests) - confirmed live:
+    script.googleusercontent.com (the Apps Script Web App response proxy)
+    can drop the connection mid-response with an SSLEOFError, which is a
+    transient gateway hiccup, not a hard failure, same as a plain timeout."""
     import json as _json
     body = _json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "text/plain;charset=utf-8"}
@@ -4802,7 +4805,7 @@ def _crawl_apps_script_post(webapp_url, payload, timeout=180, retries=1):
     for attempt in range(retries + 1):
         try:
             return http_requests.post(webapp_url, data=body, headers=headers, timeout=timeout)
-        except http_requests.exceptions.Timeout as e:
+        except (http_requests.exceptions.Timeout, http_requests.exceptions.ConnectionError) as e:
             last_err = e
             continue
         except Exception as e:
