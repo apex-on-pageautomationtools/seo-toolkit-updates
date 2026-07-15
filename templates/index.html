@@ -3143,7 +3143,14 @@ async function kvSearchGeo(){
   if(!q){toast('Enter a location to search for');return;}
   $('kv-geo-results').innerHTML='<span class="hint">Searching...</span>';
   try{
-    const r=await(await fetchWithTimeout('/api/keywordvolume/suggest_geo?q='+encodeURIComponent(q),{},30000)).json();
+    // 65s, not 30s - the backend does two SEQUENTIAL calls (OAuth token
+    // exchange, up to 15s timeout + the Ads API suggest call, up to 40s
+    // timeout), so worst case it can legitimately take up to ~55s to return
+    // even a real error. A shorter client timeout was cutting the request
+    // off before the backend's own more informative error could ever fire -
+    // confirmed live (always hit the generic client timeout message, never
+    // a real Google-side error).
+    const r=await(await fetchWithTimeout('/api/keywordvolume/suggest_geo?q='+encodeURIComponent(q),{},65000)).json();
     if(r.error){toast(r.error);$('kv-geo-results').innerHTML='';return;}
     kvLastSuggestions=r.suggestions||[];
     if(!kvLastSuggestions.length){$('kv-geo-results').innerHTML='<span class="hint">No matches found</span>';return;}
@@ -3153,7 +3160,7 @@ async function kvSearchGeo(){
     ).join('');
   }catch(e){
     // AbortError = our own 30s timeout fired, not a real network error
-    toast(e.name==='AbortError'?'Location search timed out after 30s - check the Google Ads credentials/network and try again':'Location search failed');
+    toast(e.name==='AbortError'?'Location search timed out after 65s - check the Google Ads credentials/network and try again':'Location search failed');
     $('kv-geo-results').innerHTML='';
   }
 }
