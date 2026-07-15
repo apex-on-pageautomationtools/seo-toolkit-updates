@@ -2274,11 +2274,25 @@ async function saveEngineOpts(){
   try{await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({use_buster:$('opt-buster').checked,manual_fallback:$('opt-manual').checked})});}catch(e){}
 }
+// Case-insensitive line dedup, same convention Crawl Tracker/Wayback already
+// use for their URL lists - applied here to the keyword/URL textareas of the
+// 4 batch tools (Rank Checker, Indexing Checker, Results Count, Backlink
+// Status), which previously sent duplicate lines through unchanged.
+function _dedupLines(text){
+  const seen=new Set();const out=[];let removed=0;
+  (text||'').split('\n').map(l=>l.trim()).filter(l=>l).forEach(l=>{
+    const key=l.toLowerCase();
+    if(seen.has(key)){removed++;}else{seen.add(key);out.push(l);}
+  });
+  return {text:out.join('\n'), removed};
+}
 async function doStart(){
   let p={mode,...proxyPayload()};
   if(mode==='ranking'){
     p.domain=$('r-domain').value.trim();
-    p.keywords=$('r-keywords').value.trim();
+    const _rDedup=_dedupLines($('r-keywords').value);
+    if(_rDedup.removed>0){$('r-keywords').value=_rDedup.text;toast(_rDedup.removed+' duplicate keyword(s) removed');}
+    p.keywords=_rDedup.text;
     p.country=countryCode($('r-country').value);
     p.delay=parseInt($('r-delay').value);
     p.max_pages=parseInt($('r-pages').value);
@@ -2520,7 +2534,9 @@ async function doStart(){
     return;
   }else if(mode==='backlink'){
     p.domain=$('b-domain').value.trim();
-    p.keywords=$('b-urls').value.trim();
+    const _bDedup=_dedupLines($('b-urls').value);
+    if(_bDedup.removed>0){$('b-urls').value=_bDedup.text;toast(_bDedup.removed+' duplicate URL(s) removed');}
+    p.keywords=_bDedup.text;
     p.country='us';
     p.delay=parseInt($('b-delay').value);
     p.headless=$('b-headless').value==='1';
@@ -2530,7 +2546,9 @@ async function doStart(){
     if(!p.domain){toast('Enter your domain');return;}
     if(!p.keywords){toast('Enter at least one backlink URL');return;}
   }else if(mode==='count'){
-    p.keywords=$('c-keywords').value.trim();
+    const _cDedup=_dedupLines($('c-keywords').value);
+    if(_cDedup.removed>0){$('c-keywords').value=_cDedup.text;toast(_cDedup.removed+' duplicate keyword(s) removed');}
+    p.keywords=_cDedup.text;
     p.country=countryCode($('c-country').value);
     p.delay=parseInt($('c-delay').value);
     p.headless=$('c-headless').value==='1';
@@ -2540,7 +2558,9 @@ async function doStart(){
     p.lang=$('c-lang').value||'en';
     if(!p.keywords){toast('Enter at least one keyword');return;}
   }else{
-    p.keywords=$('i-urls').value.trim();
+    const _iDedup=_dedupLines($('i-urls').value);
+    if(_iDedup.removed>0){$('i-urls').value=_iDedup.text;toast(_iDedup.removed+' duplicate URL(s) removed');}
+    p.keywords=_iDedup.text;
     p.country=countryCode($('i-country').value);
     p.delay=parseInt($('i-delay').value);
     p.headless=$('i-headless').value==='1';

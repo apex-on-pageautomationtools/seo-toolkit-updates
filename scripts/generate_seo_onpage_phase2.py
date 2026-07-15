@@ -526,14 +526,29 @@ def _extract_json(text):
     return json.loads(re.search(r"\{.*\}|\[.*\]", text, re.S).group(0))
 
 
+# Circuit breaker for the AI fallback chain - a PERMANENT error (bad/revoked
+# key, retired model: 401/403/404) will fail identically on every retry for
+# the rest of this run, so once seen, that provider is skipped for the
+# remainder of the process instead of wasting a full HTTP round-trip on every
+# single suggestion call (confirmed real case: a GEO report with 20 ALT-text
+# suggestions retried all 3 already-broken providers 20 times each - 60
+# guaranteed-failing calls, all with the exact same errors). A TRANSIENT
+# error (429 rate limit, 5xx server issue, timeout) does NOT trip the
+# breaker, since those can genuinely recover mid-run.
+_AI_BROKEN_PROVIDERS = set()
+_PERMANENT_HTTP_CODES = {401, 403, 404}
+
+
 def _ai_suggest_gemini(prompt):
     """Google Gemini's FREE tier when GEMINI_API_KEY is set (free key:
     https://aistudio.google.com/apikey). Plain REST, no SDK, no paid API."""
+    if "gemini" in _AI_BROKEN_PROVIDERS:
+        return None
     key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
         return None
     try:
-        import urllib.request
+        import urllib.request, urllib.error
         # gemini-1.5-flash was retired by Google (confirmed live: 404 "models/
         # gemini-1.5-flash is not found for API version v1beta") - gemini-2.5-flash
         # confirmed working (200 OK) against a real key on 2026-07-14.
@@ -548,6 +563,13 @@ def _ai_suggest_gemini(prompt):
         with urllib.request.urlopen(req, timeout=40) as r:
             data = json.loads(r.read())
         return _extract_json(data["candidates"][0]["content"]["parts"][0]["text"])
+    except urllib.error.HTTPError as e:
+        if e.code in _PERMANENT_HTTP_CODES:
+            _AI_BROKEN_PROVIDERS.add("gemini")
+            log(f"   [warn] Gemini suggestion failed: HTTP Error {e.code} - won't retry Gemini for the rest of this run.")
+        else:
+            log(f"   [warn] Gemini suggestion failed: HTTP Error {e.code}")
+        return None
     except Exception as e:
         log(f"   [warn] Gemini suggestion failed: {e}")
         return None
@@ -557,11 +579,13 @@ def _ai_suggest_groq(prompt):
     """Groq's FREE tier when GROQ_API_KEY is set (free key:
     https://console.groq.com/keys) - OpenAI-compatible chat completions API,
     very fast inference. Second fallback tier after Gemini."""
+    if "groq" in _AI_BROKEN_PROVIDERS:
+        return None
     key = os.environ.get("GROQ_API_KEY", "").strip()
     if not key:
         return None
     try:
-        import urllib.request
+        import urllib.request, urllib.error
         model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
         url = "https://api.groq.com/openai/v1/chat/completions"
         body = json.dumps({
@@ -576,6 +600,13 @@ def _ai_suggest_groq(prompt):
         with urllib.request.urlopen(req, timeout=40) as r:
             data = json.loads(r.read())
         return _extract_json(data["choices"][0]["message"]["content"])
+    except urllib.error.HTTPError as e:
+        if e.code in _PERMANENT_HTTP_CODES:
+            _AI_BROKEN_PROVIDERS.add("groq")
+            log(f"   [warn] Groq suggestion failed: HTTP Error {e.code} - won't retry Groq for the rest of this run.")
+        else:
+            log(f"   [warn] Groq suggestion failed: HTTP Error {e.code}")
+        return None
     except Exception as e:
         log(f"   [warn] Groq suggestion failed: {e}")
         return None
@@ -586,11 +617,13 @@ def _ai_suggest_openrouter(prompt):
     https://openrouter.ai/keys) - last AI tier before the heuristic fallback,
     since free-tier models there are more rate-limited/less consistently
     available than Gemini/Groq."""
+    if "openrouter" in _AI_BROKEN_PROVIDERS:
+        return None
     key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not key:
         return None
     try:
-        import urllib.request
+        import urllib.request, urllib.error
         # meta-llama/llama-3.1-8b-instruct:free was retired by OpenRouter (confirmed
         # live: 404 "model not found") - gpt-oss-20b:free confirmed available on
         # OpenRouter's current free-tier model list as of 2026-07-15.
@@ -610,6 +643,13 @@ def _ai_suggest_openrouter(prompt):
         with urllib.request.urlopen(req, timeout=40) as r:
             data = json.loads(r.read())
         return _extract_json(data["choices"][0]["message"]["content"])
+    except urllib.error.HTTPError as e:
+        if e.code in _PERMANENT_HTTP_CODES:
+            _AI_BROKEN_PROVIDERS.add("openrouter")
+            log(f"   [warn] OpenRouter suggestion failed: HTTP Error {e.code} - won't retry OpenRouter for the rest of this run.")
+        else:
+            log(f"   [warn] OpenRouter suggestion failed: HTTP Error {e.code}")
+        return None
     except Exception as e:
         log(f"   [warn] OpenRouter suggestion failed: {e}")
         return None

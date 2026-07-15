@@ -54,9 +54,9 @@ TITLE_COLS = {"suggested title"}
 DESC_COLS = {"suggested description"}
 H1_COLS = {"suggested h1"}
 PAGE_COLS = ("page with issues", "page url", "target pages", "url")
-EXISTING_TITLE_COLS = {"existing title", "existing title and h1 tag"}
-EXISTING_DESC_COLS = {"existing description"}
-EXISTING_H1_COLS = {"existing h1"}
+EXISTING_TITLE_COLS = {"existing title", "existing title and h1 tag", "title"}
+EXISTING_DESC_COLS = {"existing description", "description"}
+EXISTING_H1_COLS = {"existing h1", "h1"}
 
 
 def _norm(s):
@@ -267,6 +267,26 @@ def _guess_keywords(page_url):
     return [" ".join(words[-4:])] if words else []
 
 
+def _title_relevant_to_h1(title, h1):
+    """A content-relevance check using the page's OWN H1 - a far more reliable
+    signal of what the page is actually about than a URL-slug guess. Confirmed
+    real false positive: aceabseiling.com.au/caulking-sealing-water-leaking/'s
+    existing title "Rope Access Water Leak & Sealing Solutions Sydney NSW" was
+    flagged and rewritten purely because it doesn't literally say "caulking"
+    (the URL-guessed keyword), even though the title is clearly about the same
+    topic the H1 describes. Only used to veto a suggestion that would otherwise
+    fire SOLELY on the URL-guessed-keyword check - a missing/generic/too-short
+    title is still always suggested regardless."""
+    if not h1 or h1 == onpage2.MISSING or not title or title == onpage2.MISSING:
+        return False
+    h1_words = {w for w in re.findall(r"[a-z0-9]+", h1.lower()) if len(w) > 3}
+    if not h1_words:
+        return False
+    title_words = {w for w in re.findall(r"[a-z0-9]+", title.lower()) if len(w) > 3}
+    overlap = h1_words & title_words
+    return len(overlap) >= max(1, len(h1_words) // 3)
+
+
 _brand_cache = {}
 
 
@@ -276,6 +296,20 @@ def _suggest_for_page(page_url, brand):
     pd = _fetch_page_data(page_url)
     keywords = _guess_keywords(page_url)
     result = onpage2.suggest_meta(pd, keywords, brand)
+    # The "keyword" fed into suggest_meta above is only GUESSED from the URL
+    # path, not a real target keyword - judging "does the existing title need
+    # replacing" by that alone produces false positives for perfectly good
+    # titles phrased differently than the URL. If the title itself is fine
+    # (not missing/generic/too-short - suggest_meta's other checks already
+    # cover those) and it's topically related to the page's own H1, leave it
+    # alone instead of rewriting it.
+    existing_title = pd.get("title")
+    if (result.get("suggested_title") and result["suggested_title"] != "No changes needed - existing tag is already optimized"
+            and existing_title and existing_title != onpage2.MISSING and len(existing_title.strip()) >= 15
+            and existing_title.strip().lower() not in onpage2._GENERIC_TITLES
+            and _title_relevant_to_h1(existing_title, pd.get("h1"))):
+        result = dict(result)
+        result["suggested_title"] = "No changes needed - title already reflects this page's content."
     _brand_cache[page_url] = result
     return result
 
@@ -322,6 +356,9 @@ def _apply_suggestions(sheet_name, headers, rows, brand):
     desc_col = _find_col(headers, DESC_COLS)
     h1_col = _find_col(headers, H1_COLS)
     broken_col = _find_col(headers, {"broken link suggestion"})
+    existing_title_col = _find_col(headers, EXISTING_TITLE_COLS)
+    existing_desc_col = _find_col(headers, EXISTING_DESC_COLS)
+    existing_h1_col = _find_col(headers, EXISTING_H1_COLS)
 
     has_any_suggestion_col = any(c is not None for c in (title_col, desc_col, h1_col, broken_col))
     if page_col is not None and not has_any_suggestion_col:
@@ -341,7 +378,9 @@ def _apply_suggestions(sheet_name, headers, rows, brand):
             rows = [list(r) + [None] * (len(headers) - len(r)) for r in rows]
 
     if page_col is None or not (title_col is not None or desc_col is not None
-                                 or h1_col is not None or broken_col is not None):
+                                 or h1_col is not None or broken_col is not None
+                                 or existing_title_col is not None or existing_desc_col is not None
+                                 or existing_h1_col is not None):
         return headers, rows  # not a judgment sheet - pass through unchanged
 
     log(f"   Generating suggestions for '{sheet_name}' ({len(rows)} row(s))...")
@@ -352,7 +391,9 @@ def _apply_suggestions(sheet_name, headers, rows, brand):
         if page_url and page_url.startswith("http"):
             if broken_col is not None:
                 row[broken_col] = _suggest_broken_link_fix(page_url)
-            if title_col is not None or desc_col is not None or h1_col is not None:
+            if (title_col is not None or desc_col is not None or h1_col is not None
+                    or existing_title_col is not None or existing_desc_col is not None
+                    or existing_h1_col is not None):
                 s = _suggest_for_page(page_url, brand)
                 if title_col is not None:
                     row[title_col] = s["suggested_title"]
@@ -360,16 +401,32 @@ def _apply_suggestions(sheet_name, headers, rows, brand):
                     row[desc_col] = s["suggested_description"]
                 if h1_col is not None:
                     row[h1_col] = s["suggested_h1"]
+                # Fill with the REAL, freshly-checked existing value from the live
+                # page - never leave it blank just because the uploaded sheet's own
+                # export happened to have it blank (that export can be stale, or
+                # SEranking's own crawler can miss a tag a direct fetch picks up).
+                # A genuinely missing tag is written as "Missing" explicitly, not
+                # left blank, so a blank cell always means "not yet checked" and
+                # never "confirmed absent" - the two are meaningfully different for
+                # the team's review.
+                if existing_title_col is not None:
+                    row[existing_title_col] = s["existing_title"] if s["existing_title"] != onpage2.MISSING else "Missing"
+                if existing_desc_col is not None:
+                    row[existing_desc_col] = s["existing_description"] if s["existing_description"] != onpage2.MISSING else "Missing"
+                if existing_h1_col is not None:
+                    row[existing_h1_col] = s["existing_h1"] if s["existing_h1"] != onpage2.MISSING else "Missing"
         out.append(row)
     return headers, out
 
 
 # --------------------------------------------------------------------------- #
-# Output workbook - house style: navy header, wrapped body, sane row height.
+# Output workbook - house style: navy header, no-wrap body (narrow columns,
+# long text overflows into the next empty cell - Excel/Sheets' normal
+# behavior - rather than every row growing tall to fit wrapped text).
 # --------------------------------------------------------------------------- #
 HEADER_FILL = PatternFill("solid", fgColor="2F5496")
 HEADER_FONT = Font(bold=True, color="FFFFFF")
-WRAP = Alignment(horizontal="left", vertical="center", wrap_text=True)
+NO_WRAP = Alignment(horizontal="left", vertical="center", wrap_text=False)
 
 
 def _write_sheet(wb_out, name, headers, rows):
@@ -384,21 +441,15 @@ def _write_sheet(wb_out, name, headers, rows):
     for c in ws[1]:
         c.fill = HEADER_FILL
         c.font = HEADER_FONT
-        c.alignment = WRAP
+        c.alignment = NO_WRAP
     for row in rows:
         ws.append(row)
-    max_len = 1
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-        row_max = 1
         for cell in row:
-            cell.alignment = WRAP
-            row_max = max(row_max, len(str(cell.value or "")))
-        max_len = max(max_len, row_max)
-        lines = max(1, -(-row_max // 45))
-        ws.row_dimensions[row[0].row].height = max(18, lines * 15)
+            cell.alignment = NO_WRAP
     for i, h in enumerate(headers, 1):
         col_letter = ws.cell(1, i).column_letter
-        ws.column_dimensions[col_letter].width = min(60, max(14, len(str(h)) + 4))
+        ws.column_dimensions[col_letter].width = min(28, max(12, len(str(h)) + 2))
     ws.freeze_panes = "A2"
 
 
