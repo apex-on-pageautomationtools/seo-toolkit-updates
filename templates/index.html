@@ -404,7 +404,12 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
       <span class="sb-label">GEO / AI Optimization</span>
     </button>
-    <button class="sb-item" id="tab-keywordvolume" data-tip="Keyword Search Volume" onclick="switchTab('keywordvolume')">
+    <!-- Hidden for everyone for now - the Google Ads Developer Token behind
+         Keyword Search Volume is still on Test Access (blocks real customer
+         data with a 403), a Basic Access application is pending Google's
+         approval. Remove "hidden" below once that's approved and a real
+         search has been confirmed working end-to-end. -->
+    <button class="sb-item hidden" id="tab-keywordvolume" data-tip="Keyword Search Volume" onclick="switchTab('keywordvolume')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
       <span class="sb-label">Keyword Search Volume</span>
     </button>
