@@ -27,6 +27,11 @@
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/health_audit.py"
     },
     {
+      "path": "google_ads_keywords.py",
+      "hash": "780ddc8f7fe95a5b4c4e7de4f8696f8b5a31cb5e18aeae660bfe7fe7a32d7e98",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/google_ads_keywords.py"
+    },
+    {
       "path": "web_app_batch.py",
       "hash": "9ae82732922bef0a3aa003bd67f595ea500e2c3d0ce693eff9de7d052156a56c",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
