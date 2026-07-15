@@ -1598,15 +1598,24 @@ def build_health_docx(domain, captured, computed, out_dir, include_keys=None, vo
             r.font.name = FONT_NAME
             r.font.size = Pt(11)
 
+        # Prefer the REAL status capture_gsc_screenshots() actually detected
+        # (No Issues Detected / Issue Found / could-not-check-no-access) over
+        # the static CHECKPOINTS placeholder text - previously every report
+        # showed the exact same hardcoded "Status - Not found" regardless of
+        # what was actually found, since this line never looked at the real
+        # detection result at all (confirmed real case: a domain GSC wasn't
+        # even connected for still showed "Status - Not found", identical to
+        # what a genuinely clean site would show).
+        real_status = (captured.get("_statuses") or {}).get(cp["key"])
         status = cp.get("status")
-        if status:
+        if real_status or status:
             p = doc.add_paragraph(style="List Paragraph")
             p.paragraph_format.left_indent = Inches(0)
-            r = p.add_run(status[0])
+            r = p.add_run(status[0] if status else "Status: ")
             r.font.name = FONT_NAME
             r.font.size = Pt(11)
             r.bold = True
-            r = p.add_run(status[1])
+            r = p.add_run(real_status if real_status else status[1])
             r.font.name = FONT_NAME
             r.font.size = Pt(11)
 
@@ -1781,11 +1790,14 @@ def build_health_pptx_sigma(domain, captured, computed, out_dir, include_keys=No
             ], 0.689, line_y, 11.95, 0.35, 14)
             line_y += 0.4
 
+        # Real detected status (see build_health_docx's comment on this) takes
+        # priority over the static CHECKPOINTS placeholder.
+        real_status = (captured.get("_statuses") or {}).get(cp["key"])
         status = cp.get("status")
-        if status:
+        if real_status or status:
             text(s, [
-                {"text": status[0].strip() + " ", "color": INK, "bold": True},
-                {"text": status[1].strip(), "color": GREEN, "bold": True},
+                {"text": (status[0].strip() if status else "Status:") + " ", "color": INK, "bold": True},
+                {"text": (real_status or status[1]).strip(), "color": GREEN, "bold": True},
             ], 0.689, line_y, 11.95, 0.35, 14)
             line_y += 0.4
 
@@ -1913,11 +1925,14 @@ def build_health_pptx_omega(domain, captured, computed, out_dir):
                 {"text": extra[1].format(domain=domain), "color": GREEN, "bold": False},
             ], 0.5, line_y, 12.3, 0.35, 13)
             line_y += 0.35
+        # Real detected status (see build_health_docx's comment on this) takes
+        # priority over the static CHECKPOINTS placeholder.
+        real_status = (captured.get("_statuses") or {}).get(cp["key"])
         status = cp.get("status")
-        if status:
+        if real_status or status:
             text(s, [
-                {"text": status[0].strip() + " ", "color": INK, "bold": True},
-                {"text": status[1].strip(), "color": GREEN, "bold": True},
+                {"text": (status[0].strip() if status else "Status:") + " ", "color": INK, "bold": True},
+                {"text": (real_status or status[1]).strip(), "color": GREEN, "bold": True},
             ], 0.5, line_y, 12.3, 0.35, 13)
             line_y += 0.35
 

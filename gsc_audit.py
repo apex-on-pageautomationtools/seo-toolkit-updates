@@ -932,6 +932,27 @@ def _looks_like_signin(driver):
     return False
 
 
+def _looks_like_no_access(driver):
+    """True if the current page is GSC's own "Oops, you don't have access to
+    this property" error screen - shown when the signed-in Google account is
+    a REAL, logged-in account (not a sign-in wall - _looks_like_signin
+    doesn't catch this case), just not one with access to the property being
+    checked. Without this check, that error page gets screenshotted and
+    saved into the report exactly like a real capture, and its missing
+    status silently defaults to "Not found" - reading as "checked, nothing
+    found" when the truth is "couldn't check at all" (confirmed real case: a
+    Health Audit report showed a Manual Actions screenshot signed in as an
+    unrelated account with "Status - Not found", for a domain GSC genuinely
+    wasn't connected for at all)."""
+    try:
+        body = driver.find_element("tag name", "body").text.lower()
+        if "don't have access to this property" in body:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def capture_gsc_screenshots(driver, property_url, email, out_dir, pages=None, log_fn=None):
     """Capture GSC page screenshots using the existing Selenium browser.
     The browser must already be logged into a Google account with GSC access.
@@ -985,6 +1006,11 @@ def capture_gsc_screenshots(driver, property_url, email, out_dir, pages=None, lo
             if _looks_like_signin(driver):
                 log_fn(f"  [warn] {p['key']} bounced to sign-in mid-capture - "
                        f"skipping (would be a misleading screenshot).")
+                continue
+            if _looks_like_no_access(driver):
+                log_fn(f"  [warn] {p['key']} - the signed-in account doesn't have access to "
+                       f"this property, skipping (would be a misleading screenshot).")
+                statuses[p["key"]] = "Could not check - GSC account not connected/no access to this property"
                 continue
             # Normalise the health-audit key names ("manual_action"/"security_issues")
             # to the status detector's base keys ("manual"/"security").
