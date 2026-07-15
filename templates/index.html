@@ -237,6 +237,19 @@ tbody tr:hover td{background:var(--surface-2)}
 .r-gray{background:var(--surface-3);color:var(--text-2)}
 .r-none{background:rgba(240,69,58,.14);color:var(--err);font-size:11px;font-weight:700}
 .tag{font-size:11px;font-weight:800;padding:4px 10px;border-radius:var(--r-pill);display:inline-block;text-transform:capitalize;white-space:nowrap}
+.geo-chip{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border-radius:var(--r-pill);
+  border:1px solid var(--border);background:var(--surface);font-size:12.5px;font-weight:600;
+  color:var(--text-2);cursor:pointer;transition:border-color .15s var(--ease),color .15s var(--ease),background .15s var(--ease)}
+.geo-chip:hover{border-color:var(--accent);color:var(--accent);background:rgba(51,145,255,.08)}
+.geo-chip .hint{font-weight:500}
+.geo-chip-selected{display:inline-flex;align-items:center;gap:8px;padding:6px 6px 6px 13px;border-radius:var(--r-pill);
+  background:rgba(51,145,255,.12);color:var(--accent);font-size:12.5px;font-weight:700}
+.geo-chip-x{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;
+  border-radius:50%;background:rgba(51,145,255,.18);cursor:pointer;font-weight:800;line-height:1;
+  font-size:13px;transition:background .15s var(--ease),color .15s var(--ease)}
+.geo-chip-x:hover{background:var(--accent);color:#fff}
+.geo-chip-group-label{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;
+  color:var(--text-3);margin:10px 0 6px}
 .t-found,.t-yes{background:rgba(30,166,114,.16);color:var(--ok)}
 .t-not_found,.t-no{background:rgba(240,69,58,.14);color:var(--err)}
 .t-error,.t-captcha,.t-unknown{background:rgba(240,160,32,.16);color:var(--warn)}
@@ -3227,10 +3240,11 @@ async function kvSearchGeo(){
     kvLastSuggestions=r.suggestions||[];
     if(!kvLastSuggestions.length){kvLog('No matches found for "'+q+'" ('+elapsed+'s)');$('kv-geo-results').innerHTML='<span class="hint">No matches found</span>';return;}
     kvLog('Found '+kvLastSuggestions.length+' match(es) for "'+q+'" ('+elapsed+'s)');
-    $('kv-geo-results').innerHTML=kvLastSuggestions.map((s,i)=>
-      '<button type="button" class="fmt-chip" style="cursor:pointer" onclick="kvAddGeo('+i+')">'+
-      esc(s.name)+(s.target_type?' <span class="hint">('+esc(s.target_type)+')</span>':'')+'</button>'
-    ).join('');
+    $('kv-geo-results').innerHTML='<div class="geo-chip-group-label" style="width:100%;margin-top:0">'+kvLastSuggestions.length+' match(es) - click to add</div>'+
+      kvLastSuggestions.map((s,i)=>
+        '<button type="button" class="geo-chip" onclick="kvAddGeo('+i+')">'+
+        esc(s.name)+(s.target_type?' <span class="hint">('+esc(s.target_type)+')</span>':'')+'</button>'
+      ).join('');
   }catch(e){
     const elapsed=((Date.now()-t0)/1000).toFixed(1);
     // AbortError = our own 65s timeout fired, not a real network error
@@ -3252,10 +3266,12 @@ function kvRemoveGeo(resourceName){
   kvRenderSelectedGeo();
 }
 function kvRenderSelectedGeo(){
-  $('kv-geo-selected').innerHTML=kvSelectedGeo.map(g=>
-    '<span class="fmt-chip" style="display:inline-flex;align-items:center;gap:6px">'+esc(g.name)+
-    '<span style="cursor:pointer;font-weight:bold" onclick="kvRemoveGeo(\''+g.resource_name.replace(/'/g,"\\'")+'\')">&times;</span></span>'
-  ).join('');
+  if(!kvSelectedGeo.length){$('kv-geo-selected').innerHTML='';return;}
+  $('kv-geo-selected').innerHTML='<div class="geo-chip-group-label" style="width:100%;margin-top:0">Selected ('+kvSelectedGeo.length+')</div>'+
+    kvSelectedGeo.map(g=>
+      '<span class="geo-chip-selected">'+esc(g.name)+
+      '<span class="geo-chip-x" onclick="kvRemoveGeo(\''+g.resource_name.replace(/'/g,"\\'")+'\')">&times;</span></span>'
+    ).join('');
 }
 function kvUpdateKeywordCount(){
   const lines=$('kv-keywords').value.split('\n').map(l=>l.trim()).filter(l=>l);

@@ -59,6 +59,10 @@ def _force_ipv4():
 # internally so the caller never has to think about it.
 MAX_KEYWORDS_PER_CALL = 10
 
+# Every language Google Ads' own UI offers as a targetable Keyword Planner
+# language, not just the original 10 (confirmed against Google's own
+# documented criterion IDs - never guess/hardcode an ID otherwise, since a
+# wrong one silently targets the wrong language with no error).
 LANGUAGE_CONSTANTS = {
     "English": "languageConstants/1000",
     "German": "languageConstants/1001",
@@ -66,10 +70,51 @@ LANGUAGE_CONSTANTS = {
     "Spanish": "languageConstants/1003",
     "Italian": "languageConstants/1004",
     "Japanese": "languageConstants/1005",
-    "Chinese (simplified)": "languageConstants/1017",
+    "Danish": "languageConstants/1009",
+    "Dutch": "languageConstants/1010",
+    "Finnish": "languageConstants/1011",
+    "Korean": "languageConstants/1012",
+    "Norwegian": "languageConstants/1013",
     "Portuguese": "languageConstants/1014",
+    "Swedish": "languageConstants/1015",
+    "Chinese (simplified)": "languageConstants/1017",
+    "Chinese (traditional)": "languageConstants/1018",
     "Arabic": "languageConstants/1019",
+    "Bulgarian": "languageConstants/1020",
+    "Czech": "languageConstants/1021",
+    "Greek": "languageConstants/1022",
     "Hindi": "languageConstants/1023",
+    "Hungarian": "languageConstants/1024",
+    "Indonesian": "languageConstants/1025",
+    "Icelandic": "languageConstants/1026",
+    "Hebrew": "languageConstants/1027",
+    "Latvian": "languageConstants/1028",
+    "Lithuanian": "languageConstants/1029",
+    "Polish": "languageConstants/1030",
+    "Russian": "languageConstants/1031",
+    "Romanian": "languageConstants/1032",
+    "Slovak": "languageConstants/1033",
+    "Slovenian": "languageConstants/1034",
+    "Serbian": "languageConstants/1035",
+    "Ukrainian": "languageConstants/1036",
+    "Turkish": "languageConstants/1037",
+    "Catalan": "languageConstants/1038",
+    "Croatian": "languageConstants/1039",
+    "Vietnamese": "languageConstants/1040",
+    "Urdu": "languageConstants/1041",
+    "Filipino": "languageConstants/1042",
+    "Estonian": "languageConstants/1043",
+    "Thai": "languageConstants/1044",
+    "Bengali": "languageConstants/1056",
+    "Persian": "languageConstants/1064",
+    "Gujarati": "languageConstants/1072",
+    "Kannada": "languageConstants/1086",
+    "Malayalam": "languageConstants/1098",
+    "Marathi": "languageConstants/1101",
+    "Malay": "languageConstants/1102",
+    "Punjabi": "languageConstants/1110",
+    "Tamil": "languageConstants/1130",
+    "Telugu": "languageConstants/1131",
 }
 
 
