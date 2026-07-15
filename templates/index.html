@@ -2712,7 +2712,11 @@ function apply(d,m){
     const transitioned=(applyPrev[m]==='running'||applyPrev[m]==='starting');
     if(d.status==='completed'&&transitioned){
       if(isActive)toast('Completed');
-      if(m==='ranking')exportCSVMode('ranking');   // auto-download ranking CSV on completion
+      // Auto-download the CSV into the configured folder on completion for
+      // every batch tool, not just Rank Checker - previously Indexing
+      // Checker/Results Count/Backlink Status only saved a copy there when
+      // the user manually clicked Export CSV.
+      if(d.results&&d.results.length)exportCSVMode(m);
     }
   }
   applyPrev[m]=d.status;
@@ -3331,7 +3335,12 @@ async function wbPoll(){
     if(d.results) wbRenderResults(d.results);
     if(d.status==='completed'){
       $('wb-progress').textContent='Completed';$('wb-progress').className='tag t-yes';
+      const _wasRunning=_modeState.wayback==='running'||_modeState.wayback==='starting';
       setButtons('completed','wayback');stopWbPoll();toast('Wayback submission complete');
+      // Auto-download into the configured folder on completion, same as the
+      // batch tools - guarded on _wasRunning so this fires once, not on
+      // every subsequent poll while sitting on the completed tab.
+      if(_wasRunning&&d.results&&d.results.length)wbExport();
     }else if(d.status==='stopped'){
       $('wb-progress').textContent='Stopped';$('wb-progress').className='tag t-unknown';
       setButtons('stopped','wayback');stopWbPoll();
@@ -4223,6 +4232,19 @@ async function crawlProcessNext(){
   setButtons('completed','crawl');
   crawlLog('Completed -- '+crawlResults.filter(r=>r.status==='ok').length+' ok, '+crawlResults.filter(r=>r.status==='error').length+' error(s).');
   toast('Crawl check completed');
+  crawlAutoSave();
+}
+// Auto-saves into the configured Downloads folder on completion, same
+// convention as the other tools' auto-export - separate from
+// crawlDownloadCSV() (the manual "Download CSV" button, still client-side
+// via Blob) since this one needs to reach the server to land in the actual
+// configured folder rather than wherever the browser's own download
+// setting points.
+async function crawlAutoSave(){
+  const rows=crawlResults.filter(r=>r.status!=='pending').map(r=>[r.url,r.domain,r.lastCrawlDate,r.indexStatus,r.property||'']);
+  if(!rows.length)return;
+  try{await fetch('/api/crawl/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows})});}
+  catch(e){}
 }
 
 function crawlPause(){crawlPaused=true;crawlLog('Paused.');}

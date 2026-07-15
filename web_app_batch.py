@@ -3637,8 +3637,21 @@ def api_wayback_export():
     w = csv.DictWriter(out, fieldnames=["url", "archived_url", "status", "snapshot_at", "checked_at"])
     w.writeheader(); w.writerows(results)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return Response(out.getvalue(), mimetype="text/csv",
-                    headers={"Content-Disposition": f"attachment; filename=wayback_submissions_{ts}.csv"})
+    name = f"wayback_submissions_{ts}.csv"
+    # Same convention as the batch tools' CSV export - also save a copy into
+    # the user's configured Downloads folder, not just stream a browser
+    # download, so it's there automatically once a run completes. No single
+    # domain to scope a subfolder to here (one Wayback run can cover many
+    # unrelated URLs), so this goes straight into DOWNLOADS_DIR itself.
+    csv_data = "﻿" + out.getvalue()
+    try:
+        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+        with open(os.path.join(DOWNLOADS_DIR, name), "w", encoding="utf-8", newline="") as f:
+            f.write(csv_data)
+    except Exception:
+        pass
+    return Response(csv_data, mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={name}"})
 
 
 # --------------------------------------------------------------------------- #
@@ -3663,8 +3676,12 @@ def _run_seranking_audit(in_path, pdf_path, brand, zip_path=None):
             sr_state["log"].append(msg)
 
     slug = os.path.splitext(src_name)[0]
-    out_dir = os.path.join(UPLOADS_DIR, "seranking_out")
-    os.makedirs(out_dir, exist_ok=True)
+    # Saved straight into the user's configured Downloads folder (same as
+    # On-Page/Health/GSC Audit already do via _domain_folder) instead of an
+    # internal uploads folder the user would never see without clicking
+    # Download - previously this report only reached DOWNLOADS_DIR if/when
+    # the user manually clicked download in the browser.
+    out_dir = _domain_folder(slug, "seranking")
     out_path = os.path.join(out_dir, f"Final Audit - {slug}.xlsx")
 
     python_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "python", "python.exe")
@@ -3814,8 +3831,11 @@ def _run_geo_report(domain, targets_path, check_visibility, keywords, pages, faq
         with geo_lock:
             geo_state["log"].append(msg)
 
-    out_dir = os.path.join(UPLOADS_DIR, "geo_out")
-    os.makedirs(out_dir, exist_ok=True)
+    # Saved straight into the user's configured Downloads folder (same as
+    # On-Page/Health/GSC Audit already do via _domain_folder) instead of an
+    # internal uploads folder the user would never see without clicking
+    # Download.
+    out_dir = _domain_folder(domain, "geo")
 
     python_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "python", "python.exe")
     script = os.path.join(SCRIPTS_DIR, "generate_geo_report.py")
@@ -5052,6 +5072,32 @@ def api_crawl_inspect():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route("/api/crawl/save", methods=["POST"])
+def api_crawl_save():
+    """Persists a finished Crawl Tracker CSV into the user's configured
+    Downloads folder - same convention as every other tool's export, called
+    automatically once a crawl run completes instead of only saving via the
+    browser's own download mechanism when the user clicks Download CSV."""
+    data = request.get_json(silent=True) or {}
+    rows = data.get("rows") or []
+    if not rows:
+        return jsonify({"saved": False})
+    try:
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(["URL", "Domain", "Last Crawl Date", "Index Status", "GSC Property"])
+        w.writerows(rows)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"gsc_crawl_dates_{ts}.csv"
+        os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+        with open(os.path.join(DOWNLOADS_DIR, name), "w", encoding="utf-8", newline="") as f:
+            f.write("﻿" + out.getvalue())
+        return jsonify({"saved": True, "name": name})
+    except Exception as e:
+        return jsonify({"saved": False, "error": str(e)})
+
+
 # --------------------------------------------------------------------------- #
 # Brief Analysis
 # --------------------------------------------------------------------------- #
@@ -5091,8 +5137,13 @@ def api_brief_start():
                 with _brief_lock:
                     _brief_state["status"] = str(msg)
                     _brief_state["log"].append(str(msg))
+            # Saved straight into the user's configured Downloads folder (same
+            # as On-Page/Health/GSC Audit) instead of a throwaway temp
+            # directory - previously this only reached DOWNLOADS_DIR if/when
+            # the user manually clicked download in the browser.
             out_file = brief_analysis.run_brief_analysis(
-                domain, fmt=fmt, target_pages=target_pages, log_fn=prog)
+                domain, fmt=fmt, target_pages=target_pages, log_fn=prog,
+                out_dir=_domain_folder(domain, "brief"))
             with _brief_lock:
                 _brief_state["result"] = {"file": out_file}
                 _brief_state["status"] = "completed"
