@@ -391,6 +391,10 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
       <span class="sb-label">GEO / AI Optimization</span>
     </button>
+    <button class="sb-item hidden" id="tab-keywordvolume" data-tip="Keyword Search Volume" onclick="switchTab('keywordvolume')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      <span class="sb-label">Keyword Search Volume</span>
+    </button>
     <button class="sb-item" id="tab-brief" data-tip="Brief Analysis" onclick="switchTab('brief')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/></svg>
       <span class="sb-label">Brief Analysis</span>
@@ -1201,6 +1205,33 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <div class="note" style="margin-top:12px">Can take several minutes - generates 6 files (xlsx, llms-full.txt, and 4 docx), each with its own AI calls and, for the xlsx, one browser query per generated FAQ if visibility checking is on. All suggestions are verified against the page's real crawled content before being included - a suggestion whose text doesn't actually exist on the page is dropped, not guessed.</div>
     </section>
 
+    <section class="card panel" id="panel-keywordvolume" style="display:none">
+      <div class="card-t">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        Keyword Search Volume <span class="hint">(testing - superadmin only)</span>
+      </div>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Real Keyword Planner data straight from the Google Ads API - average monthly searches, competition, CPC range, and a 12-month trend - filtered by location and language. Not tied to any website or crawl, just the keywords you enter.</p>
+      <div class="field">
+        <label>Keywords <span class="hint">(one per line, max 50)</span></label>
+        <textarea id="kv-keywords" rows="6" placeholder="solar panels&#10;green energy&#10;solar panel installation cost" oninput="kvUpdateKeywordCount()"></textarea>
+        <div class="hint" id="kv-keyword-count" style="margin-top:4px">0 / 50 keywords</div>
+      </div>
+      <div class="field">
+        <label>Location <span class="hint">(country, state, or city - search and pick from real matches)</span></label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="kv-geo-query" placeholder="e.g. United States, Sydney Australia" autocomplete="off" style="flex:1">
+          <button class="btn btn-tonal" type="button" onclick="kvSearchGeo()">Search</button>
+        </div>
+        <div id="kv-geo-results" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
+        <div id="kv-geo-selected" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
+      <div class="field">
+        <label>Language</label>
+        <select id="kv-language"><option value="English">English</option></select>
+      </div>
+      <div class="note" style="margin-top:12px">Numbers come directly from Google's own historical metrics API - the same data source behind Keyword Planner. A new/low-spend Google Ads account may see rounded "range" volumes instead of exact numbers, per Google's own account-tier rules.</div>
+    </section>
+
     <section class="card panel" id="panel-brief" style="display:none">
       <div class="card-t">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -1455,6 +1486,33 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
               Download GEO Report (ZIP)
             </button>
             <button class="btn btn-tonal" onclick="geoReset()">New Report</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- keyword search volume -->
+      <div id="tbl-keywordvolume" style="flex:1;display:none">
+        <div class="empty" id="empty-keywordvolume">
+          <div class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
+          <p>Enter keywords + a location and click <b>Start</b> to look up real search volume.</p>
+        </div>
+        <div id="kv-active" class="hidden">
+          <table id="kv-table" style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="text-align:left;border-bottom:1px solid var(--border)">
+              <th style="padding:6px">Keyword</th>
+              <th style="padding:6px;text-align:right">Avg Monthly Searches</th>
+              <th style="padding:6px">Competition</th>
+              <th style="padding:6px;text-align:right">Low CPC</th>
+              <th style="padding:6px;text-align:right">High CPC</th>
+            </tr></thead>
+            <tbody id="kv-tbody"></tbody>
+          </table>
+          <div style="margin-top:14px;display:flex;gap:10px">
+            <button class="btn btn-primary" onclick="kvExportCsv()">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Export CSV
+            </button>
+            <button class="btn btn-tonal" onclick="kvReset()">New Search</button>
           </div>
         </div>
       </div>
@@ -2077,6 +2135,7 @@ function switchTab(m){
   $('panel-wayback').style.display=m==='wayback'?'':'none';
   $('panel-seranking').style.display=m==='seranking'?'':'none';
   $('panel-geo').style.display=m==='geo'?'':'none';
+  $('panel-keywordvolume').style.display=m==='keywordvolume'?'':'none';
   $('tbl-ranking').style.display=m==='ranking'?'':'none';
   $('tbl-index').style.display=m==='index'?'':'none';
   $('tbl-count').style.display=m==='count'?'':'none';
@@ -2090,7 +2149,8 @@ function switchTab(m){
   $('tbl-wayback').style.display=m==='wayback'?'':'none';
   $('tbl-seranking').style.display=m==='seranking'?'':'none';
   $('tbl-geo').style.display=m==='geo'?'':'none';
-  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',wayback:'Wayback Machine Submitter',seranking:'SEranking Audit',geo:'GEO / AI Optimization',admin:'Admin Panel'};
+  $('tbl-keywordvolume').style.display=m==='keywordvolume'?'':'none';
+  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',wayback:'Wayback Machine Submitter',seranking:'SEranking Audit',geo:'GEO / AI Optimization',keywordvolume:'Keyword Search Volume',admin:'Admin Panel'};
   const subs={ranking:'Find where your domain ranks on Google - across regions, CAPTCHA-resistant.',
     index:'Check if your URLs are indexed in Google - searches site:url to verify.',
     count:'Get Google\'s total "About N results" number for each keyword - regional, CAPTCHA-resistant.',
@@ -2103,6 +2163,7 @@ function switchTab(m){
     wayback:'Submit URLs to the Wayback Machine\'s Save Page Now for a fresh, dated archive snapshot.',
     seranking:'Turn a SEranking Site Audit export into a suggestion-filled final workbook.',
     geo:'AI-searchable keywords + FAQ suggestions, plus a no-login check of whether the site is already cited in AI answers (Perplexity reliable; Google/ChatGPT best-effort). Testing/superadmin-only.',
+    keywordvolume:'Real Keyword Planner search volume data from the Google Ads API - avg monthly searches, competition, CPC, filtered by location/language. Testing/superadmin-only.',
     admin:'Manage users, cities, and app configuration.'};
   $('page-title').textContent=titles[m];
   $('page-sub').textContent=subs[m];
@@ -2312,6 +2373,28 @@ async function doStart(){
     setButtons('running');
     startGeoPoll();
     return;
+  }else if(mode==='keywordvolume'){
+    const kvKeywords=$('kv-keywords').value.split('\n').map(l=>l.trim()).filter(l=>l);
+    if(!kvKeywords.length){toast('Enter at least one keyword');return;}
+    if(kvKeywords.length>50){toast('Maximum 50 keywords at a time ('+kvKeywords.length+' given)');return;}
+    if(!kvSelectedGeo.length){toast('Search for and add at least one location');return;}
+    setButtons('starting');   // instant feedback, before the network round-trip
+    try{
+      const rkv=await fetch('/api/keywordvolume/search',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({keywords:kvKeywords,geo_target_resource_names:kvSelectedGeo.map(g=>g.resource_name),language:$('kv-language').value})});
+      const dkv=await rkv.json();
+      if(dkv.error){toast(dkv.error);setButtons('idle');return;}
+      toast('Search volume retrieved ('+dkv.results.length+' keyword(s))');
+      kvLastResults=dkv.results;
+      kvRenderResults(dkv.results);
+      $('empty-keywordvolume').style.display='none';
+      $('kv-active').classList.remove('hidden');
+      setButtons('completed');
+    }catch(netErr){
+      toast('Could not reach the server - try again.');
+      setButtons('idle');
+    }
+    return;
   }else if(mode==='wayback'){
     const _wbRaw=$('wb-urls').value.trim();
     if(!_wbRaw){toast('Enter at least one URL');return;}
@@ -2426,6 +2509,7 @@ async function doStop(){
   if(mode==='wayback'){await wbStop();return;}
   if(mode==='seranking'){await srStop();return;}
   if(mode==='geo'){await geoStop();return;}
+  if(mode==='keywordvolume'){return;}  // synchronous request - nothing to cancel mid-flight
   const m=mode;await fetch('/api/stop',_mkbody(m));setButtons('stopped',m);stopPoll(m);showAlert(false);toast('Stopped');
 }
 async function doReset(){
@@ -2439,6 +2523,7 @@ async function doReset(){
   if(mode==='wayback'){wbReset();return;}
   if(mode==='seranking'){srReset();return;}
   if(mode==='geo'){geoReset();return;}
+  if(mode==='keywordvolume'){kvReset();return;}
   const m=mode;await fetch('/api/reset',_mkbody(m));setButtons('idle',m);showAlert(false);clearResults(m);updateProgress(0,0,'');setStatus('idle');stopPoll(m);$('log').textContent='';}
 async function loadPrevious(){
   const m=mode;
@@ -2514,7 +2599,7 @@ function updateProgress(cur,tot,kw){
   $('prog-lbl').textContent=cur+' / '+tot;
   $('cur-kw').textContent=(kw&&cur>0&&cur<=tot)?'Checking: "'+kw+'"':'';
 }
-const _modeState={ranking:'idle',index:'idle',count:'idle',backlink:'idle',onpage:'idle',health:'idle',gsc:'idle',crawl:'idle',brief:'idle',wayback:'idle',seranking:'idle',geo:'idle',admin:'idle'};
+const _modeState={ranking:'idle',index:'idle',count:'idle',backlink:'idle',onpage:'idle',health:'idle',gsc:'idle',crawl:'idle',brief:'idle',wayback:'idle',seranking:'idle',geo:'idle',keywordvolume:'idle',admin:'idle'};
 function setButtons(s, m){
   m = m || mode;
   _modeState[m] = s;
@@ -2949,6 +3034,93 @@ function geoReset(){
   setButtons('idle','geo');stopGeoPoll();
 }
 
+/* ===================== keyword search volume ===================== */
+let kvSelectedGeo=[];
+let kvLastSuggestions=[];
+let kvLastResults=[];
+async function kvLoadLanguages(){
+  try{
+    const r=await(await fetch('/api/keywordvolume/languages')).json();
+    if(r.languages&&r.languages.length){
+      $('kv-language').innerHTML=r.languages.map(l=>'<option value="'+esc(l)+'">'+esc(l)+'</option>').join('');
+    }
+  }catch(e){}
+}
+async function kvSearchGeo(){
+  const q=$('kv-geo-query').value.trim();
+  if(!q){toast('Enter a location to search for');return;}
+  $('kv-geo-results').innerHTML='<span class="hint">Searching...</span>';
+  try{
+    const r=await(await fetch('/api/keywordvolume/suggest_geo?q='+encodeURIComponent(q))).json();
+    if(r.error){toast(r.error);$('kv-geo-results').innerHTML='';return;}
+    kvLastSuggestions=r.suggestions||[];
+    if(!kvLastSuggestions.length){$('kv-geo-results').innerHTML='<span class="hint">No matches found</span>';return;}
+    $('kv-geo-results').innerHTML=kvLastSuggestions.map((s,i)=>
+      '<button type="button" class="fmt-chip" style="cursor:pointer" onclick="kvAddGeo('+i+')">'+
+      esc(s.name)+(s.target_type?' <span class="hint">('+esc(s.target_type)+')</span>':'')+'</button>'
+    ).join('');
+  }catch(e){toast('Location search failed');$('kv-geo-results').innerHTML='';}
+}
+function kvAddGeo(i){
+  const s=kvLastSuggestions[i];
+  if(!s)return;
+  if(kvSelectedGeo.some(g=>g.resource_name===s.resource_name)){toast('Already added');return;}
+  kvSelectedGeo.push(s);
+  kvRenderSelectedGeo();
+}
+function kvRemoveGeo(resourceName){
+  kvSelectedGeo=kvSelectedGeo.filter(g=>g.resource_name!==resourceName);
+  kvRenderSelectedGeo();
+}
+function kvRenderSelectedGeo(){
+  $('kv-geo-selected').innerHTML=kvSelectedGeo.map(g=>
+    '<span class="fmt-chip" style="display:inline-flex;align-items:center;gap:6px">'+esc(g.name)+
+    '<span style="cursor:pointer;font-weight:bold" onclick="kvRemoveGeo(\''+g.resource_name.replace(/'/g,"\\'")+'\')">&times;</span></span>'
+  ).join('');
+}
+function kvUpdateKeywordCount(){
+  const lines=$('kv-keywords').value.split('\n').map(l=>l.trim()).filter(l=>l);
+  const el=$('kv-keyword-count');
+  el.textContent=lines.length+' / 50 keywords';
+  el.style.color=lines.length>50?'#e5484d':'';
+}
+function kvRenderResults(results){
+  $('kv-tbody').innerHTML=results.map(r=>
+    '<tr style="border-bottom:1px solid var(--border)">'+
+    '<td style="padding:6px">'+esc(r.keyword)+'</td>'+
+    '<td style="padding:6px;text-align:right">'+esc(String(r.avg_monthly_searches))+'</td>'+
+    '<td style="padding:6px">'+esc(r.competition||'')+'</td>'+
+    '<td style="padding:6px;text-align:right">'+(r.low_cpc!=null?('$'+r.low_cpc.toFixed(2)):'-')+'</td>'+
+    '<td style="padding:6px;text-align:right">'+(r.high_cpc!=null?('$'+r.high_cpc.toFixed(2)):'-')+'</td>'+
+    '</tr>'
+  ).join('');
+}
+function kvExportCsv(){
+  if(!kvLastResults.length){toast('No results to export');return;}
+  const rows=[['Keyword','Avg Monthly Searches','Competition','Low CPC','High CPC']];
+  kvLastResults.forEach(r=>rows.push([r.keyword,r.avg_monthly_searches,r.competition,r.low_cpc!=null?r.low_cpc:'',r.high_cpc!=null?r.high_cpc:'']));
+  const csv=rows.map(row=>row.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='keyword-search-volume.csv';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function kvReset(){
+  $('empty-keywordvolume').style.display='block';
+  $('kv-active').classList.add('hidden');
+  $('kv-tbody').innerHTML='';
+  $('kv-keywords').value='';
+  $('kv-geo-query').value='';
+  $('kv-geo-results').innerHTML='';
+  kvSelectedGeo=[];
+  kvRenderSelectedGeo();
+  kvUpdateKeywordCount();
+  kvLastResults=[];
+  setButtons('idle','keywordvolume');
+}
+
 /* ===================== wayback submitter ===================== */
 let wbTimer=null;
 function startWbPoll(){stopWbPoll();wbTimer=setInterval(wbPoll,2000);}
@@ -3285,7 +3457,8 @@ const ALL_TOOLS=[
   {key:'onpage',label:'SEO On-Page'},{key:'health',label:'Health Audit'},
   {key:'gsc',label:'GSC Audit'},{key:'crawl',label:'Crawl Tracker'},
   {key:'brief',label:'Brief Analysis'},{key:'wayback',label:'Wayback Submitter'},
-  {key:'seranking',label:'SEranking Audit'},{key:'geo',label:'GEO / AI Optimization'}];
+  {key:'seranking',label:'SEranking Audit'},{key:'geo',label:'GEO / AI Optimization'},
+  {key:'keywordvolume',label:'Keyword Search Volume'}];
 
 async function admCheckAdmin(){
   try{const r=await(await fetch('/api/auth/is_admin')).json();
@@ -3303,6 +3476,10 @@ async function admCheckAdmin(){
       // (server-side enforced too, in /api/geo/* - GEO_MIN_ROLE in web_app_batch.py).
       // Promote to admin, then everyone, only once approved.
       if(admIsSuper()){const geoTab=$('tab-geo');if(geoTab)geoTab.classList.remove('hidden');}
+      // Keyword Search Volume is brand new and untested - superadmin-only for now
+      // (server-side enforced too, in /api/keywordvolume/* - KEYWORDVOL_MIN_ROLE
+      // in web_app_batch.py). Promote to admin, then everyone, only once approved.
+      if(admIsSuper()){const kvTab=$('tab-keywordvolume');if(kvTab){kvTab.classList.remove('hidden');kvLoadLanguages();}}
     }
   }catch(e){}
 }
@@ -3970,7 +4147,7 @@ async function applyToolFilter(){
     if(typeof t==='string')t=t.split(',');          // accept comma string
     const allowed=t.map(x=>String(x).trim().toLowerCase()).filter(x=>x);
     if(allowed.length===0||allowed.includes('all'))return;
-    const KEYS=['ranking','index','count','backlink','onpage','health','gsc','crawl','brief','wayback','seranking','geo'];
+    const KEYS=['ranking','index','count','backlink','onpage','health','gsc','crawl','brief','wayback','seranking','geo','keywordvolume'];
     KEYS.forEach(key=>{
       if(!allowed.includes(key)){const b=$('tab-'+key);if(b)b.style.display='none';}
     });

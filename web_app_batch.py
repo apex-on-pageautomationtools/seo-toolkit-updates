@@ -49,6 +49,7 @@ import auth
 import updater
 import requests as http_requests
 import brief_analysis
+import google_ads_keywords
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -3864,6 +3865,82 @@ def api_geo_download():
     resp = send_file(out_path, as_attachment=True, download_name=os.path.basename(out_path))
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+# --------------------------------------------------------------------------- #
+# Keyword Search Volume - real Google Ads / Keyword Planner data via REST
+# (google_ads_keywords.py). NEW and UNTESTED against a real account from this
+# environment - superadmin-only for now (same server-side-enforced pattern as
+# GEO). Google Ads calls are fast (a few seconds), so unlike GEO/On-Page this
+# runs synchronously in the request instead of a background job + polling.
+# --------------------------------------------------------------------------- #
+KEYWORDVOL_MIN_ROLE = "superadmin"  # -> "admin" once approved, then remove the check entirely
+MAX_KEYWORDS_PER_SEARCH = 50
+
+
+def _require_keywordvol_role():
+    role, email = _current_user_role()
+    allowed = {"superadmin"} if KEYWORDVOL_MIN_ROLE == "superadmin" else {"superadmin", "admin"}
+    if role not in allowed:
+        return jsonify({"error": "Keyword Search Volume is not available for your account yet."}), 403
+    return None
+
+
+@app.route("/api/keywordvolume/languages")
+def api_keywordvolume_languages():
+    denied = _require_keywordvol_role()
+    if denied:
+        return denied
+    return jsonify({"languages": list(google_ads_keywords.LANGUAGE_CONSTANTS.keys())})
+
+
+@app.route("/api/keywordvolume/suggest_geo")
+def api_keywordvolume_suggest_geo():
+    denied = _require_keywordvol_role()
+    if denied:
+        return denied
+    query = (request.args.get("q") or "").strip()
+    if not query:
+        return jsonify({"error": "Enter a location to search for."}), 400
+    try:
+        config = google_ads_keywords.build_config(CONFIG.get)
+        suggestions = google_ads_keywords.suggest_geo_target(query, config)
+        return jsonify({"suggestions": suggestions})
+    except google_ads_keywords.GoogleAdsConfigError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/keywordvolume/search", methods=["POST"])
+def api_keywordvolume_search():
+    denied = _require_keywordvol_role()
+    if denied:
+        return denied
+    data = request.get_json(silent=True) or {}
+    keywords = [k.strip() for k in (data.get("keywords") or []) if k and k.strip()]
+    keywords = list(dict.fromkeys(keywords))  # dedupe, preserve order
+    if not keywords:
+        return jsonify({"error": "Enter at least one keyword."}), 400
+    if len(keywords) > MAX_KEYWORDS_PER_SEARCH:
+        return jsonify({"error": f"Maximum {MAX_KEYWORDS_PER_SEARCH} keywords at a time "
+                                  f"({len(keywords)} given)."}), 400
+    geo_resource_names = data.get("geo_target_resource_names") or []
+    if not geo_resource_names:
+        return jsonify({"error": "Choose at least one location."}), 400
+    language_name = data.get("language") or "English"
+    language_resource = google_ads_keywords.LANGUAGE_CONSTANTS.get(
+        language_name, google_ads_keywords.LANGUAGE_CONSTANTS["English"])
+    try:
+        config = google_ads_keywords.build_config(CONFIG.get)
+        results = google_ads_keywords.get_keyword_historical_metrics(
+            keywords, geo_resource_names, language_resource, config)
+        activity(f"Keyword search volume checked ({len(keywords)} keyword(s))")
+        return jsonify({"results": results})
+    except google_ads_keywords.GoogleAdsConfigError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # --------------------------------------------------------------------------- #
