@@ -591,7 +591,10 @@ def _ai_suggest_openrouter(prompt):
         return None
     try:
         import urllib.request
-        model = os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+        # meta-llama/llama-3.1-8b-instruct:free was retired by OpenRouter (confirmed
+        # live: 404 "model not found") - gpt-oss-20b:free confirmed available on
+        # OpenRouter's current free-tier model list as of 2026-07-15.
+        model = os.environ.get("OPENROUTER_MODEL", "openai/gpt-oss-20b:free")
         url = "https://openrouter.ai/api/v1/chat/completions"
         body = json.dumps({
             "model": model,
