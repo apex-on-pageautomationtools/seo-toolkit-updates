@@ -383,15 +383,15 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
       <span class="sb-label">Wayback Submitter</span>
     </button>
-    <button class="sb-item hidden" id="tab-seranking" data-tip="SEranking Audit" onclick="switchTab('seranking')">
+    <button class="sb-item" id="tab-seranking" data-tip="SEranking Audit" onclick="switchTab('seranking')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>
       <span class="sb-label">SEranking Audit</span>
     </button>
-    <button class="sb-item hidden" id="tab-geo" data-tip="GEO / AI Optimization" onclick="switchTab('geo')">
+    <button class="sb-item" id="tab-geo" data-tip="GEO / AI Optimization" onclick="switchTab('geo')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
       <span class="sb-label">GEO / AI Optimization</span>
     </button>
-    <button class="sb-item hidden" id="tab-keywordvolume" data-tip="Keyword Search Volume" onclick="switchTab('keywordvolume')">
+    <button class="sb-item" id="tab-keywordvolume" data-tip="Keyword Search Volume" onclick="switchTab('keywordvolume')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
       <span class="sb-label">Keyword Search Volume</span>
     </button>
@@ -1179,7 +1179,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
     <section class="card panel" id="panel-geo" style="display:none">
       <div class="card-t">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
-        GEO / AI Optimization <span class="hint">(testing - superadmin only)</span>
+        GEO / AI Optimization <span class="hint">(testing)</span>
       </div>
       <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Generates the full monthly GEO deliverable set from just a domain (+ pages/keywords if you have them): a Keywords/FAQ xlsx, llms-full.txt, Schema Suggestions (FAQPage JSON-LD), a Technical Optimization (ALT-tag) report, Content Modification suggestions, and Internal Linking suggestions (checked against the real sitemap, not just the pages in this run). The Keywords xlsx also checks - without login, without any paid API - whether the site is already cited in real AI-answer results for each query. Perplexity's check is reliable; Google AI Overview and ChatGPT are best-effort only (both commonly report "Not checked" - Google blocks headless requests with a captcha, ChatGPT requires a logged-in account for a real answer). Not yet included: the Performance Report (rank tracking / Ahrefs / GA4 screenshots) - separate, bigger scope.</p>
       <div class="field">
@@ -1198,6 +1198,16 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <label>Target pages file <span class="hint">(targets.json/.xlsx - alternative to typing pages above)</span></label>
         <input type="file" id="geo-targets" accept=".json,.xlsx">
       </div>
+      <div class="field">
+        <label>FAQs per page <span class="hint">(AI-searchable keyword/FAQ entries generated per page)</span></label>
+        <select id="geo-faqs-per-page">
+          <option value="3">3</option>
+          <option value="5" selected>5</option>
+          <option value="8">8</option>
+          <option value="10">10</option>
+          <option value="15">15</option>
+        </select>
+      </div>
       <label class="switch-row">
         <span><span class="lbl">Check live AI visibility</span><span class="sub">Query Perplexity/Google/ChatGPT for each generated term (slower) - off generates keywords/FAQs only</span></span>
         <span class="switch"><input type="checkbox" id="geo-check-visibility" checked><span class="track"></span></span>
@@ -1208,7 +1218,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
     <section class="card panel" id="panel-keywordvolume" style="display:none">
       <div class="card-t">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        Keyword Search Volume <span class="hint">(testing - superadmin only)</span>
+        Keyword Search Volume <span class="hint">(testing)</span>
       </div>
       <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Real Keyword Planner data straight from the Google Ads API - average monthly searches, competition, CPC range, and a 12-month trend - filtered by location and language. Not tied to any website or crawl, just the keywords you enter.</p>
       <div class="field">
@@ -1734,7 +1744,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
           <p>Enter URLs to check if they are indexed in Google search.</p>
         </div>
         <table id="tbl-i" class="hidden">
-          <thead><tr><th>#</th><th>URL</th><th style="text-align:center">Google Status</th><th>Found URL</th><th>Status</th></tr></thead>
+          <thead><tr><th>#</th><th>URL</th><th style="text-align:center">Google Status</th><th>Found URL</th><th>Status</th><th style="text-align:center">Screenshot</th></tr></thead>
           <tbody id="tbody-i"></tbody>
         </table>
       </div>
@@ -1746,7 +1756,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
           <p>Enter keywords to see how many results Google returns for each.</p>
         </div>
         <table id="tbl-c" class="hidden">
-          <thead><tr><th>#</th><th>Query</th><th style="text-align:center">Search Results</th></tr></thead>
+          <thead><tr><th>#</th><th>Query</th><th style="text-align:center">Search Results</th><th style="text-align:center">Screenshot</th></tr></thead>
           <tbody id="tbody-c"></tbody>
         </table>
       </div>
@@ -2170,8 +2180,8 @@ function switchTab(m){
     brief:'Quick SEO analysis - indexing, domain age, titles, meta, headers, images, redirects, canonical, sitemap, robots, broken links.',
     wayback:'Submit URLs to the Wayback Machine\'s Save Page Now for a fresh, dated archive snapshot.',
     seranking:'Turn a SEranking Site Audit export into a suggestion-filled final workbook.',
-    geo:'AI-searchable keywords + FAQ suggestions, plus a no-login check of whether the site is already cited in AI answers (Perplexity reliable; Google/ChatGPT best-effort). Testing/superadmin-only.',
-    keywordvolume:'Real Keyword Planner search volume data from the Google Ads API - avg monthly searches, competition, CPC, filtered by location/language. Testing/superadmin-only.',
+    geo:'AI-searchable keywords + FAQ suggestions, plus a no-login check of whether the site is already cited in AI answers (Perplexity reliable; Google/ChatGPT best-effort). Testing phase.',
+    keywordvolume:'Real Keyword Planner search volume data from the Google Ads API - avg monthly searches, competition, CPC, filtered by location/language. Testing phase.',
     admin:'Manage users, cities, and app configuration.'};
   $('page-title').textContent=titles[m];
   $('page-sub').textContent=subs[m];
@@ -2286,7 +2296,7 @@ async function doStart(){
     p.format=$('op-format').value;
     p.no_capture=$('op-capture').value==='no';
     if(!p.domain){toast('Enter a website URL');return;}
-    setButtons('starting');   // instant feedback, before the network round-trip
+    setButtons('starting','onpage');   // instant feedback, before the network round-trip
     // Panel switch happens immediately too, not just the badge - previously
     // this waited on saveEngineOpts() + the actual start request, leaving a
     // window where the badge said "Starting..." next to the still-showing
@@ -2298,10 +2308,16 @@ async function doStart(){
     await saveEngineOpts();
     const r=await fetch('/api/onpage/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
     const d=await r.json();
-    if(d.error){toast(d.error);setButtons('idle');$('empty-onpage').style.display='block';$('onpage-active').classList.add('hidden');return;}
+    // Explicit 'onpage' below, not the bare/implicit mode - by the time these
+    // awaits resolve the user may have already switched tabs, and mode would
+    // then point at whatever tab is now active, silently corrupting THAT
+    // tab's running/idle state instead of onpage's own (confirmed live: GEO
+    // still running in the background while the user was on SEranking's tab
+    // showed the shared badge/buttons as "Running" for SEranking).
+    if(d.error){toast(d.error);setButtons('idle','onpage');$('empty-onpage').style.display='block';$('onpage-active').classList.add('hidden');return;}
     toast('On-page report started');
     $('btn-op-download').disabled=true;
-    setButtons('running');
+    setButtons('running','onpage');
     startOpPoll();
     return;
   }else if(mode==='health'){
@@ -2311,7 +2327,7 @@ async function doStart(){
     p.no_capture=$('ha-capture').value==='no';
     p.include_psi=$('ha-include-psi').checked;
     if(!p.domain){toast('Enter a domain');return;}
-    setButtons('starting');   // instant feedback, before the network round-trip
+    setButtons('starting','health');   // instant feedback, before the network round-trip
     // Switch the panel over to the active/log view IMMEDIATELY too, not just
     // the top badge - previously this only happened after BOTH the GSC
     // pre-check and the actual /api/health-audit/start request finished, so
@@ -2329,7 +2345,7 @@ async function doStart(){
         $('ha-log').textContent='GSC connected ('+gc.email+') - screenshots will be included.\nStarting audit...';
       }else if(gc.available){
         const proceed=confirm('GSC screenshots available!\n\n'+gc.message+'\n\nClick OK to continue without GSC screenshots, or Cancel to connect first.');
-        if(!proceed){setButtons('idle');$('empty-health').style.display='block';$('health-active').classList.add('hidden');return;}
+        if(!proceed){setButtons('idle','health');$('empty-health').style.display='block';$('health-active').classList.add('hidden');return;}
         $('ha-log').textContent='Starting audit...';
       }else{
         $('ha-log').textContent='Starting audit...';
@@ -2339,13 +2355,13 @@ async function doStart(){
     }
     const r2=await fetch('/api/health-audit/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
     const d2=await r2.json();
-    if(d2.error){toast(d2.error);setButtons('idle');$('empty-health').style.display='block';$('health-active').classList.add('hidden');return;}
+    // 'health' explicit below - see the onpage branch's comment on why (mode
+    // may have moved on to a different tab by the time this await resolves).
+    if(d2.error){toast(d2.error);setButtons('idle','health');$('empty-health').style.display='block';$('health-active').classList.add('hidden');return;}
     toast('Health audit started');
     $('btn-ha-download').disabled=true;
-    $('badge').className='badge b-running';$('dot').className='dot d-running';
-    $('status-txt').textContent='Running - 0%';
-    $('prog').style.width='0%';$('prog-lbl').textContent='Starting...';
-    setButtons('running');
+    if(mode==='health'){$('badge').className='badge b-running';$('dot').className='dot d-running';$('status-txt').textContent='Running - 0%';$('prog').style.width='0%';$('prog-lbl').textContent='Starting...';}
+    setButtons('running','health');
     startHaPoll();
     return;
   }else if(mode==='brief'){
@@ -2353,16 +2369,16 @@ async function doStart(){
     p.targets=$('ba-targets').value.trim();
     p.format=$('ba-format').value;
     if(!p.domain){toast('Enter a domain');return;}
-    setButtons('starting');   // instant feedback, before the network round-trip
+    setButtons('starting','brief');   // instant feedback, before the network round-trip
     $('empty-brief').style.display='none';
     $('brief-active').classList.remove('hidden');
     if($('ba-log'))$('ba-log').textContent='Starting...';
     const rb=await fetch('/api/brief/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
     const db=await rb.json();
-    if(db.error){toast(db.error);setButtons('idle');$('empty-brief').style.display='block';$('brief-active').classList.add('hidden');return;}
+    if(db.error){toast(db.error);setButtons('idle','brief');$('empty-brief').style.display='block';$('brief-active').classList.add('hidden');return;}
     toast('Brief analysis started');
     $('btn-ba-download').disabled=true;
-    setButtons('running');
+    setButtons('running','brief');
     startBaPoll();
     return;
   }else if(mode==='seranking'){
@@ -2375,16 +2391,16 @@ async function doStart(){
     if(pdfFile)fd.append('pdf',pdfFile);
     if(zipFile)fd.append('zip',zipFile);
     fd.append('brand',$('sr-brand').value.trim());
-    setButtons('starting');   // instant feedback, before the network round-trip
+    setButtons('starting','seranking');   // instant feedback, before the network round-trip
     $('empty-seranking').style.display='none';
     $('seranking-active').classList.remove('hidden');
     $('sr-log').textContent='Starting...';
     const rs=await fetch('/api/seranking/start',{method:'POST',body:fd});
     const ds=await rs.json();
-    if(ds.error){toast(ds.error);setButtons('idle');$('empty-seranking').style.display='block';$('seranking-active').classList.add('hidden');return;}
+    if(ds.error){toast(ds.error);setButtons('idle','seranking');$('empty-seranking').style.display='block';$('seranking-active').classList.add('hidden');return;}
     toast('SEranking audit started');
     $('btn-sr-download').disabled=true;
-    setButtons('running');
+    setButtons('running','seranking');
     startSrPoll();
     return;
   }else if(mode==='geo'){
@@ -2399,20 +2415,21 @@ async function doStart(){
     const geoFd=new FormData();
     geoFd.append('domain',geoDomain);
     geoFd.append('check_visibility',$('geo-check-visibility').checked?'1':'0');
+    geoFd.append('faqs_per_page',$('geo-faqs-per-page').value);
     if(geoPages)geoFd.append('pages',geoPages);
     const geoKeywords=$('geo-keywords').value.trim();
     if(geoKeywords)geoFd.append('keywords',geoKeywords);
     if(geoTargetsFile)geoFd.append('targets',geoTargetsFile);
-    setButtons('starting');   // instant feedback, before the network round-trip
+    setButtons('starting','geo');   // instant feedback, before the network round-trip
     $('empty-geo').style.display='none';
     $('geo-active').classList.remove('hidden');
     $('geo-log').textContent='Starting...';
     const rg=await fetch('/api/geo/start',{method:'POST',body:geoFd});
     const dg=await rg.json();
-    if(dg.error){toast(dg.error);setButtons('idle');$('empty-geo').style.display='block';$('geo-active').classList.add('hidden');return;}
+    if(dg.error){toast(dg.error);setButtons('idle','geo');$('empty-geo').style.display='block';$('geo-active').classList.add('hidden');return;}
     toast('GEO report started');
     $('btn-geo-download').disabled=true;
-    setButtons('running');
+    setButtons('running','geo');
     startGeoPoll();
     return;
   }else if(mode==='keywordvolume'){
@@ -2420,7 +2437,9 @@ async function doStart(){
     if(!kvKeywords.length){toast('Enter at least one keyword');return;}
     if(kvKeywords.length>50){toast('Maximum 50 keywords at a time ('+kvKeywords.length+' given)');return;}
     if(!kvSelectedGeo.length){toast('Search for and add at least one location');return;}
-    setButtons('starting');   // instant feedback, before the network round-trip
+    setButtons('starting','keywordvolume');   // instant feedback, before the network round-trip
+    const kvT0=Date.now();
+    kvLog('Requesting search volume for '+kvKeywords.length+' keyword(s) across '+kvSelectedGeo.length+' location(s) - up to '+Math.ceil(kvKeywords.length/10)+' sequential Google Ads API call(s), can take a while.');
     try{
       // Longer timeout than the geo-suggest lookup - up to 50 keywords chunks
       // into up to 5 sequential Google Ads API calls server-side, which can
@@ -2429,16 +2448,21 @@ async function doStart(){
       const rkv=await fetchWithTimeout('/api/keywordvolume/search',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({keywords:kvKeywords,geo_target_resource_names:kvSelectedGeo.map(g=>g.resource_name),language:$('kv-language').value})},90000);
       const dkv=await rkv.json();
-      if(dkv.error){toast(dkv.error);setButtons('idle');return;}
+      const kvElapsed=((Date.now()-kvT0)/1000).toFixed(1);
+      if(dkv.error){kvLog('Failed after '+kvElapsed+'s: '+dkv.error);toast(dkv.error);setButtons('idle','keywordvolume');return;}
+      kvLog('Done in '+kvElapsed+'s - '+dkv.results.length+' keyword(s) retrieved.');
       toast('Search volume retrieved ('+dkv.results.length+' keyword(s))');
       kvLastResults=dkv.results;
       kvRenderResults(dkv.results);
       $('empty-keywordvolume').style.display='none';
       $('kv-active').classList.remove('hidden');
-      setButtons('completed');
+      setButtons('completed','keywordvolume');
     }catch(netErr){
-      toast(netErr.name==='AbortError'?'Search timed out after 90s - check the Google Ads credentials/network and try again':'Could not reach the server - try again.');
-      setButtons('idle');
+      const kvElapsed=((Date.now()-kvT0)/1000).toFixed(1);
+      const kvMsg=netErr.name==='AbortError'?'Search timed out after 90s - check the Google Ads credentials/network and try again':'Could not reach the server - try again.';
+      kvLog('Failed after '+kvElapsed+'s: '+kvMsg);
+      toast(kvMsg);
+      setButtons('idle','keywordvolume');
     }
     return;
   }else if(mode==='wayback'){
@@ -2460,7 +2484,7 @@ async function doStart(){
     $('btn-wb-export').disabled=true;
     $('wb-progress').textContent='Starting...';$('wb-progress').className='tag t-yes';
     $('wb-log').textContent='Starting submission of '+_wbLines.length+' URL(s)...';
-    setButtons('running');
+    setButtons('running','wayback');
     try{
       const rw=await fetch('/api/wayback/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
       let dw;
@@ -2482,16 +2506,16 @@ async function doStart(){
     p.format=$('gsc-format').value;
     if(!p.domain){toast('Enter a domain');return;}
     if(!p.email){toast('Connect a Google account first');gscConnect();return;}
-    setButtons('starting');   // instant feedback, before the network round-trip
+    setButtons('starting','gsc');   // instant feedback, before the network round-trip
     $('empty-gsc').style.display='none';
     $('gsc-active').classList.remove('hidden');
     $('gsc-log').textContent='Starting...';
     const rg=await fetch('/api/gsc/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
     const dg=await rg.json();
-    if(dg.error){toast(dg.error);setButtons('idle');$('empty-gsc').style.display='block';$('gsc-active').classList.add('hidden');return;}
+    if(dg.error){toast(dg.error);setButtons('idle','gsc');$('empty-gsc').style.display='block';$('gsc-active').classList.add('hidden');return;}
     toast('GSC audit started');
     $('btn-gsc-download').disabled=true;
-    setButtons('running');
+    setButtons('running','gsc');
     startGscPoll();
     return;
   }else if(mode==='backlink'){
@@ -2785,12 +2809,16 @@ function appendRow(row,num,m){
     const found=fu.startsWith('http')
       ?'<a class="lnk" href="'+esc(fu)+'" target="_blank" rel="noopener" title="'+esc(fu)+'">'+esc(fu.replace(/https?:\/\/(www\.)?/,''))+'</a>'
       :'<span style="color:var(--text-3)">N/A</span>';
+    const iss=row.screenshot||'';
+    const issUrl=row.screenshot_url||(iss?'/api/screenshot/'+esc(iss):'');
+    const issCell=issUrl?'<a class="lnk" href="'+esc(issUrl)+'" target="_blank" title="View search screenshot">📷</a>':'<span style="color:var(--text-3)">N/A</span>';
     const tr=document.createElement('tr');
     tr.innerHTML='<td style="color:var(--text-3)">'+num+'</td>'+
       '<td class="cell-url" style="font-weight:600">'+esc(row.url||'')+'</td>'+
       '<td style="text-align:center"><span class="tag '+cls+'">'+esc(idx)+'</span></td>'+
       '<td class="cell-url">'+found+'</td>'+
-      '<td><span class="tag '+(row.status==='ok'?'t-yes':'t-unknown')+'">'+esc(row.status==='ok'?'Checked':(row.status||'').replace(/_/g,' '))+'</span></td>';
+      '<td><span class="tag '+(row.status==='ok'?'t-yes':'t-unknown')+'">'+esc(row.status==='ok'?'Checked':(row.status||'').replace(/_/g,' '))+'</span></td>'+
+      '<td style="text-align:center">'+issCell+'</td>';
     tbody_i.appendChild(tr);
     $('tbl-i').classList.remove('hidden');$('empty-index').style.display='none';
   } else if(m==='count'){
@@ -2799,10 +2827,14 @@ function appendRow(row,num,m){
     const hasNum=raw&&raw!=='N/A';
     const disp=hasNum?raw:(failed?(row.status||'').replace(/_/g,' '):(raw||'N/A'));
     const col=hasNum?'var(--text)':'var(--text-3)';
+    const css=row.screenshot||'';
+    const cssUrl=row.screenshot_url||(css?'/api/screenshot/'+esc(css):'');
+    const cssCell=cssUrl?'<a class="lnk" href="'+esc(cssUrl)+'" target="_blank" title="View search screenshot">📷</a>':'<span style="color:var(--text-3)">N/A</span>';
     const tr=document.createElement('tr');
     tr.innerHTML='<td style="color:var(--text-3)">'+num+'</td>'+
       '<td class="cell-kw" style="font-weight:600">'+esc(row.keyword||'')+'</td>'+
-      '<td style="text-align:center;font-weight:700;color:'+col+'">'+esc(disp)+'</td>';
+      '<td style="text-align:center;font-weight:700;color:'+col+'">'+esc(disp)+'</td>'+
+      '<td style="text-align:center">'+cssCell+'</td>';
     tbody_c.appendChild(tr);
     $('tbl-c').classList.remove('hidden');$('empty-count').style.display='none';
   } else if(m==='backlink'){
@@ -3018,6 +3050,7 @@ async function baPoll(){
     const el=$('ba-log');
     if(d.log&&d.log.length) el.textContent=d.log.join('\n');
     el.scrollTop=el.scrollHeight;
+    mirrorSidebarLog(d.log,'brief');
     $('ba-progress').textContent=d.progress||d.status;
     if(d.status==='completed'){
       $('ba-progress').className='tag t-yes';
@@ -3130,6 +3163,18 @@ function geoReset(){
 let kvSelectedGeo=[];
 let kvLastSuggestions=[];
 let kvLastResults=[];
+// The Keyword Search Volume tool has no background job/poll loop to mirror
+// into the shared sidebar log (it's one synchronous request-response), so
+// the Activity Log sat blank the entire time a search ran - no way to tell
+// "is anything even happening" from a plain unchanging "Searching..." label.
+// Writes directly into the same #log the other tools mirror into.
+function kvLog(msg){
+  const el=$('log');
+  if(!el||mode!=='keywordvolume')return;
+  const ts=new Date().toLocaleTimeString();
+  el.textContent=(el.textContent?el.textContent+'\n':'')+'['+ts+'] '+msg;
+  el.scrollTop=el.scrollHeight;
+}
 async function kvLoadLanguages(){
   try{
     const r=await(await fetch('/api/keywordvolume/languages')).json();
@@ -3142,6 +3187,8 @@ async function kvSearchGeo(){
   const q=$('kv-geo-query').value.trim();
   if(!q){toast('Enter a location to search for');return;}
   $('kv-geo-results').innerHTML='<span class="hint">Searching...</span>';
+  const t0=Date.now();
+  kvLog('Location search: "'+q+'" - requesting a Google Ads OAuth token, then calling geoTargetConstants:suggest. This can legitimately take up to ~55s; waiting up to 65s before giving up.');
   try{
     // 65s, not 30s - the backend does two SEQUENTIAL calls (OAuth token
     // exchange, up to 15s timeout + the Ads API suggest call, up to 40s
@@ -3151,16 +3198,21 @@ async function kvSearchGeo(){
     // confirmed live (always hit the generic client timeout message, never
     // a real Google-side error).
     const r=await(await fetchWithTimeout('/api/keywordvolume/suggest_geo?q='+encodeURIComponent(q),{},65000)).json();
-    if(r.error){toast(r.error);$('kv-geo-results').innerHTML='';return;}
+    const elapsed=((Date.now()-t0)/1000).toFixed(1);
+    if(r.error){kvLog('Failed after '+elapsed+'s: '+r.error);toast(r.error);$('kv-geo-results').innerHTML='';return;}
     kvLastSuggestions=r.suggestions||[];
-    if(!kvLastSuggestions.length){$('kv-geo-results').innerHTML='<span class="hint">No matches found</span>';return;}
+    if(!kvLastSuggestions.length){kvLog('No matches found for "'+q+'" ('+elapsed+'s)');$('kv-geo-results').innerHTML='<span class="hint">No matches found</span>';return;}
+    kvLog('Found '+kvLastSuggestions.length+' match(es) for "'+q+'" ('+elapsed+'s)');
     $('kv-geo-results').innerHTML=kvLastSuggestions.map((s,i)=>
       '<button type="button" class="fmt-chip" style="cursor:pointer" onclick="kvAddGeo('+i+')">'+
       esc(s.name)+(s.target_type?' <span class="hint">('+esc(s.target_type)+')</span>':'')+'</button>'
     ).join('');
   }catch(e){
-    // AbortError = our own 30s timeout fired, not a real network error
-    toast(e.name==='AbortError'?'Location search timed out after 65s - check the Google Ads credentials/network and try again':'Location search failed');
+    const elapsed=((Date.now()-t0)/1000).toFixed(1);
+    // AbortError = our own 65s timeout fired, not a real network error
+    const msg=e.name==='AbortError'?'Location search timed out after 65s - check the Google Ads credentials/network and try again':'Location search failed: '+e.message;
+    kvLog('Failed after '+elapsed+'s: '+msg);
+    toast(msg);
     $('kv-geo-results').innerHTML='';
   }
 }
@@ -3255,6 +3307,7 @@ async function wbPoll(){
     const el=$('wb-log');
     if(d.log&&d.log.length) el.textContent=d.log.join('\n');
     el.scrollTop=el.scrollHeight;
+    mirrorSidebarLog(d.log,'wayback');
     if(d.results) wbRenderResults(d.results);
     if(d.status==='completed'){
       $('wb-progress').textContent='Completed';$('wb-progress').className='tag t-yes';
@@ -3580,17 +3633,6 @@ async function admCheckAdmin(){
       $('tab-admin').style.display='';
       MY_ADMIN_ROLE=r.role||'admin';MY_ADMIN_BUILDING=r.building||'';
       $('adm-buildings-card').style.display=admIsSuper()?'':'none';
-      // SEranking Audit is still being tested - admin-only for now, hidden from
-      // regular users until it's confirmed working reliably.
-      const srTab=$('tab-seranking');if(srTab)srTab.classList.remove('hidden');
-      // GEO / AI Optimization is brand new and untested - superadmin-only for now
-      // (server-side enforced too, in /api/geo/* - GEO_MIN_ROLE in web_app_batch.py).
-      // Promote to admin, then everyone, only once approved.
-      if(admIsSuper()){const geoTab=$('tab-geo');if(geoTab)geoTab.classList.remove('hidden');}
-      // Keyword Search Volume is brand new and untested - superadmin-only for now
-      // (server-side enforced too, in /api/keywordvolume/* - KEYWORDVOL_MIN_ROLE
-      // in web_app_batch.py). Promote to admin, then everyone, only once approved.
-      if(admIsSuper()){const kvTab=$('tab-keywordvolume');if(kvTab){kvTab.classList.remove('hidden');kvLoadLanguages();}}
     }
   }catch(e){}
 }
@@ -4251,6 +4293,12 @@ async function applyFormatFilter(){
   }catch(e){}
 }
 async function applyToolFilter(){
+  // Superadmin always sees every tool, regardless of whatever allowed_tools
+  // happens to be stored for the account - only admin/user accounts are
+  // actually restricted by their Allowed Tools selection. Relies on
+  // admCheckAdmin() having already resolved MY_ADMIN_ROLE (initApp() awaits
+  // it before calling this).
+  if(admIsSuper())return;
   try{
     const r=await(await fetch('/api/auth/tools')).json();
     let t=r.tools;
@@ -4276,7 +4324,10 @@ async function initApp(){
   wireDomainTrim();
   gscLoadAccounts();
   gscSessionsLoad();
-  admCheckAdmin();
+  // Awaited (not fire-and-forget) - applyToolFilter() needs MY_ADMIN_ROLE
+  // already resolved to correctly skip filtering for superadmin accounts.
+  await admCheckAdmin();
+  kvLoadLanguages();
   applyFormatFilter();
   applyToolFilter();
   setTimeout(autoCheckUpdates, 3500);  // quietly pull any new files after the app opens

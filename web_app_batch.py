@@ -1811,6 +1811,28 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
 # --------------------------------------------------------------------------- #
 # Index checker - hardened
 # --------------------------------------------------------------------------- #
+def _shot_index_or_count(driver, folder_domain, folder_mode, name_seed):
+    """Screenshot the current SERP for the Indexing Checker / Results Count tools -
+    same capture+upload pipeline as ranking's SERP screenshots (team-requested:
+    a screenshot alongside the status helps verify the result). Returns
+    (local_filename, public_url) - either can be empty on failure, never raises."""
+    try:
+        if not is_alive(driver):
+            return "", ""
+        safe = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in name_seed)[:60]
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ss_name = f"{safe}_{ts}.png"
+        ss_path = os.path.join(_domain_folder(folder_domain, folder_mode), ss_name)
+        _save_full_page_screenshot(driver, ss_path)
+        ss_url = _upload_ranking_screenshot(ss_path)
+        if ss_url:
+            add_log(f"Screenshot URL: {ss_url}")
+        return ss_name, ss_url
+    except Exception as e:
+        add_log(f"Screenshot failed: {e}")
+        return "", ""
+
+
 def index_one(sess, raw_url, country, city=None, lang="en"):
     from urllib.parse import urlparse
     url = raw_url.strip()
@@ -1831,11 +1853,13 @@ def index_one(sess, raw_url, country, city=None, lang="en"):
             _reanchor_locale(sess, country, lang)
             continue
         if "did not match any documents" in src.lower():
-            return {"status": "ok", "indexed": "No", "found_url": ""}
+            ss_name, ss_url = _shot_index_or_count(sess.driver, p.netloc, "index", raw_url)
+            return {"status": "ok", "indexed": "No", "found_url": "", "screenshot": ss_name, "screenshot_url": ss_url}
         links = extract_organic(sess.driver)
+        ss_name, ss_url = _shot_index_or_count(sess.driver, p.netloc, "index", raw_url)
         if links:
-            return {"status": "ok", "indexed": "Yes", "found_url": links[0]}
-        return {"status": "ok", "indexed": "No", "found_url": ""}
+            return {"status": "ok", "indexed": "Yes", "found_url": links[0], "screenshot": ss_name, "screenshot_url": ss_url}
+        return {"status": "ok", "indexed": "No", "found_url": "", "screenshot": ss_name, "screenshot_url": ss_url}
     return {"status": "ok", "indexed": "Unknown", "found_url": ""}
 
 def run_index_analysis(urls, delay, headless, country, proxies,
@@ -1881,6 +1905,8 @@ def run_index_analysis(urls, delay, headless, country, proxies,
                     "url": url, "indexed": result.get("indexed", "Unknown"),
                     "found_url": result.get("found_url", ""),
                     "status": result.get("status", "unknown"),
+                    "screenshot": result.get("screenshot", ""),
+                    "screenshot_url": result.get("screenshot_url", ""),
                     "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
             autosave()
             if i < len(urls) - 1 and not stop_event.is_set():
@@ -1985,11 +2011,13 @@ def count_one(sess, keyword, country, city=None, lang="en"):
         count = _capture_result_count(sess.driver)
         if count:
             add_log(f"'{keyword}': about {count} results")
-            return {"status": "ok", "results_count": count}
+            ss_name, ss_url = _shot_index_or_count(sess.driver, "results_count", "count", keyword)
+            return {"status": "ok", "results_count": count, "screenshot": ss_name, "screenshot_url": ss_url}
         low = src.lower()
         if "did not match any documents" in low or "no results found" in low:
             add_log(f"'{keyword}': 0 results")
-            return {"status": "ok", "results_count": "0"}
+            ss_name, ss_url = _shot_index_or_count(sess.driver, "results_count", "count", keyword)
+            return {"status": "ok", "results_count": "0", "screenshot": ss_name, "screenshot_url": ss_url}
         return {"status": "ok", "results_count": "N/A"}
     return {"status": "ok", "results_count": "N/A"}
 
@@ -2037,6 +2065,8 @@ def run_count_analysis(keywords, delay, headless, country, proxies,
                     "keyword": kw,
                     "results_count": result.get("results_count", ""),
                     "status": result.get("status", "unknown"),
+                    "screenshot": result.get("screenshot", ""),
+                    "screenshot_url": result.get("screenshot_url", ""),
                     "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
             autosave()
             if i < len(keywords) - 1 and not stop_event.is_set():
@@ -2389,18 +2419,31 @@ def _fetch_runtime_keys_now():
     runtime_keys action on the central gateway; the per-building override (if the
     building's own GSC-tracker sheet has a "Keys" tab) comes from that building's
     own GSC script - each building's admin manages their own override there
-    without needing any central-sheet access."""
+    without needing any central-sheet access.
+
+    Returns True if BOTH fetch attempts succeeded (even if nothing changed),
+    False if either failed - previously both failures were silently swallowed,
+    so a transient hiccup right after app launch left CONFIG's keys empty for
+    up to RUNTIME_KEYS_TTL (15 min) with zero indication anywhere that a sync
+    had failed (confirmed real case: a GEO report run in that window fell back
+    to placeholder FAQs even though the central Keys sheet had real values).
+    _runtime_keys_sync_loop uses this to retry sooner instead of waiting the
+    full interval after a failure."""
     global CONFIG
     email, password = auth.get_any_credentials()
     if not email:
-        return
+        return False
     keys = {}
+    ok = True
     try:
         result = auth._api_call({"action": "runtime_keys", "email": email, "password": password})
         if result.get("success"):
             keys.update({k: v for k, v in result.get("keys", {}).items() if v})
-    except Exception:
-        pass
+        else:
+            ok = False
+    except Exception as e:
+        ok = False
+        logging.warning(f"Runtime keys sync: central gateway fetch failed: {e}")
     try:
         webapp_url = _gsc_webapp_url()
         if webapp_url:
@@ -2408,26 +2451,36 @@ def _fetch_runtime_keys_now():
             data = resp.json()
             if data.get("success"):
                 keys.update({k: v for k, v in data.get("keys", {}).items() if v})
-    except Exception:
-        pass
+            else:
+                ok = False
+    except Exception as e:
+        ok = False
+        logging.warning(f"Runtime keys sync: per-building fetch failed: {e}")
     if keys:
         changed = any(CONFIG.get(k) != v for k, v in keys.items())
         for k, v in keys.items():
             CONFIG[k] = v.strip() if isinstance(v, str) else v
         if changed:
             save_config(CONFIG)
+    return ok
+
+
+RUNTIME_KEYS_RETRY_TTL = 60  # short retry after a failed sync, instead of waiting the full 15 min
 
 
 def _runtime_keys_sync_loop():
     """Waits for a logged-in user, fetches/merges runtime keys in the background,
     then refreshes every RUNTIME_KEYS_TTL seconds for the life of the app - so a
     key added centrally (or overridden per-building) reaches every machine
-    automatically, without anyone needing to click 'Sync Keys'."""
+    automatically, without anyone needing to click 'Sync Keys'. On a failed
+    sync (e.g. a transient network hiccup right after app launch), retries
+    again in RUNTIME_KEYS_RETRY_TTL seconds instead of leaving CONFIG's keys
+    stale/empty for the full 15-minute interval."""
     while True:
         email, _pw = auth.get_any_credentials()
         if email:
-            _fetch_runtime_keys_now()
-            time.sleep(RUNTIME_KEYS_TTL)
+            ok = _fetch_runtime_keys_now()
+            time.sleep(RUNTIME_KEYS_TTL if ok else RUNTIME_KEYS_RETRY_TTL)
         else:
             time.sleep(15)
 
@@ -2985,9 +3038,9 @@ def api_export_csv():
     elif m == "backlink":
         fields = ["url", "domain_found", "meta_robots", "link_type", "da", "dr", "pa", "da_source", "link_url", "status", "checked_at"]
     elif m == "count":
-        fields = ["keyword", "results_count"]
+        fields = ["keyword", "results_count", "screenshot", "screenshot_url"]
     else:
-        fields = ["url", "indexed", "found_url", "status", "checked_at"]
+        fields = ["url", "indexed", "found_url", "status", "screenshot", "screenshot_url", "checked_at"]
     w = csv.DictWriter(out, fieldnames=fields, extrasaction="ignore")
     w.writeheader(); w.writerows(results); out.seek(0)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -3739,37 +3792,10 @@ def api_seranking_download():
 
 # --------------------------------------------------------------------------- #
 # GEO / AI Optimization - runs generate_geo_report.py (subprocess, same pattern
-# as SEranking above). NEW and UNTESTED - superadmin-only for now (server-side
-# enforced below, not just hidden in the UI), per explicit instruction: promote
-# to admin, then everyone, only once approved. Each stage is a one-line change
-# to the role check in _require_geo_role().
+# as SEranking above). Access is controlled the same way as every other tool -
+# purely via each user's Allowed Tools list in the admin panel, no separate
+# server-side role gate.
 # --------------------------------------------------------------------------- #
-GEO_MIN_ROLE = "superadmin"  # -> "admin" once approved for admins, then remove the check entirely
-
-
-def _current_user_role():
-    """Same role resolution as /api/auth/is_admin, without the account-caching
-    side effects - just what's needed to gate a route."""
-    accounts = auth.list_logged_in()
-    if not accounts:
-        return "", ""
-    email = accounts[0]["email"]
-    try:
-        result = auth._api_call({"action": "is_admin", "email": email})
-    except Exception:
-        return "", email
-    return (result.get("role") or ""), email
-
-
-def _require_geo_role():
-    """Returns None if the current logged-in user is allowed to use GEO, else a
-    (response, status_code) tuple to return immediately. Server-side check - a
-    hidden UI tab alone doesn't stop someone calling the API directly."""
-    role, email = _current_user_role()
-    allowed = {"superadmin"} if GEO_MIN_ROLE == "superadmin" else {"superadmin", "admin"}
-    if role not in allowed:
-        return jsonify({"error": "GEO/AI Optimization is not available for your account yet."}), 403
-    return None
 
 
 geo_state = {"status": "idle", "log": [], "domain": "", "output_file": "", "error_msg": ""}
@@ -3777,7 +3803,7 @@ geo_lock = threading.Lock()
 geo_stop = threading.Event()
 
 
-def _run_geo_report(domain, targets_path, check_visibility, keywords, pages):
+def _run_geo_report(domain, targets_path, check_visibility, keywords, pages, faqs_per_page=5):
     with geo_lock:
         geo_state.update({"status": "running", "log": [], "domain": domain,
                           "output_file": "", "error_msg": ""})
@@ -3793,7 +3819,7 @@ def _run_geo_report(domain, targets_path, check_visibility, keywords, pages):
 
     python_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "python", "python.exe")
     script = os.path.join(SCRIPTS_DIR, "generate_geo_report.py")
-    cmd = [python_exe, "-u", script, domain, "--out", out_dir]
+    cmd = [python_exe, "-u", script, domain, "--out", out_dir, "--faqs-per-page", str(faqs_per_page)]
     if targets_path:
         cmd += ["--targets", targets_path]
     elif pages:
@@ -3842,9 +3868,6 @@ def _run_geo_report(domain, targets_path, check_visibility, keywords, pages):
 
 @app.route("/api/geo/start", methods=["POST"])
 def api_geo_start():
-    denied = _require_geo_role()
-    if denied:
-        return denied
     with geo_lock:
         if geo_state["status"] == "running":
             return jsonify({"error": "GEO report already running."}), 400
@@ -3854,6 +3877,11 @@ def api_geo_start():
     check_visibility = request.form.get("check_visibility", "1") != "0"
     keywords = (request.form.get("keywords") or "").strip() or None
     pages = (request.form.get("pages") or "").strip() or None
+    try:
+        faqs_per_page = int(request.form.get("faqs_per_page", "5"))
+    except ValueError:
+        faqs_per_page = 5
+    faqs_per_page = max(1, min(20, faqs_per_page))
     tf = request.files.get("targets")
     # GEO's work is done per-page, not just per-domain (team builds FAQs/schema/
     # etc for actual pages) - require at least one page URL or a targets file,
@@ -3868,16 +3896,14 @@ def api_geo_start():
         os.makedirs(UPLOADS_DIR, exist_ok=True)
         targets_path = os.path.join(UPLOADS_DIR, f"geo_{int(time.time())}_{os.path.basename(tf.filename)}")
         tf.save(targets_path)
-    t = threading.Thread(target=_run_geo_report, args=(domain, targets_path, check_visibility, keywords, pages), daemon=True)
+    t = threading.Thread(target=_run_geo_report,
+                          args=(domain, targets_path, check_visibility, keywords, pages, faqs_per_page), daemon=True)
     t.start()
     return jsonify({"status": "started"})
 
 
 @app.route("/api/geo/status")
 def api_geo_status():
-    denied = _require_geo_role()
-    if denied:
-        return denied
     with geo_lock:
         return jsonify({
             "status": geo_state["status"],
@@ -3889,18 +3915,12 @@ def api_geo_status():
 
 @app.route("/api/geo/stop", methods=["POST"])
 def api_geo_stop():
-    denied = _require_geo_role()
-    if denied:
-        return denied
     geo_stop.set()
     return jsonify({"status": "stopping"})
 
 
 @app.route("/api/geo/download")
 def api_geo_download():
-    denied = _require_geo_role()
-    if denied:
-        return denied
     with geo_lock:
         out_path = geo_state.get("output_file", "")
     if not out_path or not os.path.exists(out_path):
@@ -3912,36 +3932,22 @@ def api_geo_download():
 
 # --------------------------------------------------------------------------- #
 # Keyword Search Volume - real Google Ads / Keyword Planner data via REST
-# (google_ads_keywords.py). NEW and UNTESTED against a real account from this
-# environment - superadmin-only for now (same server-side-enforced pattern as
-# GEO). Google Ads calls are fast (a few seconds), so unlike GEO/On-Page this
-# runs synchronously in the request instead of a background job + polling.
+# (google_ads_keywords.py). Access is controlled the same way as every other
+# tool - purely via each user's Allowed Tools list in the admin panel, no
+# separate server-side role gate. Google Ads calls are fast (a few seconds),
+# so unlike GEO/On-Page this runs synchronously in the request instead of a
+# background job + polling.
 # --------------------------------------------------------------------------- #
-KEYWORDVOL_MIN_ROLE = "superadmin"  # -> "admin" once approved, then remove the check entirely
 MAX_KEYWORDS_PER_SEARCH = 50
-
-
-def _require_keywordvol_role():
-    role, email = _current_user_role()
-    allowed = {"superadmin"} if KEYWORDVOL_MIN_ROLE == "superadmin" else {"superadmin", "admin"}
-    if role not in allowed:
-        return jsonify({"error": "Keyword Search Volume is not available for your account yet."}), 403
-    return None
 
 
 @app.route("/api/keywordvolume/languages")
 def api_keywordvolume_languages():
-    denied = _require_keywordvol_role()
-    if denied:
-        return denied
     return jsonify({"languages": list(google_ads_keywords.LANGUAGE_CONSTANTS.keys())})
 
 
 @app.route("/api/keywordvolume/suggest_geo")
 def api_keywordvolume_suggest_geo():
-    denied = _require_keywordvol_role()
-    if denied:
-        return denied
     query = (request.args.get("q") or "").strip()
     if not query:
         return jsonify({"error": "Enter a location to search for."}), 400
@@ -3957,9 +3963,6 @@ def api_keywordvolume_suggest_geo():
 
 @app.route("/api/keywordvolume/search", methods=["POST"])
 def api_keywordvolume_search():
-    denied = _require_keywordvol_role()
-    if denied:
-        return denied
     data = request.get_json(silent=True) or {}
     keywords = [k.strip() for k in (data.get("keywords") or []) if k and k.strip()]
     keywords = list(dict.fromkeys(keywords))  # dedupe, preserve order
@@ -4588,10 +4591,16 @@ def api_admin_sync_keys():
     sheet, so an admin doesn't have to wait for the next scheduled sync."""
     try:
         before = dict(CONFIG)
-        _fetch_runtime_keys_now()
+        synced_ok = _fetch_runtime_keys_now()
         changed_keys = {k: v for k, v in CONFIG.items() if k in SENSITIVE_KEYS and v and before.get(k) != v}
         masked_keys = {k: ("****" + v[-4:] if isinstance(v, str) and len(v) > 4 else "****")
                         for k, v in CONFIG.items() if k in SENSITIVE_KEYS and v}
+        if not synced_ok:
+            activity("API key sync failed to reach the central sheet and/or building sheet "
+                     "(network issue) - showing whatever keys were already cached locally.", "error")
+            return jsonify({"ok": False, "error": "Could not reach the central and/or building Keys "
+                                                    "sheet - check your network connection and try again.",
+                            "keys": masked_keys})
         activity(f"API keys synced: {', '.join(masked_keys.keys())}")
         return jsonify({"ok": True, "keys": masked_keys, "changed": list(changed_keys.keys())})
     except Exception as e:
@@ -4907,6 +4916,55 @@ def api_gsc_domain_check():
 # --------------------------------------------------------------------------- #
 # Crawl Tracker - proxy to Apps Script Web App
 # --------------------------------------------------------------------------- #
+def _looks_like_quota_or_auth_error(msg):
+    """True for the shared Apps Script account's daily UrlFetchApp quota
+    running out, or its OAuth access failing - both cases where a domain the
+    account genuinely has access to can still be checked via a DIFFERENT
+    route (this app's own locally-connected GSC account), rather than a
+    permanent reason like the domain not being in the master list at all."""
+    m = (msg or "").lower()
+    return ("too many times for one day" in m) or ("not authorised" in m) or ("not authorized" in m)
+
+
+def _crawl_inspect_via_local_gsc(url, domain):
+    """Falls back to a DIRECT Search Console API call using one of THIS APP's
+    own locally-connected GSC accounts (the same OAuth connection GSC Audit/
+    Health Audit use) - completely separate from the shared Apps Script's
+    account-key system and its daily UrlFetchApp quota. So a domain doesn't
+    have to fail outright just because the shared quota ran out, as long as
+    the current user has connected a GSC account with access to it (GSC
+    Audit tab -> Connect Google Account). Returns None if no locally-
+    connected account has access to this domain - caller then shows a clear
+    "connect a GSC account" message instead of a raw Apps Script error."""
+    if not domain:
+        return None
+    try:
+        accounts = gsc_audit.list_accounts()
+    except Exception:
+        return None
+    for acct in [a for a in accounts if a.get("has_refresh")]:
+        try:
+            token = gsc_audit.get_access_token(acct["email"])
+            property_url = gsc_audit.resolve_property(token, domain)
+            result = gsc_audit.inspect_url(token, property_url, url)
+            idx = result.get("indexStatusResult", {})
+            crawl_time = idx.get("lastCrawlTime")
+            coverage = idx.get("coverageState")
+            verdict = idx.get("verdict")
+            if not crawl_time:
+                last_crawl_date = "Never Crawled"
+                index_status = coverage or (f"verdict {verdict}" if verdict else "no crawl data")
+            else:
+                last_crawl_date = datetime.fromisoformat(crawl_time.replace("Z", "+00:00")).strftime("%d %b %Y")
+                index_status = coverage or "Unknown"
+            return {"success": True, "url": url, "domain": domain, "accountKey": "",
+                    "lastCrawlDate": last_crawl_date, "indexStatus": index_status,
+                    "property": property_url, "via": "local_gsc"}
+        except Exception:
+            continue  # this locally-connected account doesn't have access to this domain - try the next one
+    return None
+
+
 def _crawl_apps_script_post(webapp_url, payload, timeout=180, retries=1):
     """POST to the Apps Script web app the same way the known-working
     last-gsc-crawl-date-check frontend does: Content-Type: text/plain
@@ -4941,7 +4999,21 @@ def api_crawl_validate():
     data = request.get_json(silent=True) or {}
     try:
         resp = _crawl_apps_script_post(webapp_url, {"action": "validate_batch", "urls": data.get("urls", [])})
-        return jsonify(resp.json())
+        result = resp.json()
+        # An item marked not-ready here because the shared account's quota/
+        # auth failed (not a permanent reason like "domain not in master
+        # list") still deserves a real attempt, not an instant "Skipped" -
+        # flip it back to ready so the frontend sends it to /api/crawl/
+        # inspect, which will retry via this app's own locally-connected GSC
+        # account if one has access to the domain (falls straight back to
+        # the original error there if not).
+        for item in (result.get("items") or []):
+            if not item.get("ready") and _looks_like_quota_or_auth_error(item.get("error", "")):
+                item["ready"] = True
+                item["quotaFallbackPending"] = True
+        if result.get("items"):
+            result["readyCount"] = sum(1 for i in result["items"] if i.get("ready"))
+        return jsonify(result)
     except http_requests.exceptions.Timeout:
         return jsonify({"error": "The Google Sheet is taking too long to respond. Please try again."}), 504
     except Exception as e:
@@ -4953,15 +5025,28 @@ def api_crawl_inspect():
     if not webapp_url:
         return jsonify({"error": "GSC accounts not configured. Set Apps Script URL in Admin."}), 400
     data = request.get_json(silent=True) or {}
+    url = data.get("url", "")
+    domain = data.get("domain", "")
     try:
         resp = _crawl_apps_script_post(webapp_url, {
             "action": "inspect_single",
-            "url": data.get("url", ""),
-            "domain": data.get("domain", ""),
+            "url": url,
+            "domain": domain,
             "accountKey": data.get("accountKey", ""),
             "batchId": data.get("batchId", "")
         })
-        return jsonify(resp.json())
+        result = resp.json()
+        if not result.get("success") and _looks_like_quota_or_auth_error(result.get("error", "")):
+            fallback = _crawl_inspect_via_local_gsc(url, domain)
+            if fallback is not None:
+                return jsonify(fallback)
+            result["error"] = (
+                (result.get("error", "") or "Shared GSC connection unavailable") +
+                " - the shared account's daily API quota is exhausted for today. To keep checking "
+                f"this domain now, connect the Google Search Console account for {domain or 'it'} "
+                "once in the GSC Audit section."
+            )
+        return jsonify(result)
     except http_requests.exceptions.Timeout:
         return jsonify({"error": "URL Inspection API is taking too long to respond. Please try again."}), 504
     except Exception as e:

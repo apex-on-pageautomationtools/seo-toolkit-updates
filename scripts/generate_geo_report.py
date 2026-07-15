@@ -88,6 +88,9 @@ def generate_ai_faqs(page_data, brand, n=5, seed_keywords=None):
             '- "answer": a 2-4 sentence answer to that question, written from THIS '
             "page's actual content (not generic filler), naturally mentioning the "
             f"brand ({brand}) once\n\n"
+            "IMPORTANT: write the keyword, query, and answer in the SAME language as "
+            "the page title/H1/content excerpt above - never translate to English if "
+            "the page itself isn't in English.\n\n"
             'Return ONLY a JSON array: [{"keyword": "...", "query": "...", "answer": "..."}, ...]'
         )
         result = op._ai_suggest(prompt)
@@ -104,7 +107,15 @@ def generate_ai_faqs(page_data, brand, n=5, seed_keywords=None):
         if out:
             return out
 
-    # Heuristic fallback - no Gemini key, or the call failed.
+    # Heuristic fallback - no AI key configured, or every tier of the free-tier
+    # chain (Gemini/Groq/OpenRouter) failed/returned nothing usable. This is a
+    # single generic entry, not `n` real ones - log it loudly so a run that
+    # silently degraded to this (confirmed real case: kidscover.eu got only 1
+    # templated FAQ per page instead of the requested 5) is obvious from the
+    # log instead of looking like a legitimate low-FAQ result.
+    log(f"   [!] No working AI key found for {url} - add a Gemini/Groq/OpenRouter API "
+        f"key in Admin -> Sync API Keys, then re-run this report. Using 1 generic "
+        f"placeholder FAQ for now instead of {n} real ones.")
     topic = h1 if h1 and h1 != op.MISSING else (title if title and title != op.MISSING else "this page")
     return [{
         "keyword": topic.lower(),
@@ -301,15 +312,15 @@ def run_visibility_checks_batch(queries, domain):
 # --------------------------------------------------------------------------- #
 # Step 3: combine into the reference-matching xlsx
 # --------------------------------------------------------------------------- #
-def build_all_faqs(pages_data, brand, seed_keywords=None):
+def build_all_faqs(pages_data, brand, seed_keywords=None, faqs_per_page=5):
     """Generate the FAQ/keyword set ONCE per page and reuse it everywhere (xlsx,
     Schema, llms-full.txt) - matching the real reference, where every deliverable
     draws from the exact same FAQ data instead of each file inventing its own.
     Returns {url: [{"keyword","query","answer"}, ...]}."""
     faqs_by_page = {}
     for pd in pages_data:
-        log(f"   -> generating FAQs: {pd['url']}")
-        faqs_by_page[pd["url"]] = generate_ai_faqs(pd, brand, seed_keywords=seed_keywords)
+        log(f"   -> generating {faqs_per_page} FAQ(s): {pd['url']}")
+        faqs_by_page[pd["url"]] = generate_ai_faqs(pd, brand, n=faqs_per_page, seed_keywords=seed_keywords)
     return faqs_by_page
 
 
@@ -861,7 +872,11 @@ def main():
     ap.add_argument("--keywords-only", action="store_true",
                      help="only generate the Keywords/FAQ xlsx - skip llms-full.txt, Schema, Technical, "
                           "Content Modification, and Internal Linking (faster, fewer AI calls)")
+    ap.add_argument("--faqs-per-page", type=int, default=5,
+                     help="Number of AI-searchable keyword/FAQ entries to generate per page (default 5).")
     args = ap.parse_args()
+
+    faqs_per_page = max(1, min(20, args.faqs_per_page))
 
     seed_keywords = None
     if args.keywords:
@@ -906,8 +921,8 @@ def main():
                            homepage.get("h1") if homepage else None,
                            homepage.get("og_site_name") if homepage else None)
 
-    log("[3/4] Generating AI-searchable keywords/FAQs...")
-    faqs_by_page = build_all_faqs(pages_data, brand, seed_keywords=seed_keywords)
+    log(f"[3/4] Generating AI-searchable keywords/FAQs ({faqs_per_page} per page)...")
+    faqs_by_page = build_all_faqs(pages_data, brand, seed_keywords=seed_keywords, faqs_per_page=faqs_per_page)
 
     log("[4/4] Building deliverables" +
         ("" if args.no_visibility_check else " + checking live AI visibility") + "...")
