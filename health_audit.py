@@ -747,13 +747,17 @@ def check_blank_pages(target_pages, domain, driver=None):
     return results, blank_count
 
 
-PSI_API_KEY_DEFAULT = "AIzaSyAuV5kxzjZm5KvjQ_HlODes6C7eh__aI0I"
-
-
 def check_pagespeed(domain, api_key=None):
-    """Fetch real PageSpeed Insights data via the PSI API."""
+    """Fetch real PageSpeed Insights data via the PSI API. Requires a real key
+    (Keys sheet psi_api_key, synced into CONFIG) - no hardcoded fallback key
+    (a real Google API key was previously hardcoded here directly in source,
+    committed to a PUBLIC repo - treat it as compromised/rotated, never
+    embed a real key in source again). Returns empty/None scores if no key
+    is configured, same as any other key-gated feature in this app."""
     import json
-    key = api_key or PSI_API_KEY_DEFAULT
+    key = (api_key or "").strip()
+    if not key:
+        return {"mobile": None, "desktop": None}
     base_text = ("The time it takes to fully display the content on a specific page; it reports on the "
                  "performance of a page on both mobile and desktop devices. ")
     scores = {}
