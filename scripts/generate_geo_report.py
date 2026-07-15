@@ -500,9 +500,24 @@ def build_technical_optimization_docx(domain, pages_data, brand, out_path, max_i
         doc.add_paragraph(
             f"{len(missing)} image(s) are missing ALT tags across the target pages checked - "
             "ALT text helps both accessibility and AI/search engines understand image content.")
-        for url, src, title in missing[:max_images]:
-            log(f"   -> ALT suggestion: {src[:70]}")
-            alt = _suggest_alt_text(url, src, brand, title)
+        to_process = missing[:max_images]
+        # Each ALT suggestion is an independent AI call (a full Gemini/Groq/
+        # OpenRouter round-trip) - running them one at a time made a page with
+        # many missing-ALT images take a very long time. Same bounded-
+        # concurrency pattern already used for broken-link checking elsewhere
+        # in this codebase. Order in the output doc is preserved even though
+        # completion order isn't.
+        import concurrent.futures
+        alts = [None] * len(to_process)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+            futures = {pool.submit(_suggest_alt_text, url, src, brand, title): i
+                       for i, (url, src, title) in enumerate(to_process)}
+            done = 0
+            for fut in concurrent.futures.as_completed(futures):
+                alts[futures[fut]] = fut.result()
+                done += 1
+                log(f"   -> ALT suggestion {done}/{len(to_process)} done")
+        for (url, src, title), alt in zip(to_process, alts):
             doc.add_paragraph(f"Page URL: - {url}", style="List Paragraph")
             doc.add_paragraph(f"Image Source: - {src}", style="List Paragraph")
             doc.add_paragraph(f"Image ALT Suggestion: - {alt}", style="List Paragraph")
