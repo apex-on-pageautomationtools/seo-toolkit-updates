@@ -20,7 +20,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-API_VERSION = "v17"  # bump if/when Google deprecates this version
+API_VERSION = "v23"  # v17 was long since sunset (confirmed live: 404 "was not
+                     # found on this server") - v23 is Google's current latest
+                     # major version as of Feb 2026, supported into 2027; bump
+                     # again once Google announces its own sunset.
 OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 BASE_URL = f"https://googleads.googleapis.com/{API_VERSION}"
 
