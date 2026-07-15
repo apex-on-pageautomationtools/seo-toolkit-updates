@@ -2221,6 +2221,17 @@ function toggleCollapse(id){
 
 /* ===================== helpers ===================== */
 const esc=s=>(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+// Plain fetch() never times out on its own - if the backend genuinely hangs
+// (network issue, a slow first-time OAuth/API call), the caller is stuck
+// showing "Searching..."/"Loading..." forever with no way to tell if it's
+// broken or just slow. Wraps fetch with an AbortController so it always
+// resolves one way or another within ms milliseconds.
+function fetchWithTimeout(url,opts,ms){
+  opts=opts||{};ms=ms||45000;
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),ms);
+  return fetch(url,{...opts,signal:ctrl.signal}).finally(()=>clearTimeout(timer));
+}
 function countryCode(val){
   for(const o of document.querySelectorAll('#country-list option'))
     if(o.value.toLowerCase()===val.toLowerCase()) return o.dataset.code||'us';
@@ -2411,8 +2422,12 @@ async function doStart(){
     if(!kvSelectedGeo.length){toast('Search for and add at least one location');return;}
     setButtons('starting');   // instant feedback, before the network round-trip
     try{
-      const rkv=await fetch('/api/keywordvolume/search',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({keywords:kvKeywords,geo_target_resource_names:kvSelectedGeo.map(g=>g.resource_name),language:$('kv-language').value})});
+      // Longer timeout than the geo-suggest lookup - up to 50 keywords chunks
+      // into up to 5 sequential Google Ads API calls server-side, which can
+      // legitimately take a while, but must still resolve eventually rather
+      // than leaving the UI stuck on "Starting..." forever if something hangs.
+      const rkv=await fetchWithTimeout('/api/keywordvolume/search',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({keywords:kvKeywords,geo_target_resource_names:kvSelectedGeo.map(g=>g.resource_name),language:$('kv-language').value})},90000);
       const dkv=await rkv.json();
       if(dkv.error){toast(dkv.error);setButtons('idle');return;}
       toast('Search volume retrieved ('+dkv.results.length+' keyword(s))');
@@ -2422,7 +2437,7 @@ async function doStart(){
       $('kv-active').classList.remove('hidden');
       setButtons('completed');
     }catch(netErr){
-      toast('Could not reach the server - try again.');
+      toast(netErr.name==='AbortError'?'Search timed out after 90s - check the Google Ads credentials/network and try again':'Could not reach the server - try again.');
       setButtons('idle');
     }
     return;
@@ -3128,7 +3143,7 @@ async function kvSearchGeo(){
   if(!q){toast('Enter a location to search for');return;}
   $('kv-geo-results').innerHTML='<span class="hint">Searching...</span>';
   try{
-    const r=await(await fetch('/api/keywordvolume/suggest_geo?q='+encodeURIComponent(q))).json();
+    const r=await(await fetchWithTimeout('/api/keywordvolume/suggest_geo?q='+encodeURIComponent(q),{},30000)).json();
     if(r.error){toast(r.error);$('kv-geo-results').innerHTML='';return;}
     kvLastSuggestions=r.suggestions||[];
     if(!kvLastSuggestions.length){$('kv-geo-results').innerHTML='<span class="hint">No matches found</span>';return;}
@@ -3136,7 +3151,11 @@ async function kvSearchGeo(){
       '<button type="button" class="fmt-chip" style="cursor:pointer" onclick="kvAddGeo('+i+')">'+
       esc(s.name)+(s.target_type?' <span class="hint">('+esc(s.target_type)+')</span>':'')+'</button>'
     ).join('');
-  }catch(e){toast('Location search failed');$('kv-geo-results').innerHTML='';}
+  }catch(e){
+    // AbortError = our own 30s timeout fired, not a real network error
+    toast(e.name==='AbortError'?'Location search timed out after 30s - check the Google Ads credentials/network and try again':'Location search failed');
+    $('kv-geo-results').innerHTML='';
+  }
 }
 function kvAddGeo(i){
   const s=kvLastSuggestions[i];
