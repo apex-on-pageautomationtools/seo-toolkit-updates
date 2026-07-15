@@ -205,6 +205,99 @@ def check_ai_visibility(driver, query, domain):
     ]
 
 
+VISIBILITY_WORKERS = 2  # deliberately small - real headless Chrome instances hitting
+                        # Perplexity/Google concurrently from the SAME IP; kept low to
+                        # stay conservative on captcha/rate-limit risk rather than
+                        # maximize throughput.
+
+
+def _new_visibility_driver():
+    """A genuinely NEW, independent Chrome instance - NOT generate_seo_onpage_phase2's
+    shared singleton (_get_op_driver() always returns the SAME driver object), which
+    is fine for that module's sequential screenshot capture but useless here: running
+    checks concurrently needs one real browser process per worker."""
+    import tempfile
+    from selenium.webdriver import Chrome, ChromeOptions
+    opts = ChromeOptions()
+    opts.add_argument(f"--user-data-dir={tempfile.mkdtemp(prefix='seo_geo_vis_')}")
+    opts.add_argument("--headless=new")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--disable-notifications")
+    opts.add_argument("--mute-audio")
+    opts.add_argument("--window-size=1366,900")
+    opts.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+    driver = Chrome(options=opts)
+    driver.set_page_load_timeout(45)
+    return driver
+
+
+def run_visibility_checks_batch(queries, domain):
+    """queries: list of query strings (duplicates are checked only once).
+    Runs up to VISIBILITY_WORKERS independent Chrome instances concurrently -
+    genuine parallelism, not tabs (a single Selenium driver only ever controls
+    one tab at a time regardless of how many are open, so multiple tabs on one
+    driver would NOT actually run concurrently). Falls back to the existing
+    shared single-driver path if a second browser instance can't be launched
+    (e.g. a memory-constrained machine), rather than failing the whole run.
+    Returns {query: [perplexity_cell, google_cell, chatgpt_cell]}."""
+    unique_queries = list(dict.fromkeys(queries))
+    if not unique_queries:
+        return {}
+    results = {}
+
+    n_workers = min(VISIBILITY_WORKERS, len(unique_queries))
+    drivers = []
+    try:
+        drivers = [_new_visibility_driver() for _ in range(n_workers)]
+    except Exception as e:
+        log(f"   [warn] could not launch {n_workers} parallel browser instance(s) ({e}) - "
+            f"falling back to a single shared browser.")
+        for d in drivers:
+            try:
+                d.quit()
+            except Exception:
+                pass
+        drivers = [op._get_op_driver()]
+
+    def _cells_for(driver, query):
+        log(f"   -> checking AI visibility: {query[:70]}")
+        engine_results = check_ai_visibility(driver, query, domain)
+        by_engine = {r["engine"]: r for r in engine_results}
+        return [
+            "Yes" if by_engine["perplexity"]["cited"] else ("Not checked" if not by_engine["perplexity"]["checked"] else "No"),
+            "Yes" if by_engine["google_ai_overview"]["cited"] else ("Not checked" if not by_engine["google_ai_overview"]["checked"] else "No"),
+            "Yes" if by_engine["chatgpt"]["cited"] else ("Not checked" if not by_engine["chatgpt"]["checked"] else "No"),
+        ]
+
+    def _worker(worker_idx):
+        driver = drivers[worker_idx]
+        for i in range(worker_idx, len(unique_queries), len(drivers)):
+            q = unique_queries[i]
+            try:
+                results[q] = _cells_for(driver, q)
+            except Exception as e:
+                log(f"   [warn] visibility check failed for {q[:50]!r}: {e}")
+                results[q] = ["Not checked", "Not checked", "Not checked"]
+
+    import concurrent.futures
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(drivers)) as pool:
+            list(pool.map(_worker, range(len(drivers))))
+    finally:
+        # Only quit drivers WE created here - never quit the shared singleton
+        # from _get_op_driver() (other code may still need it this run).
+        for d in drivers:
+            if d is not None and d is not getattr(op, "_op_driver", None):
+                try:
+                    d.quit()
+                except Exception:
+                    pass
+    return results
+
+
 # --------------------------------------------------------------------------- #
 # Step 3: combine into the reference-matching xlsx
 # --------------------------------------------------------------------------- #
@@ -242,41 +335,35 @@ def build_geo_keywords_xlsx(domain, pages_data, faqs_by_page, out_path, check_vi
         cell.fill = PatternFill("solid", fgColor="1F3864")
         cell.alignment = Alignment(wrap_text=True, vertical="center")
 
-    driver = op._get_op_driver() if check_visibility else None
-
-    def _visibility_cells(query):
-        if not (check_visibility and driver):
-            return ["Not checked", "Not checked", "Not checked"] if check_visibility else []
-        log(f"   -> checking AI visibility: {query[:70]}")
-        results = check_ai_visibility(driver, query, domain)
-        by_engine = {r["engine"]: r for r in results}
-        return [
-            "Yes" if by_engine["perplexity"]["cited"] else ("Not checked" if not by_engine["perplexity"]["checked"] else "No"),
-            "Yes" if by_engine["google_ai_overview"]["cited"] else ("Not checked" if not by_engine["google_ai_overview"]["checked"] else "No"),
-            "Yes" if by_engine["chatgpt"]["cited"] else ("Not checked" if not by_engine["chatgpt"]["checked"] else "No"),
-        ]
-
-    total_rows = 0
+    # Build every row's data FIRST (no visibility cells yet), then run all the
+    # needed visibility checks together as one batch through run_visibility_
+    # checks_batch()'s parallel-browser pool, instead of checking one query at
+    # a time interleaved with row-building - lets 2 independent Chrome
+    # instances work through the query list concurrently.
+    pending_rows = []
     for pd in pages_data:
         for item in faqs_by_page.get(pd["url"], []):
-            row = [pd["url"], item["keyword"], item["query"], item["answer"], "Auto-generated from page content"]
-            row += _visibility_cells(item["query"])
-            ws.append(row)
-            total_rows += 1
-
+            pending_rows.append([pd["url"], item["keyword"], item["query"], item["answer"],
+                                  "Auto-generated from page content", item["query"]])
     # Direct check of the team's own given keywords, as-typed - not just the
     # AI-rephrased question derived from them, so they can see their EXACT
     # existing keyword's current AI-citation status.
     if seed_keywords:
         home_url = pages_data[0]["url"] if pages_data else f"https://{domain}/"
         for kw in seed_keywords:
-            row = [home_url, kw, kw, "", "User-provided keyword (checked as-is)"]
-            row += _visibility_cells(kw)
-            ws.append(row)
-            total_rows += 1
+            pending_rows.append([home_url, kw, kw, "", "User-provided keyword (checked as-is)", kw])
 
-    if driver:
-        op._close_op_driver()
+    visibility_by_query = {}
+    if check_visibility and pending_rows:
+        visibility_by_query = run_visibility_checks_batch([r[5] for r in pending_rows], domain)
+
+    total_rows = 0
+    for url, keyword, query, answer, source, check_query in pending_rows:
+        row = [url, keyword, query, answer, source]
+        if check_visibility:
+            row += visibility_by_query.get(check_query, ["Not checked", "Not checked", "Not checked"])
+        ws.append(row)
+        total_rows += 1
 
     ws.column_dimensions["A"].width = 45
     ws.column_dimensions["B"].width = 30
