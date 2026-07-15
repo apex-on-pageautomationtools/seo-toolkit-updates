@@ -1333,7 +1333,10 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       </div>
       <div class="collapse-b open" id="log-b"><div><div class="pad">
         <div class="log" id="log"></div>
-        <button class="btn btn-tonal btn-sm btn-w" style="margin-top:12px" onclick="saveLog()">Save log</button>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-tonal btn-sm" style="flex:1" onclick="saveLog()">Save log</button>
+          <button class="btn btn-tonal btn-sm" style="flex:1" onclick="copyLogText('log')">Copy log</button>
+        </div>
       </div></div></div>
     </section>
 
@@ -1402,6 +1405,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
               Download ZIP
             </button>
             <button class="btn btn-tonal" onclick="opReset()">New Report</button>
+            <button class="btn btn-tonal" onclick="copyLogText('op-log')">Copy Log</button>
           </div>
         </div>
       </div>
@@ -1423,6 +1427,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
               Download Report
             </button>
             <button class="btn btn-tonal" onclick="haReset()">New Audit</button>
+            <button class="btn btn-tonal" onclick="copyLogText('ha-log')">Copy Log</button>
           </div>
         </div>
       </div>
@@ -1444,6 +1449,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
               Download Report
             </button>
             <button class="btn btn-tonal" onclick="gscReset()">New Audit</button>
+            <button class="btn btn-tonal" onclick="copyLogText('gsc-log')">Copy Log</button>
           </div>
         </div>
       </div>
@@ -1465,6 +1471,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
               Download Audit
             </button>
             <button class="btn btn-tonal" onclick="srReset()">New Audit</button>
+            <button class="btn btn-tonal" onclick="copyLogText('sr-log')">Copy Log</button>
           </div>
         </div>
       </div>
@@ -1486,6 +1493,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
               Download GEO Report (ZIP)
             </button>
             <button class="btn btn-tonal" onclick="geoReset()">New Report</button>
+            <button class="btn btn-tonal" onclick="copyLogText('geo-log')">Copy Log</button>
           </div>
         </div>
       </div>
@@ -1532,7 +1540,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
           <div style="overflow-x:auto">
             <table style="width:100%;border-collapse:collapse;font-size:12px">
               <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
-                <th style="padding:6px">URL</th><th style="padding:6px">Archived URL</th><th style="padding:6px">Status</th>
+                <th style="padding:6px">URL</th><th style="padding:6px">Archived URL</th><th style="padding:6px">Snapshot Date</th><th style="padding:6px">Status</th>
               </tr></thead>
               <tbody id="wb-results-body"></tbody>
             </table>
@@ -2536,7 +2544,47 @@ function exportCSVMode(m){window.location.href='/api/export/csv?mode='+(m||mode)
 function saveLog(){
   const txt=$('log').innerText;if(!txt.trim()){toast('Log is empty');return;}
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain'}));
-  a.download='rank-checker-log-'+new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)+'.txt';a.click();
+  // Filename now reflects whichever tool is actually active, instead of being
+  // hardcoded to "rank-checker" regardless of what produced the log.
+  a.download=mode+'-log-'+new Date().toISOString().replace(/[:.]/g,'-').slice(0,19)+'.txt';a.click();
+}
+// Copies a log panel's text straight to the clipboard - a poll loop replaces
+// a log panel's textContent every ~2s while a tool is running, which silently
+// wipes out any manual text selection mid-drag, making copy-by-hand feel
+// broken. One click here sidesteps that entirely.
+async function copyLogText(elId){
+  const el=$(elId);
+  const txt=el?el.innerText:'';
+  if(!txt.trim()){toast('Log is empty');return;}
+  try{
+    await navigator.clipboard.writeText(txt);
+    toast('Log copied to clipboard');
+  }catch(e){
+    // Clipboard API can be blocked (no HTTPS/permission) - fall back to a
+    // manual-select prompt rather than failing silently.
+    const ta=document.createElement('textarea');
+    ta.value=txt;document.body.appendChild(ta);ta.select();
+    try{document.execCommand('copy');toast('Log copied to clipboard');}
+    catch(e2){toast('Could not copy automatically - select the text manually.');}
+    document.body.removeChild(ta);
+  }
+}
+// Mirrors a background tool's own log into the shared sidebar Activity Log
+// panel too, so it's visible from one common place instead of only inside
+// that tool's own panel - previously each background-job tool (GEO, On-Page,
+// Health Audit, GSC Audit, SEranking) only wrote into its own in-panel log
+// div, leaving the sidebar's Activity Log blank while they ran. forMode is
+// required and checked against the CURRENTLY VIEWED tab - several of these
+// tools can run in parallel in the background (see doStart()), so without
+// this guard, whichever one's poll happens to fire last would keep
+// overwriting the sidebar log out from under whatever tab you're actually
+// looking at. Same convention crawlLog() already uses for the same reason.
+function mirrorSidebarLog(lines,forMode){
+  if(forMode&&mode!==forMode)return;
+  const el=$('log');
+  if(!el||!lines||!lines.length)return;
+  el.textContent=lines.join('\n');
+  el.scrollTop=el.scrollHeight;
 }
 
 /* ===================== polling ===================== */
@@ -2764,6 +2812,7 @@ async function opPoll(){
     const el=$('op-log');
     if(d.log&&d.log.length) el.textContent=d.log.join('\n');
     el.scrollTop=el.scrollHeight;
+    mirrorSidebarLog(d.log,'onpage');
     $('op-progress').textContent=d.progress||d.status;
     if(d.status==='completed'){
       $('op-progress').className='tag t-yes';
@@ -2823,6 +2872,7 @@ async function haPoll(){
     const el=$('ha-log');
     if(d.log&&d.log.length) el.textContent=d.log.join('\n');
     el.scrollTop=el.scrollHeight;
+    mirrorSidebarLog(d.log,'health');
     $('ha-progress').textContent=d.progress||d.status;
     // Update shared status bar
     const prog=d.progress||'';
@@ -2891,6 +2941,7 @@ async function gscPoll(){
     const el=$('gsc-log');
     if(d.log&&d.log.length) el.textContent=d.log.join('\n');
     el.scrollTop=el.scrollHeight;
+    mirrorSidebarLog(d.log,'gsc');
     $('gsc-progress').textContent=d.progress||d.status;
     if(d.status==='completed'){
       $('gsc-progress').className='tag t-yes';
@@ -2966,6 +3017,7 @@ async function srPoll(){
     const el=$('sr-log');
     if(d.log&&d.log.length) el.textContent=d.log.join('\n');
     el.scrollTop=el.scrollHeight;
+    mirrorSidebarLog(d.log,'seranking');
     if(d.status==='completed'){
       $('sr-progress').textContent='Completed';$('sr-progress').className='tag t-yes';
       $('btn-sr-download').disabled=!d.has_file;
@@ -3005,6 +3057,7 @@ async function geoPoll(){
     const el=$('geo-log');
     if(d.log&&d.log.length) el.textContent=d.log.join('\n');
     el.scrollTop=el.scrollHeight;
+    mirrorSidebarLog(d.log,'geo');
     if(d.status==='completed'){
       $('geo-progress').textContent='Completed';$('geo-progress').className='tag t-yes';
       $('btn-geo-download').disabled=!d.has_file;
@@ -3129,10 +3182,18 @@ function wbRenderResults(results){
   const tbody=$('wb-results-body');
   tbody.innerHTML=results.map(r=>{
     const link=r.archived_url?'<a class="lnk" href="'+esc(r.archived_url)+'" target="_blank" rel="noopener">'+esc(r.archived_url)+'</a>':'<span style="color:var(--text-3)">-</span>';
-    const ok=r.status==='submitted';
+    // "existing" - archive.org already had a recent-enough snapshot and
+    // returned THAT instead of making a fresh capture (confirmed live: a
+    // snapshot from the previous day came back for a URL submitted today).
+    // Shown distinctly from "submitted" (a genuinely new capture) rather
+    // than both being reported as the same success.
+    const badge=r.status==='submitted'?{cls:'t-yes',label:'New capture'}
+      :r.status==='existing'?{cls:'t-unknown',label:'Existing snapshot reused'}
+      :{cls:'t-not_found',label:'Failed'};
     return '<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px;word-break:break-all">'+esc(r.url)+'</td>'+
       '<td style="padding:6px;word-break:break-all">'+link+'</td>'+
-      '<td style="padding:6px"><span class="tag '+(ok?'t-yes':'t-not_found')+'">'+(ok?'Submitted':'Failed')+'</span></td></tr>';
+      '<td style="padding:6px;white-space:nowrap">'+esc(r.snapshot_at||'-')+'</td>'+
+      '<td style="padding:6px"><span class="tag '+badge.cls+'">'+badge.label+'</span></td></tr>';
   }).join('');
   $('wb-count').textContent=results.length+(results.length===1?' URL':' URLs');
   $('btn-wb-export').disabled=results.length===0;

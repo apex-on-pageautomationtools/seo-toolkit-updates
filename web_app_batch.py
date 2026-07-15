@@ -3468,6 +3468,25 @@ def _submit_wayback_url(url, max_tries=3, timeout=45):
     return None
 
 
+def _parse_wayback_snapshot_time(archived_url):
+    """Extract the real capture timestamp Wayback embeds in its own URL
+    (/web/YYYYMMDDHHMMSS/...) - this is the authoritative date of whatever
+    snapshot was actually returned, which is NOT always "just now": if
+    archive.org already has a recent-enough capture of this URL, Save Page Now
+    returns that EXISTING snapshot instead of making a fresh one - confirmed
+    live (a snapshot from the previous day came back for a URL submitted
+    today). There's no other signal that a "successful" submission didn't
+    actually create a new capture."""
+    import re as _re
+    m = _re.search(r"/web/(\d{14})/", archived_url or "")
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%Y%m%d%H%M%S")
+    except Exception:
+        return None
+
+
 def _run_wayback_submit(urls):
     with wayback_lock:
         wayback_state.update({"status": "running", "log": [], "results": [], "error_msg": ""})
@@ -3482,13 +3501,31 @@ def _run_wayback_submit(urls):
         with wayback_lock:
             wayback_state["log"].append(f"[{i+1}/{len(urls)}] Submitting {u}...")
         archived = _submit_wayback_url(u)
+        now = datetime.now()
+        snapshot_time = _parse_wayback_snapshot_time(archived) if archived else None
+        # Within 5 min of the request = a genuinely fresh capture; anything
+        # older means archive.org handed back an existing snapshot instead of
+        # making a new one - report that honestly rather than as "submitted".
+        is_fresh = bool(snapshot_time and (now - snapshot_time).total_seconds() < 300)
+        if archived and is_fresh:
+            status = "submitted"
+        elif archived:
+            status = "existing"
+        else:
+            status = "failed"
         with wayback_lock:
             wayback_state["results"].append({
-                "url": u, "archived_url": archived or "",
-                "status": "submitted" if archived else "failed",
-                "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
-            wayback_state["log"].append(
-                "  -> " + (f"Archived: {archived}" if archived else "Failed after retries"))
+                "url": u, "archived_url": archived or "", "status": status,
+                "snapshot_at": snapshot_time.strftime("%Y-%m-%d %H:%M:%S") if snapshot_time else "",
+                "checked_at": now.strftime("%Y-%m-%d %H:%M:%S")})
+            if status == "existing":
+                wayback_state["log"].append(
+                    f"  -> Existing snapshot reused (archive.org already had one from "
+                    f"{snapshot_time.strftime('%Y-%m-%d %H:%M')}, no new capture made): {archived}")
+            elif status == "submitted":
+                wayback_state["log"].append(f"  -> Archived (new capture): {archived}")
+            else:
+                wayback_state["log"].append("  -> Failed after retries")
     with wayback_lock:
         ok = sum(1 for r in wayback_state["results"] if r["status"] == "submitted")
         wayback_state["log"].append(f"Completed -- {ok} ok, {len(wayback_state['results']) - ok} error(s).")
@@ -3544,7 +3581,7 @@ def api_wayback_export():
     with wayback_lock:
         results = list(wayback_state["results"])
     out = io.StringIO()
-    w = csv.DictWriter(out, fieldnames=["url", "archived_url", "status", "checked_at"])
+    w = csv.DictWriter(out, fieldnames=["url", "archived_url", "status", "snapshot_at", "checked_at"])
     w.writeheader(); w.writerows(results)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return Response(out.getvalue(), mimetype="text/csv",
