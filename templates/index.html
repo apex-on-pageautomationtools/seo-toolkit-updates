@@ -3389,7 +3389,14 @@ async function gscConnect(){
     const d=await r.json();
     if(d.error){toast(d.error,'err');return;}
     toast('Connected: '+d.email);
-    gscLoadAccounts();
+    await gscLoadAccounts();
+    // Re-run the domain -> account check now that a new account is connected -
+    // previously this only ran on the domain field's blur event, so after
+    // connecting the account a domain was waiting on, the info box kept
+    // showing the stale "Not connected yet" message until the user clicked
+    // back into the field and out again (felt like having to retype the
+    // domain just to refresh the status).
+    if($('gsc-domain')&&$('gsc-domain').value.trim())gscCheckDomain();
   }catch(e){toast('Connection failed','err');}
 }
 async function gscLoadAccounts(){
