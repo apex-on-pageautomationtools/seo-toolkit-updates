@@ -13,7 +13,9 @@ Plus, since a Developer Token can only be issued from a Manager (MCC)
 account, almost always also:
   google_ads_manager_customer_id
 """
+import contextlib
 import json
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,6 +23,33 @@ import urllib.request
 API_VERSION = "v17"  # bump if/when Google deprecates this version
 OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 BASE_URL = f"https://googleads.googleapis.com/{API_VERSION}"
+
+
+@contextlib.contextmanager
+def _force_ipv4():
+    """Temporarily forces IPv4-only DNS resolution for the request(s) made
+    inside this block. Confirmed real root cause via PowerShell
+    Test-NetConnection on a live machine: googleads.googleapis.com's IPv6
+    addresses are unreachable on that network ("TCP connect ... failed" for
+    every IPv6 address it resolves to), while oauth2.googleapis.com's IPv6
+    address works fine - a browser silently races IPv4/IPv6 and uses
+    whichever works ("Happy Eyeballs"), but Python's urllib tries each
+    resolved address in order with no such racing, so it was burning the
+    ENTIRE request timeout on broken IPv6 addresses before ever reaching a
+    working IPv4 one - the exact cause of every Keyword Search Volume
+    request timing out at 65s with no result. Scoped as a context manager
+    (not a permanent global patch) so it only affects these specific calls,
+    not the rest of the app's networking."""
+    orig_getaddrinfo = socket.getaddrinfo
+
+    def _ipv4_only(host, port, family=0, type=0, proto=0, flags=0):
+        return orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
+    socket.getaddrinfo = _ipv4_only
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = orig_getaddrinfo
 
 # GenerateKeywordHistoricalMetrics' documented per-request keyword limit is
 # lower than the 50-keyword tool-wide limit this app exposes - chunk
@@ -74,7 +103,7 @@ def _get_access_token(client_id, client_secret, refresh_token):
     }).encode()
     req = urllib.request.Request(OAUTH_TOKEN_URL, data=data,
                                   headers={"Content-Type": "application/x-www-form-urlencoded"})
-    with urllib.request.urlopen(req, timeout=15) as r:
+    with _force_ipv4(), urllib.request.urlopen(req, timeout=15) as r:
         tokens = json.loads(r.read().decode())
     if "error" in tokens:
         raise Exception(f"Google Ads OAuth refresh failed: {tokens.get('error_description', tokens['error'])}")
@@ -92,7 +121,7 @@ def _ads_request(path, body, access_token, config):
         headers["login-customer-id"] = config["manager_customer_id"]
     req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=40) as r:
+        with _force_ipv4(), urllib.request.urlopen(req, timeout=40) as r:
             return json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8", "ignore")
