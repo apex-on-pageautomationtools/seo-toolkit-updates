@@ -3320,7 +3320,7 @@ def _run_onpage_report(domain, targets_json, fmt, no_capture):
 
     def _log(msg):
         with onpage_lock:
-            onpage_state["log"].append(msg)
+            onpage_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
             if msg.startswith("["):
                 onpage_state["progress"] = msg
 
@@ -3545,14 +3545,18 @@ def _run_wayback_submit(urls):
         wayback_state.update({"status": "running", "log": [], "results": [], "error_msg": ""})
     wayback_stop.clear()
     activity(f"Wayback submission started for {len(urls)} URL(s)")
+
+    def _wblog(msg):
+        wayback_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+
     for i, u in enumerate(urls):
         if wayback_stop.is_set():
             with wayback_lock:
-                wayback_state["log"].append("Stopped by user.")
+                _wblog("Stopped by user.")
                 wayback_state["status"] = "stopped"
             return
         with wayback_lock:
-            wayback_state["log"].append(f"[{i+1}/{len(urls)}] Submitting {u}...")
+            _wblog(f"[{i+1}/{len(urls)}] Submitting {u}...")
         archived = _submit_wayback_url(u)
         now = datetime.now()
         snapshot_time = _parse_wayback_snapshot_time(archived) if archived else None
@@ -3572,16 +3576,16 @@ def _run_wayback_submit(urls):
                 "snapshot_at": snapshot_time.strftime("%Y-%m-%d %H:%M:%S") if snapshot_time else "",
                 "checked_at": now.strftime("%Y-%m-%d %H:%M:%S")})
             if status == "existing":
-                wayback_state["log"].append(
+                _wblog(
                     f"  -> Existing snapshot reused (archive.org already had one from "
                     f"{snapshot_time.strftime('%Y-%m-%d %H:%M')}, no new capture made): {archived}")
             elif status == "submitted":
-                wayback_state["log"].append(f"  -> Archived (new capture): {archived}")
+                _wblog(f"  -> Archived (new capture): {archived}")
             else:
-                wayback_state["log"].append("  -> Failed after retries")
+                _wblog("  -> Failed after retries")
     with wayback_lock:
         ok = sum(1 for r in wayback_state["results"] if r["status"] == "submitted")
-        wayback_state["log"].append(f"Completed -- {ok} ok, {len(wayback_state['results']) - ok} error(s).")
+        _wblog(f"Completed -- {ok} ok, {len(wayback_state['results']) - ok} error(s).")
         wayback_state["status"] = "completed"
 
 
@@ -3673,7 +3677,7 @@ def _run_seranking_audit(in_path, pdf_path, brand, zip_path=None):
 
     def _log(msg):
         with sr_lock:
-            sr_state["log"].append(msg)
+            sr_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
     slug = os.path.splitext(src_name)[0]
     # Saved straight into the user's configured Downloads folder (same as
@@ -3829,7 +3833,7 @@ def _run_geo_report(domain, targets_path, check_visibility, keywords, pages, faq
 
     def _log(msg):
         with geo_lock:
-            geo_state["log"].append(msg)
+            geo_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
     # Saved straight into the user's configured Downloads folder (same as
     # On-Page/Health/GSC Audit already do via _domain_folder) instead of an
@@ -4032,7 +4036,7 @@ def _run_health_audit(domain, fmt, target_pages, no_capture, headless, browser_n
 
     def _log(msg):
         with ha_lock:
-            ha_state["log"].append(msg)
+            ha_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
             if msg.startswith("["):
                 ha_state["progress"] = msg
 
@@ -4247,7 +4251,7 @@ def _run_gsc_audit(domain, email, fmt, headless, browser_name):
 
     def _log(msg):
         with gsc_lock:
-            gsc_state["log"].append(msg)
+            gsc_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
             if msg.startswith("[") or msg.startswith("  "):
                 gsc_state["progress"] = msg
 
@@ -5136,7 +5140,7 @@ def api_brief_start():
             def prog(msg):
                 with _brief_lock:
                     _brief_state["status"] = str(msg)
-                    _brief_state["log"].append(str(msg))
+                    _brief_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
             # Saved straight into the user's configured Downloads folder (same
             # as On-Page/Health/GSC Audit) instead of a throwaway temp
             # directory - previously this only reached DOWNLOADS_DIR if/when
