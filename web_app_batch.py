@@ -3624,6 +3624,12 @@ def _run_seranking_audit(in_path, pdf_path, brand, zip_path=None):
     if zip_path:
         cmd += ["--zip", zip_path]
 
+    # Nothing appeared in this tool's log while the status still said
+    # "Starting..." - the first _log() call was inside the stdout-read loop
+    # below, so there was zero visibility into what was even running until
+    # the script's own first print (which can take a while if the uploaded
+    # zip/PDF needs slow one-time setup first, e.g. installing pdfminer/xlrd).
+    _log(f"Starting: {src_name}")
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, bufsize=1, cwd=SCRIPTS_DIR,

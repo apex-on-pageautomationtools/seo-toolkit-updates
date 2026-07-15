@@ -2276,13 +2276,19 @@ async function doStart(){
     p.no_capture=$('op-capture').value==='no';
     if(!p.domain){toast('Enter a website URL');return;}
     setButtons('starting');   // instant feedback, before the network round-trip
+    // Panel switch happens immediately too, not just the badge - previously
+    // this waited on saveEngineOpts() + the actual start request, leaving a
+    // window where the badge said "Starting..." next to the still-showing
+    // empty-state placeholder.
+    $('empty-onpage').style.display='none';
+    $('onpage-active').classList.remove('hidden');
+    $('op-log').textContent='Starting...';
+    $('op-progress').textContent='Starting...';
     await saveEngineOpts();
     const r=await fetch('/api/onpage/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
     const d=await r.json();
-    if(d.error){toast(d.error);setButtons('idle');return;}
+    if(d.error){toast(d.error);setButtons('idle');$('empty-onpage').style.display='block';$('onpage-active').classList.add('hidden');return;}
     toast('On-page report started');
-    $('empty-onpage').style.display='none';
-    $('onpage-active').classList.remove('hidden');
     $('btn-op-download').disabled=true;
     setButtons('running');
     startOpPoll();
@@ -2295,21 +2301,35 @@ async function doStart(){
     p.include_psi=$('ha-include-psi').checked;
     if(!p.domain){toast('Enter a domain');return;}
     setButtons('starting');   // instant feedback, before the network round-trip
+    // Switch the panel over to the active/log view IMMEDIATELY too, not just
+    // the top badge - previously this only happened after BOTH the GSC
+    // pre-check and the actual /api/health-audit/start request finished, so
+    // there was a real window where the badge said "Starting..." next to the
+    // still-showing empty-state placeholder, looking like nothing was
+    // happening (confirmed live).
+    $('empty-health').style.display='none';
+    $('health-active').classList.remove('hidden');
+    $('ha-log').textContent='Checking GSC connection...';
+    $('ha-progress').textContent='Starting...';$('ha-progress').className='tag t-yes';
     try{
       const gc=await(await fetch('/api/gsc/check-for-domain?domain='+encodeURIComponent(p.domain))).json();
       if(gc.connected){
         toast('GSC connected ('+gc.email+') - screenshots will be included');
+        $('ha-log').textContent='GSC connected ('+gc.email+') - screenshots will be included.\nStarting audit...';
       }else if(gc.available){
         const proceed=confirm('GSC screenshots available!\n\n'+gc.message+'\n\nClick OK to continue without GSC screenshots, or Cancel to connect first.');
-        if(!proceed){setButtons('idle');return;}
+        if(!proceed){setButtons('idle');$('empty-health').style.display='block';$('health-active').classList.add('hidden');return;}
+        $('ha-log').textContent='Starting audit...';
+      }else{
+        $('ha-log').textContent='Starting audit...';
       }
-    }catch(e){}
+    }catch(e){
+      $('ha-log').textContent='Starting audit...';
+    }
     const r2=await fetch('/api/health-audit/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
     const d2=await r2.json();
-    if(d2.error){toast(d2.error);setButtons('idle');return;}
+    if(d2.error){toast(d2.error);setButtons('idle');$('empty-health').style.display='block';$('health-active').classList.add('hidden');return;}
     toast('Health audit started');
-    $('empty-health').style.display='none';
-    $('health-active').classList.remove('hidden');
     $('btn-ha-download').disabled=true;
     $('badge').className='badge b-running';$('dot').className='dot d-running';
     $('status-txt').textContent='Running - 0%';
@@ -2323,12 +2343,13 @@ async function doStart(){
     p.format=$('ba-format').value;
     if(!p.domain){toast('Enter a domain');return;}
     setButtons('starting');   // instant feedback, before the network round-trip
-    const rb=await fetch('/api/brief/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
-    const db=await rb.json();
-    if(db.error){toast(db.error);setButtons('idle');return;}
-    toast('Brief analysis started');
     $('empty-brief').style.display='none';
     $('brief-active').classList.remove('hidden');
+    if($('ba-log'))$('ba-log').textContent='Starting...';
+    const rb=await fetch('/api/brief/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
+    const db=await rb.json();
+    if(db.error){toast(db.error);setButtons('idle');$('empty-brief').style.display='block';$('brief-active').classList.add('hidden');return;}
+    toast('Brief analysis started');
     $('btn-ba-download').disabled=true;
     setButtons('running');
     startBaPoll();
@@ -2344,12 +2365,13 @@ async function doStart(){
     if(zipFile)fd.append('zip',zipFile);
     fd.append('brand',$('sr-brand').value.trim());
     setButtons('starting');   // instant feedback, before the network round-trip
-    const rs=await fetch('/api/seranking/start',{method:'POST',body:fd});
-    const ds=await rs.json();
-    if(ds.error){toast(ds.error);setButtons('idle');return;}
-    toast('SEranking audit started');
     $('empty-seranking').style.display='none';
     $('seranking-active').classList.remove('hidden');
+    $('sr-log').textContent='Starting...';
+    const rs=await fetch('/api/seranking/start',{method:'POST',body:fd});
+    const ds=await rs.json();
+    if(ds.error){toast(ds.error);setButtons('idle');$('empty-seranking').style.display='block';$('seranking-active').classList.add('hidden');return;}
+    toast('SEranking audit started');
     $('btn-sr-download').disabled=true;
     setButtons('running');
     startSrPoll();
@@ -2371,12 +2393,13 @@ async function doStart(){
     if(geoKeywords)geoFd.append('keywords',geoKeywords);
     if(geoTargetsFile)geoFd.append('targets',geoTargetsFile);
     setButtons('starting');   // instant feedback, before the network round-trip
-    const rg=await fetch('/api/geo/start',{method:'POST',body:geoFd});
-    const dg=await rg.json();
-    if(dg.error){toast(dg.error);setButtons('idle');return;}
-    toast('GEO report started');
     $('empty-geo').style.display='none';
     $('geo-active').classList.remove('hidden');
+    $('geo-log').textContent='Starting...';
+    const rg=await fetch('/api/geo/start',{method:'POST',body:geoFd});
+    const dg=await rg.json();
+    if(dg.error){toast(dg.error);setButtons('idle');$('empty-geo').style.display='block';$('geo-active').classList.add('hidden');return;}
+    toast('GEO report started');
     $('btn-geo-download').disabled=true;
     setButtons('running');
     startGeoPoll();
@@ -2445,12 +2468,13 @@ async function doStart(){
     if(!p.domain){toast('Enter a domain');return;}
     if(!p.email){toast('Connect a Google account first');gscConnect();return;}
     setButtons('starting');   // instant feedback, before the network round-trip
-    const rg=await fetch('/api/gsc/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
-    const dg=await rg.json();
-    if(dg.error){toast(dg.error);setButtons('idle');return;}
-    toast('GSC audit started');
     $('empty-gsc').style.display='none';
     $('gsc-active').classList.remove('hidden');
+    $('gsc-log').textContent='Starting...';
+    const rg=await fetch('/api/gsc/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});
+    const dg=await rg.json();
+    if(dg.error){toast(dg.error);setButtons('idle');$('empty-gsc').style.display='block';$('gsc-active').classList.add('hidden');return;}
+    toast('GSC audit started');
     $('btn-gsc-download').disabled=true;
     setButtons('running');
     startGscPoll();
