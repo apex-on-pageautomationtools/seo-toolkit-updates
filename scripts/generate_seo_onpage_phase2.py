@@ -1019,6 +1019,74 @@ def recommend_canonical(page_data):
 
 
 # ----------------------------------------------------------------- xlsx output
+# Per-format header labels/colors for the Meta / Canonical / Alt supplementary
+# sheets, taken verbatim from each format's real client reference deliverable
+# (D:\Report Formats\On-Page Report Formats\<Format>\...). Formats not listed
+# here keep the script's original default template labels/color - this ONLY
+# restyles formats we have confirmed real references for, it never removes a
+# file that already generates correctly for every format.
+#
+# Values: (sheet_name, [7 header labels for Page/ExistingTitle/SuggestedTitle/
+#          ExistingDesc/SuggestedDesc/ExistingH1/SuggestedH1], header_hex_color)
+FORMAT_META_XLSX = {
+    "camila": ("Sheet1", ["Page", "Existing Meta Title", "Suggested Meta Title",
+                          "Existing Meta Description", "Suggested Meta Description",
+                          "Existing H1", "Suggested H1"], "B6D7A8"),
+    "deltafvr": ("Meta Suggestions", ["Webpages URL", "Existing Title", "Suggested Title",
+                                      "Existing Description", "Suggested Description",
+                                      "Existing H1", "Suggested H1"], "0070C0"),
+    "deltafl": ("Meta Suggestions", ["Target Pages", "Existing Title", "Suggested Title",
+                                     "Existing Description", "Suggested Description",
+                                     "Existing H1", "Suggested H1"], None),
+    "eta": ("Sheet1", ["Target Pages", "Existing Title", "Suggested Title",
+                       "Existing Description", "Suggested Description",
+                       "Existing H1", "Suggested H1"], "FFFF00"),
+    "kappa": ("Sheet1", ["Original URL", "Existing Title", "Suggested Title",
+                         "Existing Meta Description", "Suggested Meta Description",
+                         "Existing H1 Heading", "Suggested H1 Heading"], "F4B084"),
+    "octal": ("Meta Suggestion", ["Target Page's", "Existing Title", "Suggested Title",
+                                  "Existing Description", "Suggested Meta Description",
+                                  "Existing H1 tag", "Suggested H1 tag"], None),
+    "peta": ("Sheet1", ["Url", "Exiting Title", "Suggested Title",
+                        "Exiting Description", "Suggested Description",
+                        "Exiting H1", "Suggested H1"], "00B050"),
+    "beta": ("Sheet1", ["Url", "Exiting Title", "Suggested Title",
+                        "Exiting Description", "Suggested Description",
+                        "Exiting H1", "Suggested H1"], "00B050"),
+    "xenon": ("Sheet1", ["Target Pages", "Existing Title", "Suggested Title",
+                         "Existing Description", "Suggested Description",
+                         "Existing H1", "Suggested H1"], "1F3864"),
+    "neon": ("Sheet1", ["Page URL", "Existing Title", "Suggested Title",
+                        "Existing Description", "Suggested Description",
+                        "Existing H1", "Suggested H1"], "215967"),
+}
+
+# Values: (sheet_name, [3 header labels for Page/Existing/Recommended], color)
+FORMAT_CANON_XLSX = {
+    "camila": ("Sheet1", ["Page URL", "Existing Canonical Tag", "Suggested Canonical Tag"], "93C47D"),
+    "deltafl": ("Canonical tags Suggestions", ["Page URL", "Existing Canonical Tag",
+                                               "Suggested Canonical Tag"], "366092"),
+}
+
+# Values: (sheet_name, [(header label, data field key)], color). Field keys index
+# into each alt entry's dict: "page", "image", "existing_alt", "suggested_alt" -
+# a (label, field) list (not just labels) because some references (ETA) order
+# Image before Page and/or drop the existing-alt column entirely (Neon/Sara/Octal).
+FORMAT_ALT_XLSX = {
+    "neon": ("Sheet1", [("Page URL", "page"), ("Image URL", "image"),
+                        ("Recommended Alt Tag Suggestions", "suggested_alt")], "215967"),
+    "sara": ("Image Alt Tag Suggestions", [("Page URL", "page"), ("Image URL", "image"),
+                                           ("Image Alt", "suggested_alt")], "215967"),
+    "octal": ("Sheet1", [("Page Url", "page"), ("Image Url", "image"),
+                         ("Image Alt Tag", "suggested_alt")], None),
+    "eta": ("Sheet1", [("Image Urls", "image"), ("Source Pages", "page"),
+                       ("Existing Alt Texts", "existing_alt"), ("Suggested Alt texts", "suggested_alt")], "FFFF00"),
+    "kappa": ("Sheet1", [("Page URL", "page"), ("Image URL", "image"),
+                         ("Existing Image Alt Text", "existing_alt"),
+                         ("Suggested Image Alt Text", "suggested_alt")], "4A86E8"),
+}
+
+
 def _clone_and_clear(template, header_rows=1):
     import openpyxl
     wb = openpyxl.load_workbook(template)
@@ -1041,7 +1109,21 @@ def _write_rows(ws, proto, rows, start=2):
                 cell._style = proto[c - 1]
 
 
-def write_meta_xlsx(metas, out_path):
+def _apply_header_override(ws, labels, color_hex, sheet_name=None):
+    """Overwrite a cloned template's header row 1 with a format's real label
+    text/fill color (and sheet title), leaving the row's font/alignment/border
+    style alone - only the text and fill actually differ between formats."""
+    from openpyxl.styles import PatternFill
+    if sheet_name:
+        ws.title = sheet_name
+    fill = PatternFill("solid", fgColor=color_hex) if color_hex else None
+    for c, label in enumerate(labels, 1):
+        cell = ws.cell(1, c, label)
+        if fill:
+            cell.fill = fill
+
+
+def write_meta_xlsx(metas, out_path, fmt=None):
     from copy import copy
     from openpyxl.styles import Alignment, Font
     wb, ws, proto = _clone_and_clear(TPL_META)
@@ -1049,6 +1131,10 @@ def write_meta_xlsx(metas, out_path):
              m["suggested_description"], m["existing_h1"], m["suggested_h1"],
              m.get("content_match", "")] for m in metas]
     _write_rows(ws, proto, rows)
+    spec = FORMAT_META_XLSX.get(str(fmt or "").strip().lower())
+    if spec:
+        sheet_name, labels, color_hex = spec
+        _apply_header_override(ws, labels, color_hex, sheet_name)
     left = Alignment(horizontal="left", vertical="center", wrap_text=True)
     # The cloned template row styles the "existing" columns in red. Real existing
     # values should read as calm black text; keep red ONLY to flag genuinely
@@ -1075,16 +1161,26 @@ def write_meta_xlsx(metas, out_path):
     wb.save(out_path)
 
 
-def write_alt_xlsx(self_hosted, external_cdn, out_path):
+def write_alt_xlsx(self_hosted, external_cdn, out_path, fmt=None):
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Image Alt Tag Suggestions"
-    headers = ["Page URL", "Image URL", "Existing Alt Text", "Suggested Alt Tag"]
-    # Match the house-style header used by the Canonical / Target Pages sheets:
-    # solid 2F5496 fill with a white bold font, and a frozen header row.
-    header_fill = PatternFill("solid", fgColor="2F5496")
+
+    spec = FORMAT_ALT_XLSX.get(str(fmt or "").strip().lower())
+    if spec:
+        sheet_name, columns, color_hex = spec
+        headers = [label for label, _field in columns]
+        field_order = [field for _label, field in columns]
+        header_fill = PatternFill("solid", fgColor=color_hex) if color_hex else PatternFill("solid", fgColor="2F5496")
+    else:
+        sheet_name = "Image Alt Tag Suggestions"
+        field_order = ["page", "image", "existing_alt", "suggested_alt"]
+        headers = ["Page URL", "Image URL", "Existing Alt Text", "Suggested Alt Tag"]
+        # Match the house-style header used by the Canonical / Target Pages sheets:
+        # solid 2F5496 fill with a white bold font, and a frozen header row.
+        header_fill = PatternFill("solid", fgColor="2F5496")
+    ws.title = sheet_name
     header_font = Font(bold=True, size=11, color="FFFFFF")
     header_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
     for c, h in enumerate(headers, 1):
@@ -1093,17 +1189,16 @@ def write_alt_xlsx(self_hosted, external_cdn, out_path):
         cell.fill = header_fill
         cell.alignment = header_align
     ws.freeze_panes = "A2"
-    ws.column_dimensions["A"].width = 40
-    ws.column_dimensions["B"].width = 60
-    ws.column_dimensions["C"].width = 30
-    ws.column_dimensions["D"].width = 30
+    for i in range(len(headers)):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = 40 if i != 1 else 60
+
+    def _write_entry(row, a):
+        for c, field in enumerate(field_order, 1):
+            ws.cell(row, c, a.get(field, ""))
 
     row = 2
     for a in self_hosted:
-        ws.cell(row, 1, a["page"])
-        ws.cell(row, 2, a["image"])
-        ws.cell(row, 3, a["existing_alt"])
-        ws.cell(row, 4, a["suggested_alt"])
+        _write_entry(row, a)
         row += 1
 
     if external_cdn:
@@ -1112,19 +1207,20 @@ def write_alt_xlsx(self_hosted, external_cdn, out_path):
         note_cell.font = Font(bold=True, color="C00000", size=11)
         row += 1
         for a in external_cdn:
-            ws.cell(row, 1, a["page"])
-            ws.cell(row, 2, a["image"])
-            ws.cell(row, 3, a["existing_alt"])
-            ws.cell(row, 4, a["suggested_alt"])
+            _write_entry(row, a)
             row += 1
 
     wb.save(out_path)
 
 
-def write_canonical_xlsx(canons, out_path):
+def write_canonical_xlsx(canons, out_path, fmt=None):
     wb, ws, proto = _clone_and_clear(TPL_CANON)
     rows = [[c["page"], c["existing"], c["recommended"]] for c in canons]
     _write_rows(ws, proto, rows)
+    spec = FORMAT_CANON_XLSX.get(str(fmt or "").strip().lower())
+    if spec:
+        sheet_name, labels, color_hex = spec
+        _apply_header_override(ws, labels, color_hex, sheet_name)
     wb.save(out_path)
 
 
@@ -1152,6 +1248,195 @@ def write_targets_xlsx(targets, out_path):
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
         for cell in row:
             cell.alignment = left
+    wb.save(out_path)
+
+
+def write_broken_link_xlsx(broken_links_detail, out_path, sheet_name="Broken Link", color="0070C0",
+                            columns=None):
+    """Broken Link sheet - format-specific column order/labels (Camila/Delta FVR/
+    Theta/ETA references all show a variant of Link/Source/Status/Suggestion),
+    built from findings["broken_links_detail"] (already-verified 404/410 links -
+    see health_audit.check_broken_links). columns: [(label, field)] where field
+    is one of url/found_on/code/suggested_redirect; defaults to the Delta FVR order."""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill
+    columns = columns or [("Broken Link", "url"), ("Source Page", "found_on"),
+                          ("Server Response", "code"), ("Broken Link Suggestion", "suggested_redirect")]
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+    header_fill = PatternFill("solid", fgColor=color)
+    header_font = Font(bold=True, size=11, color="FFFFFF")
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    for c, (label, _field) in enumerate(columns, 1):
+        cell = ws.cell(1, c, label)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = left
+    ws.freeze_panes = "A2"
+    for i in range(len(columns)):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = 46
+    for r, item in enumerate(broken_links_detail or [], 2):
+        for c, (_label, field) in enumerate(columns, 1):
+            if field == "found_on":
+                val = ", ".join(item.get("found_on") or []) or item.get("url", "")
+            elif field == "suggested_redirect":
+                val = item.get("suggested_redirect") or "Remove this broken link."
+            elif field is None:
+                val = ""
+            else:
+                val = item.get(field, "")
+            cell = ws.cell(r, c, val)
+            cell.alignment = left
+    wb.save(out_path)
+
+
+def _wayback_snapshot_url(page_url, timeout=10):
+    """Closest archived snapshot for a page via the Wayback Machine's official
+    Availability API - returns None (never fabricated) if nothing is archived."""
+    import json as _json
+    import urllib.parse as _uparse
+    try:
+        api = "https://archive.org/wayback/available?url=" + _uparse.quote(page_url, safe="")
+        req = urllib.request.Request(api, headers={"User-Agent": "Mozilla/5.0 SEOPhase2Bot"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = _json.loads(r.read().decode("utf-8", "ignore"))
+        snap = (data.get("archived_snapshots") or {}).get("closest") or {}
+        return snap.get("url") if snap.get("available") else None
+    except Exception:
+        return None
+
+
+def write_webarchive_xlsx(pages_data, out_path, sheet_name="Webarchive URL", color="0070C0"):
+    """Webpages URL / Webarchive URL sheet (Delta FVR + Delta Up reference format) -
+    real snapshot lookups via the Wayback Availability API, "Not Archived" when
+    the API genuinely has nothing (never a fabricated link)."""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+    header_fill = PatternFill("solid", fgColor=color)
+    header_font = Font(bold=True, size=11, color="FFFFFF")
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    for c, label in enumerate(["Webpages URL", "Webarchive URL"], 1):
+        cell = ws.cell(1, c, label)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = left
+    ws.freeze_panes = "A2"
+    ws.column_dimensions["A"].width = 54
+    ws.column_dimensions["B"].width = 70
+    for r, pd in enumerate(pages_data, 2):
+        url = pd["url"]
+        snap = _wayback_snapshot_url(url)
+        ws.cell(r, 1, url).alignment = left
+        ws.cell(r, 2, snap or "Not Archived").alignment = left
+    wb.save(out_path)
+
+
+def write_indexing_status_xlsx(pages_data, gsc_indexing, out_path, sheet_name="Indexing Status",
+                                split_target_nontarget=False, target_urls=None):
+    """Page URL / Status sheet from real GSC URL Inspection results (findings[
+    "gsc_indexing"] - already fetched via check_gsc_indexing). When
+    split_target_nontarget, writes two sheets ("target pages" / "Non target page")
+    like the Delta FL reference; otherwise a single sheet like Delta Up/Sara."""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill
+    status_by_url = {item.get("url"): item.get("coverageState") or item.get("verdict") or "Unknown"
+                     for item in (gsc_indexing or [])}
+    header_fill = PatternFill("solid", fgColor="215967")
+    header_font = Font(bold=True, size=11, color="FFFFFF")
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    def _fill_sheet(ws, urls):
+        for c, label in enumerate(["Page URL", "Status"], 1):
+            cell = ws.cell(1, c, label)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = left
+        ws.freeze_panes = "A2"
+        ws.column_dimensions["A"].width = 60
+        ws.column_dimensions["B"].width = 30
+        for r, u in enumerate(urls, 2):
+            ws.cell(r, 1, u).alignment = left
+            ws.cell(r, 2, status_by_url.get(u, "Unknown")).alignment = left
+
+    wb = openpyxl.Workbook()
+    if split_target_nontarget:
+        target_set = set(target_urls or [])
+        ws1 = wb.active
+        ws1.title = "target pages"
+        _fill_sheet(ws1, [u for u in status_by_url if u in target_set])
+        ws2 = wb.create_sheet("Non target page")
+        _fill_sheet(ws2, [u for u in status_by_url if u not in target_set])
+    else:
+        ws = wb.active
+        ws.title = sheet_name
+        _fill_sheet(ws, [pd["url"] for pd in pages_data])
+    wb.save(out_path)
+
+
+# 2nd Phase Checklist points this script can answer from data it already
+# collects (robots.txt/sitemap/noindex/https/www checks, etc). Anything the
+# real reference asks for that needs a human or an external tool (domain age
+# via duplichecker, SE-ranking traffic status, who verified target pages,
+# recent traffic drops, "dummy content" judgment calls) is intentionally left
+# blank rather than guessed - this script never fabricates data it can't verify.
+def _build_checklist_rows(domain, pages_data, findings, targets, sitemap_url, sitemap_body):
+    from urllib.parse import urlparse
+    any_www = any(urlparse(pd["url"]).netloc.lower().startswith("www.") for pd in pages_data)
+    any_https = all(urlparse(pd["url"]).scheme == "https" for pd in pages_data) if pages_data else None
+    any_trailing_slash = None
+    if pages_data:
+        paths = [urlparse(pd["url"]).path for pd in pages_data]
+        any_trailing_slash = sum(1 for p in paths if p.endswith("/")) >= len(paths) / 2
+    noindex = findings.get("noindex_pages") or []
+    return [
+        ("Number of Target Keywords", sum(len(t.get("keywords") or []) for t in targets)),
+        ("Number or Target Pages", len(targets)),
+        ("robots.txt file", "Found" if findings.get("robots_body") else "Not Found"),
+        ("Sitemap File", "Found" if sitemap_body else "Not Found"),
+        ("Noindex on pages", f"Found on {len(noindex)} page(s)" if noindex else "Not Found"),
+        ("https or http", "https" if any_https else ("Mixed" if any_https is False else "Unknown")),
+        ("www or non www", "www" if any_www else "Non www"),
+        ("Slash and Non Slash", "Slash" if any_trailing_slash else "Non-Slash" if any_trailing_slash is not None else "Unknown"),
+        ("Indexing Status Checked", "Yes" if findings.get("gsc_indexing") else "No"),
+        ("Domain Age as per duplichecker", ""),
+        ("Traffic Status on SE rank tool", ""),
+        ("Target Pages Verified By", ""),
+        ("Any Critical issue in the website", ""),
+        ("Any frequent drop in traffic in last 2-3 month", ""),
+        ("Dummy content on pages", ""),
+    ]
+
+
+def write_checklist_xlsx(domain, pages_data, findings, targets, sitemap_url, sitemap_body, out_path):
+    """2nd Phase Checklist sheet (Delta FVR/FL/Up + Sara reference format) -
+    only the points this script can verify are filled in; the rest are left
+    blank for manual review rather than fabricated. See _build_checklist_rows."""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Check-list"
+    header_fill = PatternFill("solid", fgColor="31869B")
+    header_font = Font(bold=True, size=11, color="FFFFFF")
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    for c, label in enumerate(["2nd Phase Point", "Status"], 1):
+        cell = ws.cell(1, c, label)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = left
+    ws.column_dimensions["A"].width = 48
+    ws.column_dimensions["B"].width = 40
+    for r, (point, status) in enumerate(_build_checklist_rows(domain, pages_data, findings, targets,
+                                                               sitemap_url, sitemap_body), 2):
+        ws.cell(r, 1, point).alignment = left
+        cell = ws.cell(r, 2, status if status != "" else "Manual review required")
+        cell.alignment = left
+        if status == "":
+            cell.font = Font(italic=True, color="808080")
     wb.save(out_path)
 
 
@@ -7136,8 +7421,8 @@ def main():
     can_x = work / f"Canonical Tag Suggestions - {domain}.xlsx"
     doc_f = work / doc_name
 
-    write_meta_xlsx(metas, meta_x)
-    write_canonical_xlsx(canons, can_x)
+    write_meta_xlsx(metas, meta_x, fmt=fmt)
+    write_canonical_xlsx(canons, can_x, fmt=fmt)
 
     # Omega: no separate Alt Tag XLSX; has Target-pages-and-keywords-Report
     # Neon + James: include Alt Tag XLSX + Target Pages
@@ -7146,7 +7431,7 @@ def main():
         write_targets_xlsx(targets, targets_x)
     else:
         alt_x = work / f"Image Alt Tag Suggestions - {domain}.xlsx"
-        write_alt_xlsx(all_self_hosted, all_external_cdn, alt_x)
+        write_alt_xlsx(all_self_hosted, all_external_cdn, alt_x, fmt=fmt)
         targets_x = work / f"Target Pages & Keywords Report - {domain}.xlsx"
         write_targets_xlsx(targets, targets_x)
 
@@ -7157,6 +7442,38 @@ def main():
     if findings.get("gsc_indexing"):
         crawl_x = work / f"Crawling status - {domain}.xlsx"
         write_crawl_status_xlsx(domain, findings["gsc_indexing"], crawl_x, country=args.country)
+
+    # Format-specific extra deliverables - additive only (never replaces a file
+    # already generated above), built strictly from real data this script has
+    # already collected. See D:\Report Formats\On-Page Report Formats\<Format>\
+    # for the reference this is matched against.
+    if fmt in ("camila", "deltafvr", "theta", "eta"):
+        broken_x = work / f"Broken Link Suggestion - {domain}.xlsx"
+        broken_cols = {
+            "camila": [("Broken Link URL", "url"), ("Source Page URL", "found_on"),
+                      ("Status", "code"), ("Suggestion", "suggested_redirect")],
+            "theta": [("Broken link", "url"), ("Page where found", "found_on"),
+                     ("Server Response", "code"), ("Solution", "suggested_redirect")],
+            "eta": [("Broken Links", "url"), ("Link Text", None),
+                   ("Source Pages", "found_on"), ("Suggestion", "suggested_redirect")],
+        }
+        write_broken_link_xlsx(findings.get("broken_links_detail"), broken_x,
+                                columns=broken_cols.get(fmt))
+
+    if fmt in ("deltafvr", "deltaup"):
+        web_x = work / f"Webarchive URL - {domain}.xlsx"
+        write_webarchive_xlsx(pages_data, web_x)
+
+    if fmt in ("deltafl", "deltaup", "sara") and findings.get("gsc_indexing"):
+        idx_x = work / (f"Indexing status - {domain}.xlsx" if fmt == "deltafl"
+                        else f"Indexing Status - {domain}.xlsx")
+        write_indexing_status_xlsx(pages_data, findings["gsc_indexing"], idx_x,
+                                    split_target_nontarget=(fmt == "deltafl"),
+                                    target_urls=[t["page"] for t in targets])
+
+    if fmt in ("deltafvr", "deltafl", "deltaup", "sara"):
+        checklist_x = work / f"2nd Phase Checklist sheet - {domain}.xlsx"
+        write_checklist_xlsx(domain, pages_data, findings, targets, sitemap_url, sitemap_body, checklist_x)
 
     # robots.txt: attach the existing one
     if findings.get("robots_body"):
