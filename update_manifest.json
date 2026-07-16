@@ -33,7 +33,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "6f3978c1c9367faf48a6443466301dc7c182db37ae9d9204dd787ce8bbe7db84",
+      "hash": "c7513769dd7e0f8769cd6f053ad1325dbc1a1bf05962fafc7f64c29bf8671da9",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -108,7 +108,7 @@
     },
     {
       "path": "scripts/generate_seo_onpage_phase2.py",
-      "hash": "636e4c3329b5775d133a7f9f9e49169658d5c097faf94f6aaa84c2a1048adc2d",
+      "hash": "f6b4f0dde991bbf6c0cf596697699c62d0e0e3d119d7c9abda70a1faf5c86bcc",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seo_onpage_phase2.py"
     },
     {
@@ -178,12 +178,12 @@
     },
     {
       "path": "scripts/generate_seranking_audit.py",
-      "hash": "44a5f517388e2cc4e5f15bfaec7e15244f579a0afcfae775129215411d52788f",
+      "hash": "3c70dcecbbea30c6649b79572175c0ebe33b5d668fada774886771429098b079",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seranking_audit.py"
     },
     {
       "path": "scripts/generate_geo_report.py",
-      "hash": "c9b1e08c058118fec79c98eb4fc9811356ae295ab44bc5e9382cdfb2edf3bf71",
+      "hash": "aea73470500d8514ed77bc42ef52c5bba4c3ef68c41bd80b2661ab7f1a15d450",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_geo_report.py"
     },
     {

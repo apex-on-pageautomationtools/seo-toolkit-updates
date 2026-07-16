@@ -915,6 +915,7 @@ def main():
         pages_data.append(op.crawl_page(t["page"], t.get("keywords", []), dry_run=args.dry_run))
     op._close_op_driver()
     log(f"[2/4] Crawled {len(pages_data)} page(s)")
+    op.set_run_scale(len(pages_data))  # gates whether the paid OpenAI suggestion tier is used
 
     homepage = pages_data[0] if pages_data else None
     brand = op.brand_from(domain, homepage.get("title") if homepage else None,

@@ -263,14 +263,15 @@ CONFIG = load_config()
 
 
 def _ai_key_env():
-    """Base subprocess env plus GEMINI_API_KEY/GROQ_API_KEY/OPENROUTER_API_KEY,
-    whichever are configured centrally (Admin -> Sync API Keys) - shared by every
-    report generator that calls generate_seo_onpage_phase2._ai_suggest()'s free-
-    tier fallback chain (On-Page, GEO), so a key added once reaches all of them."""
+    """Base subprocess env plus GEMINI_API_KEY/GROQ_API_KEY/OPENROUTER_API_KEY/
+    OPENAI_API_KEY, whichever are configured centrally (Admin -> Sync API Keys) -
+    shared by every report generator that calls generate_seo_onpage_phase2._ai_suggest()'s
+    fallback chain (On-Page, GEO, SEranking), so a key added once reaches all of them."""
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
     for cfg_key, env_key in (("gemini_api_key", "GEMINI_API_KEY"),
                               ("groq_api_key", "GROQ_API_KEY"),
-                              ("openrouter_api_key", "OPENROUTER_API_KEY")):
+                              ("openrouter_api_key", "OPENROUTER_API_KEY"),
+                              ("openai_api_key", "OPENAI_API_KEY")):
         val = CONFIG.get(cfg_key, "").strip()
         if val:
             env[env_key] = val

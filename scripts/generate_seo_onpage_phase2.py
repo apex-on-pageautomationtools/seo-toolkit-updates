@@ -655,14 +655,80 @@ def _ai_suggest_openrouter(prompt):
         return None
 
 
+def _ai_suggest_openai(prompt):
+    """OpenAI's PAID API when OPENAI_API_KEY is set - last tier, after every
+    free one has failed. gpt-5.6-luna: OpenAI's cheapest current-gen model
+    (per-team decision - real money, so only used for small/targeted runs,
+    see _ai_suggest's BULK_AI_PAGE_LIMIT gate below), OpenAI-compatible
+    chat completions API, same request shape as Groq/OpenRouter above."""
+    if "openai" in _AI_BROKEN_PROVIDERS:
+        return None
+    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not key:
+        return None
+    try:
+        import urllib.request, urllib.error
+        model = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna")
+        url = "https://api.openai.com/v1/chat/completions"
+        body = json.dumps({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+        }).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+        })
+        with urllib.request.urlopen(req, timeout=40) as r:
+            data = json.loads(r.read())
+        return _extract_json(data["choices"][0]["message"]["content"])
+    except urllib.error.HTTPError as e:
+        if e.code in _PERMANENT_HTTP_CODES:
+            _AI_BROKEN_PROVIDERS.add("openai")
+            log(f"   [warn] OpenAI suggestion failed: HTTP Error {e.code} - won't retry OpenAI for the rest of this run.")
+        else:
+            log(f"   [warn] OpenAI suggestion failed: HTTP Error {e.code}")
+        return None
+    except Exception as e:
+        log(f"   [warn] OpenAI suggestion failed: {e}")
+        return None
+
+
+# How many pages/rows this run covers, set once at the start of each report's
+# main() via set_run_scale() - gates whether the PAID OpenAI tier is even
+# attempted below. None = unknown/not set, treated as "small" (paid tier
+# allowed) so a caller that never calls set_run_scale() behaves like before
+# this was added.
+BULK_AI_PAGE_LIMIT = 20
+_current_run_scale = None
+
+
+def set_run_scale(page_count):
+    """Call once near the start of a report run with the real page/row count
+    it covers. Team decision: the paid OpenAI tier is only worth the real
+    money for small/targeted runs - a large bulk run instead just falls
+    through to the heuristic fallback once the free tiers (Gemini/Groq/
+    OpenRouter) are exhausted, rather than silently burning paid credits
+    across hundreds of pages."""
+    global _current_run_scale
+    _current_run_scale = page_count
+
+
 def _ai_suggest(prompt):
-    """Suggestion copy via a free-tier AI fallback chain: Gemini -> Groq ->
-    OpenRouter -> None (caller falls back to its own heuristic). Each tier is
-    skipped instantly if its API key isn't configured (CONFIG's Keys sheet /
-    GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY env vars), so a site with
-    only a Gemini key behaves exactly as before. Returns parsed JSON or None."""
+    """Suggestion copy via a fallback chain: Gemini -> Groq -> OpenRouter (all
+    free tiers, tried unconditionally) -> OpenAI (paid, only for a run of
+    BULK_AI_PAGE_LIMIT pages or fewer - see set_run_scale) -> None (caller
+    falls back to its own heuristic). Each tier is skipped instantly if its
+    API key isn't configured (CONFIG's Keys sheet / GEMINI_API_KEY,
+    GROQ_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY env vars), so a site
+    with only a Gemini key behaves exactly as before. Returns parsed JSON or
+    None."""
     for fn in (_ai_suggest_gemini, _ai_suggest_groq, _ai_suggest_openrouter):
         result = fn(prompt)
+        if result is not None:
+            return result
+    if _current_run_scale is None or _current_run_scale <= BULK_AI_PAGE_LIMIT:
+        result = _ai_suggest_openai(prompt)
         if result is not None:
             return result
     return None
@@ -7009,6 +7075,7 @@ def main():
             homepage = pd
     _close_op_driver()          # done crawling - free the render browser
     log(f"[2/5] Crawled {total} page(s)")
+    set_run_scale(total)  # gates whether the paid OpenAI suggestion tier is used - see set_run_scale()
 
     brand = brand_from(domain, homepage.get("title") if homepage else None,
                        homepage.get("h1") if homepage else None,

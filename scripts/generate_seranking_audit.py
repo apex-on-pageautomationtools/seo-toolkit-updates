@@ -57,6 +57,10 @@ PAGE_COLS = ("page with issues", "page url", "target pages", "url")
 EXISTING_TITLE_COLS = {"existing title", "existing title and h1 tag", "title"}
 EXISTING_DESC_COLS = {"existing description", "description"}
 EXISTING_H1_COLS = {"existing h1", "h1"}
+ALT_COLS = {"suggested alt text", "alt text suggestion"}
+CANON_COLS = {"suggested canonical", "recommended canonical tag", "recommended canonical"}
+EXISTING_CANON_COLS = {"existing canonical", "existing canonical tag"}
+IMAGE_URL_COLS = {"image url"}
 
 
 def _norm(s):
@@ -76,6 +80,10 @@ def _find_page_col(headers):
         if any(n == p or n.startswith(p) for p in PAGE_COLS):
             return i
     return None
+
+
+def _find_image_col(headers):
+    return _find_col(headers, IMAGE_URL_COLS)
 
 
 # --------------------------------------------------------------------------- #
@@ -314,6 +322,49 @@ def _suggest_for_page(page_url, brand):
     return result
 
 
+def _suggest_alt_text(page_url, img_src, brand):
+    """Real AI-generated ALT text for one image - same approach GEO's Technical
+    Optimization report already uses (generate_geo_report._suggest_alt_text),
+    ported here so SEranking's "Alt text missing" sheet gets a real per-image
+    suggestion instead of just passing the raw HTTP-status columns through."""
+    page_title = ""
+    try:
+        s = _suggest_for_page(page_url, brand)
+        et = s.get("existing_title")
+        page_title = et if et and et != onpage2.MISSING else ""
+    except Exception:
+        pass
+    prompt = (
+        f"Write a concise, descriptive image ALT text (under 125 characters) for an image on "
+        f"{brand}'s page at {page_url} (page topic: {page_title or 'unknown'}). "
+        f"The image file is: {img_src}. Infer what the image likely shows from the filename/page "
+        "topic. Return ONLY the ALT text, no quotes, no extra commentary."
+    )
+    result = onpage2._ai_suggest(f'Return ONLY JSON: {{"alt": "..."}}\n\n{prompt}')
+    if isinstance(result, dict) and result.get("alt"):
+        return str(result["alt"]).strip()
+    # Heuristic fallback - filename-derived, same as GEO's version
+    name = img_src.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    name = re.sub(r"[-_]+", " ", name).strip() or "image"
+    return f"{name} - {brand}".strip(" -")
+
+
+_canon_cache = {}
+
+
+def _suggest_canonical(page_url):
+    """Real canonical-tag recommendation via the same logic the On-Page report
+    uses (onpage2.recommend_canonical), for SEranking's "Canonical tag" sheet -
+    that sheet's template already ships an "Existing"/"Recommended Canonical
+    tag" column pair, just never filled in before."""
+    if page_url in _canon_cache:
+        return _canon_cache[page_url]
+    pd = _fetch_page_data(page_url)
+    result = onpage2.recommend_canonical(pd)
+    _canon_cache[page_url] = result
+    return result
+
+
 # --------------------------------------------------------------------------- #
 # Broken-link judgment - a dead link either has a discoverable redirect target
 # (suggest that) or genuinely doesn't (suggest removal). Never invents a URL.
@@ -347,6 +398,8 @@ _NAME_JUDGMENT_RULES = [
     (re.compile(r"title", re.I), "title"),
     (re.compile(r"description", re.I), "desc"),
     (re.compile(r"4xx|broken|dead.?link", re.I), "broken"),
+    (re.compile(r"alt.?text|alt.?tag|missing.?alt", re.I), "alt"),
+    (re.compile(r"canonical", re.I), "canon"),
 ]
 
 
@@ -359,8 +412,12 @@ def _apply_suggestions(sheet_name, headers, rows, brand):
     existing_title_col = _find_col(headers, EXISTING_TITLE_COLS)
     existing_desc_col = _find_col(headers, EXISTING_DESC_COLS)
     existing_h1_col = _find_col(headers, EXISTING_H1_COLS)
+    alt_col = _find_col(headers, ALT_COLS)
+    canon_col = _find_col(headers, CANON_COLS)
+    existing_canon_col = _find_col(headers, EXISTING_CANON_COLS)
+    image_col = _find_image_col(headers)
 
-    has_any_suggestion_col = any(c is not None for c in (title_col, desc_col, h1_col, broken_col))
+    has_any_suggestion_col = any(c is not None for c in (title_col, desc_col, h1_col, broken_col, alt_col, canon_col))
     if page_col is not None and not has_any_suggestion_col:
         # No pre-built suggestion column - infer what's needed from the sheet name
         # and add it, so a plain (non-SEranking-template) issue list still gets
@@ -375,12 +432,17 @@ def _apply_suggestions(sheet_name, headers, rows, brand):
                 headers = headers + ["Suggested H1"]; h1_col = len(headers) - 1
             if "broken" in kinds:
                 headers = headers + ["Broken link Suggestion"]; broken_col = len(headers) - 1
+            if "alt" in kinds and image_col is not None:
+                headers = headers + ["Suggested Alt Text"]; alt_col = len(headers) - 1
+            if "canon" in kinds:
+                headers = headers + ["Recommended Canonical Tag"]; canon_col = len(headers) - 1
             rows = [list(r) + [None] * (len(headers) - len(r)) for r in rows]
 
     if page_col is None or not (title_col is not None or desc_col is not None
                                  or h1_col is not None or broken_col is not None
                                  or existing_title_col is not None or existing_desc_col is not None
-                                 or existing_h1_col is not None):
+                                 or existing_h1_col is not None or alt_col is not None
+                                 or canon_col is not None or existing_canon_col is not None):
         return headers, rows  # not a judgment sheet - pass through unchanged
 
     log(f"   Generating suggestions for '{sheet_name}' ({len(rows)} row(s))...")
@@ -391,6 +453,16 @@ def _apply_suggestions(sheet_name, headers, rows, brand):
         if page_url and page_url.startswith("http"):
             if broken_col is not None:
                 row[broken_col] = _suggest_broken_link_fix(page_url)
+            if alt_col is not None:
+                img_url = str(row[image_col] or "").strip() if (image_col is not None and image_col < len(row)) else ""
+                row[alt_col] = _suggest_alt_text(page_url, img_url, brand) if img_url else \
+                    "Could not determine the image URL - please check manually."
+            if canon_col is not None or existing_canon_col is not None:
+                canon = _suggest_canonical(page_url)
+                if canon_col is not None:
+                    row[canon_col] = canon["recommended"]
+                if existing_canon_col is not None:
+                    row[existing_canon_col] = canon["existing"] if canon["existing"] != onpage2.MISSING else "Missing"
             if (title_col is not None or desc_col is not None or h1_col is not None
                     or existing_title_col is not None or existing_desc_col is not None
                     or existing_h1_col is not None):
@@ -568,6 +640,21 @@ def _classify_xls_report(headers):
 def process_workbook(in_path, out_path, brand, pdf_path=None, zip_path=None):
     wb_out = openpyxl.Workbook()
     wb_out.remove(wb_out.active)
+
+    # Pre-scan total row count across all sources so the AI paid-tier gate
+    # (onpage2.BULK_AI_PAGE_LIMIT) reflects the real scale of this run before
+    # any suggestion generation starts - SEranking sheets are often huge
+    # (e.g. 800+ rows for a single issue export).
+    total_rows = 0
+    if in_path:
+        wb_scan = openpyxl.load_workbook(in_path, data_only=True, read_only=True)
+        for sheet_name in wb_scan.sheetnames:
+            total_rows += max(0, wb_scan[sheet_name].max_row - 1)
+        wb_scan.close()
+    if zip_path:
+        for fname, headers, rows in _read_seranking_zip(zip_path):
+            total_rows += len(rows)
+    onpage2.set_run_scale(total_rows)
 
     if in_path:
         log(f"Reading: {in_path}")
