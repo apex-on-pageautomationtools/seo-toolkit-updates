@@ -3473,7 +3473,7 @@ def api_onpage_download():
 # needed), so it's a lightweight background job like Brief Analysis rather than
 # a full checker Session.
 # --------------------------------------------------------------------------- #
-wayback_state = {"status": "idle", "log": [], "results": [], "error_msg": ""}
+wayback_state = {"status": "idle", "log": [], "results": [], "error_msg": "", "progress": ""}
 wayback_lock = threading.Lock()
 wayback_stop = threading.Event()
 
@@ -3543,12 +3543,15 @@ def _parse_wayback_snapshot_time(archived_url):
 
 def _run_wayback_submit(urls):
     with wayback_lock:
-        wayback_state.update({"status": "running", "log": [], "results": [], "error_msg": ""})
+        wayback_state.update({"status": "running", "log": [], "results": [], "error_msg": "",
+                              "progress": "Starting..."})
     wayback_stop.clear()
     activity(f"Wayback submission started for {len(urls)} URL(s)")
 
     def _wblog(msg):
         wayback_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+        if msg.startswith("["):
+            wayback_state["progress"] = msg
 
     for i, u in enumerate(urls):
         if wayback_stop.is_set():
@@ -3625,6 +3628,7 @@ def api_wayback_status():
             "log": wayback_state["log"][-200:],
             "results": wayback_state["results"],
             "error_msg": wayback_state["error_msg"],
+            "progress": wayback_state["progress"],
         })
 
 
@@ -3663,7 +3667,7 @@ def api_wayback_export():
 # SEranking Audit - turns an uploaded SEranking Site Audit .xlsx export into a
 # suggestion-filled final workbook (subprocess, same pattern as On-Page).
 # --------------------------------------------------------------------------- #
-sr_state = {"status": "idle", "log": [], "output_file": "", "output_file_backup": "", "error_msg": ""}
+sr_state = {"status": "idle", "log": [], "output_file": "", "output_file_backup": "", "error_msg": "", "progress": ""}
 sr_lock = threading.Lock()
 sr_stop = threading.Event()
 
@@ -3671,7 +3675,7 @@ sr_stop = threading.Event()
 def _run_seranking_audit(in_path, pdf_path, brand, zip_path=None):
     with sr_lock:
         sr_state.update({"status": "running", "log": [], "output_file": "",
-                         "output_file_backup": "", "error_msg": ""})
+                         "output_file_backup": "", "error_msg": "", "progress": "Starting..."})
     sr_stop.clear()
     src_name = os.path.basename(in_path or zip_path or pdf_path)
     activity(f"SEranking audit started ({src_name})")
@@ -3679,6 +3683,8 @@ def _run_seranking_audit(in_path, pdf_path, brand, zip_path=None):
     def _log(msg):
         with sr_lock:
             sr_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            if msg.startswith("["):
+                sr_state["progress"] = msg
 
     slug = os.path.splitext(src_name)[0]
     # Saved straight into the user's configured Downloads folder (same as
@@ -3789,6 +3795,7 @@ def api_seranking_status():
             "log": sr_state["log"][-200:],
             "error_msg": sr_state["error_msg"],
             "has_file": bool(sr_state["output_file"]),
+            "progress": sr_state["progress"],
         })
 
 
@@ -3820,7 +3827,7 @@ def api_seranking_download():
 # --------------------------------------------------------------------------- #
 
 
-geo_state = {"status": "idle", "log": [], "domain": "", "output_file": "", "error_msg": ""}
+geo_state = {"status": "idle", "log": [], "domain": "", "output_file": "", "error_msg": "", "progress": ""}
 geo_lock = threading.Lock()
 geo_stop = threading.Event()
 
@@ -3828,13 +3835,15 @@ geo_stop = threading.Event()
 def _run_geo_report(domain, targets_path, check_visibility, keywords, pages, faqs_per_page=5):
     with geo_lock:
         geo_state.update({"status": "running", "log": [], "domain": domain,
-                          "output_file": "", "error_msg": ""})
+                          "output_file": "", "error_msg": "", "progress": "Starting..."})
     geo_stop.clear()
     activity(f"GEO report started ({domain})")
 
     def _log(msg):
         with geo_lock:
             geo_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            if msg.startswith("["):
+                geo_state["progress"] = msg
 
     # Saved straight into the user's configured Downloads folder (same as
     # On-Page/Health/GSC Audit already do via _domain_folder) instead of an
@@ -3935,6 +3944,7 @@ def api_geo_status():
             "log": geo_state["log"][-200:],
             "error_msg": geo_state["error_msg"],
             "has_file": bool(geo_state["output_file"]),
+            "progress": geo_state["progress"],
         })
 
 

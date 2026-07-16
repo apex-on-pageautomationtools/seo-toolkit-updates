@@ -1425,6 +1425,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <div id="onpage-active" class="hidden">
           <div style="margin-bottom:12px">
             <span class="tag t-yes" id="op-progress">Starting...</span>
+            <span id="op-timer" style="font-size:12px;color:var(--text-3);margin-left:8px"></span>
           </div>
           <div class="log" id="op-log" style="height:350px;overflow-y:auto;font-size:12px"></div>
           <div style="margin-top:14px;display:flex;gap:10px">
@@ -1447,6 +1448,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <div id="health-active" class="hidden">
           <div style="margin-bottom:12px">
             <span class="tag t-yes" id="ha-progress">Starting...</span>
+            <span id="ha-timer" style="font-size:12px;color:var(--text-3);margin-left:8px"></span>
           </div>
           <div class="log" id="ha-log" style="height:350px;overflow-y:auto;font-size:12px"></div>
           <div style="margin-top:14px;display:flex;gap:10px">
@@ -1469,6 +1471,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <div id="gsc-active" class="hidden">
           <div style="margin-bottom:12px">
             <span class="tag t-yes" id="gsc-progress">Starting...</span>
+            <span id="gsc-timer" style="font-size:12px;color:var(--text-3);margin-left:8px"></span>
           </div>
           <div class="log" id="gsc-log" style="height:350px;overflow-y:auto;font-size:12px"></div>
           <div style="margin-top:14px;display:flex;gap:10px">
@@ -1491,6 +1494,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <div id="seranking-active" class="hidden">
           <div style="margin-bottom:12px">
             <span class="tag t-yes" id="sr-progress">Starting...</span>
+            <span id="sr-timer" style="font-size:12px;color:var(--text-3);margin-left:8px"></span>
           </div>
           <div class="log" id="sr-log" style="height:350px;overflow-y:auto;font-size:12px"></div>
           <div style="margin-top:14px;display:flex;gap:10px">
@@ -1513,6 +1517,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <div id="geo-active" class="hidden">
           <div style="margin-bottom:12px">
             <span class="tag t-yes" id="geo-progress">Starting...</span>
+            <span id="geo-timer" style="font-size:12px;color:var(--text-3);margin-left:8px"></span>
           </div>
           <div class="log" id="geo-log" style="height:350px;overflow-y:auto;font-size:12px"></div>
           <div style="margin-top:14px;display:flex;gap:10px">
@@ -1563,6 +1568,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
           <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">
             <span class="tag t-yes" id="wb-progress">Starting...</span>
             <span id="wb-count" style="font-size:12px;color:var(--text-3)"></span>
+            <span id="wb-timer" style="font-size:12px;color:var(--text-3);margin-left:8px"></span>
           </div>
           <div class="log" id="wb-log" style="height:160px;overflow-y:auto;font-size:12px;margin-bottom:12px"></div>
           <div style="overflow-x:auto">
@@ -1592,6 +1598,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <div id="brief-active" class="hidden">
           <div style="margin-bottom:12px">
             <span class="tag t-yes" id="ba-progress">Starting...</span>
+            <span id="ba-timer" style="font-size:12px;color:var(--text-3);margin-left:8px"></span>
           </div>
           <div class="log" id="ba-log" style="height:350px;overflow-y:auto;font-size:12px"></div>
           <div style="margin-top:14px;display:flex;gap:10px">
@@ -2351,6 +2358,7 @@ async function doStart(){
     $('btn-op-download').disabled=true;
     setButtons('running','onpage');
     startOpPoll();
+    startReportTimer('op');
     return;
   }else if(mode==='health'){
     p.domain=$('ha-domain').value.trim();
@@ -2395,6 +2403,7 @@ async function doStart(){
     if(mode==='health'){$('badge').className='badge b-running';$('dot').className='dot d-running';$('status-txt').textContent='Running - 0%';$('prog').style.width='0%';$('prog-lbl').textContent='Starting...';}
     setButtons('running','health');
     startHaPoll();
+    startReportTimer('ha');
     return;
   }else if(mode==='brief'){
     p.domain=$('ba-domain').value.trim();
@@ -2412,6 +2421,7 @@ async function doStart(){
     $('btn-ba-download').disabled=true;
     setButtons('running','brief');
     startBaPoll();
+    startReportTimer('ba');
     return;
   }else if(mode==='seranking'){
     const file=$('sr-file').files[0];
@@ -2434,6 +2444,7 @@ async function doStart(){
     $('btn-sr-download').disabled=true;
     setButtons('running','seranking');
     startSrPoll();
+    startReportTimer('sr');
     return;
   }else if(mode==='geo'){
     const geoDomain=$('geo-domain').value.trim();
@@ -2463,6 +2474,7 @@ async function doStart(){
     $('btn-geo-download').disabled=true;
     setButtons('running','geo');
     startGeoPoll();
+    startReportTimer('geo');
     return;
   }else if(mode==='keywordvolume'){
     const kvKeywords=$('kv-keywords').value.split('\n').map(l=>l.trim()).filter(l=>l);
@@ -2525,6 +2537,7 @@ async function doStart(){
       if(!rw.ok||dw.error){ toast(dw.error||('Failed to start (HTTP '+rw.status+')')); wbReset(); return; }
       toast('Wayback submission started ('+dw.count+' URL(s))');
       startWbPoll();
+      startReportTimer('wb');
     }catch(netErr){
       toast('Could not reach the server - try again.');
       wbReset();
@@ -2549,6 +2562,7 @@ async function doStart(){
     $('btn-gsc-download').disabled=true;
     setButtons('running','gsc');
     startGscPoll();
+    startReportTimer('gsc');
     return;
   }else if(mode==='backlink'){
     p.domain=$('b-domain').value.trim();
@@ -2914,6 +2928,68 @@ function appendRow(row,num,m){
 }
 
 
+/* ===================== report generation timers ===================== */
+// Shared elapsed-time display for every report-generator tool (On-Page,
+// Health Audit, GSC Audit, Brief Analysis, SEranking, GEO, Wayback) - each
+// keeps its own start timestamp, keyed by the tool's short id (e.g. 'op'),
+// so switching tabs while multiple reports run in the background doesn't mix
+// up their times. The element keeps its final value on stop (not cleared)
+// so the user can see how long the run took even after it completes.
+const reportTimerState={};
+function startReportTimer(id){
+  reportTimerState[id]={start:Date.now()};
+  const tick=()=>{
+    const st=reportTimerState[id];
+    if(!st)return;
+    const el=$(id+'-timer');
+    if(!el)return;
+    const secs=Math.floor((Date.now()-st.start)/1000);
+    const m=Math.floor(secs/60),s=secs%60;
+    el.textContent='Elapsed: '+m+':'+String(s).padStart(2,'0');
+  };
+  tick();
+  reportTimerState[id].interval=setInterval(tick,1000);
+}
+function stopReportTimer(id){
+  const st=reportTimerState[id];
+  if(st){clearInterval(st.interval);delete reportTimerState[id];}
+}
+function resetReportTimer(id){
+  stopReportTimer(id);
+  const el=$(id+'-timer');
+  if(el)el.textContent='';
+}
+
+// The shared status bar (#badge/#dot/#status-txt/#prog/#prog-lbl, top of the
+// right column) used to only ever get updated by the ranking/backlink/index/
+// count checkers (via updateProgress) and Health Audit - every other report
+// tool (On-Page, GSC Audit, Brief Analysis, SEranking, GEO, Wayback) left it
+// frozen at whatever it last showed, which read as "the progress bar isn't
+// working" while those reports ran. Reused here with the same isActive gate
+// Health Audit already used, so switching tabs mid-run never corrupts a
+// different tool's own numbers.
+function updateSharedProgressBar(toolMode, progVal){
+  if(mode!==toolMode)return 0;
+  let pct=0;
+  if(typeof progVal==='number'){
+    pct=Math.min(100,Math.max(0,Math.round(progVal)));
+  }else{
+    const m=(progVal||'').match(/\[(\d+)\/(\d+)\]/);
+    pct=m?Math.min(100,Math.round((parseInt(m[1])/parseInt(m[2]))*100)):0;
+  }
+  $('badge').className='badge b-running';$('dot').className='dot d-running';
+  $('status-txt').textContent='Running - '+pct+'%';
+  $('prog').style.width=pct+'%';$('prog-lbl').textContent=(typeof progVal==='string'?progVal:pct+'%');
+  return pct;
+}
+function finishSharedProgressBar(toolMode, label){
+  if(mode!==toolMode)return;
+  $('badge').className='badge b-idle';$('dot').className='dot d-idle';
+  $('status-txt').textContent=label;
+  $('prog').style.width=(label==='Completed'?'100%':$('prog').style.width);
+  $('prog-lbl').textContent=label;
+}
+
 /* ===================== on-page report ===================== */
 let opTimer=null;
 function startOpPoll(){stopOpPoll();opTimer=setInterval(opPoll,2000);}
@@ -2930,16 +3006,20 @@ async function opPoll(){
     if(d.status==='completed'){
       $('op-progress').className='tag t-yes';
       $('btn-op-download').disabled=false;
-      setButtons('completed','onpage');stopOpPoll();toast('Report ready');
+      finishSharedProgressBar('onpage','Completed');
+      setButtons('completed','onpage');stopOpPoll();stopReportTimer('op');toast('Report ready');
     }else if(d.status==='error'){
       $('op-progress').className='tag t-not_found';
       $('op-progress').textContent='Error: '+(d.error_msg||'failed');
-      setButtons('stopped','onpage');stopOpPoll();
+      finishSharedProgressBar('onpage','Error');
+      setButtons('stopped','onpage');stopOpPoll();stopReportTimer('op');
     }else if(d.status==='stopped'){
       $('op-progress').className='tag t-unknown';
-      setButtons('stopped','onpage');stopOpPoll();
+      finishSharedProgressBar('onpage','Stopped');
+      setButtons('stopped','onpage');stopOpPoll();stopReportTimer('op');
     }else{
       $('op-progress').className='tag t-yes';
+      updateSharedProgressBar('onpage',d.progress);
     }
   }catch(e){}
 }
@@ -2971,7 +3051,7 @@ function opReset(){
   $('onpage-active').classList.add('hidden');
   $('op-log').textContent='';
   $('btn-op-download').disabled=true;
-  setButtons('idle','onpage');stopOpPoll();
+  setButtons('idle','onpage');stopOpPoll();resetReportTimer('op');
 }
 
 /* ===================== health audit ===================== */
@@ -2997,16 +3077,16 @@ async function haPoll(){
       $('ha-progress').className='tag t-yes';
       $('btn-ha-download').disabled=false;
       if(isActive){$('badge').className='badge b-idle';$('dot').className='dot d-idle';$('status-txt').textContent='Completed';$('prog').style.width='100%';$('prog-lbl').textContent='Done';}
-      setButtons('completed','health');stopHaPoll();toast('Health audit report ready');
+      setButtons('completed','health');stopHaPoll();stopReportTimer('ha');toast('Health audit report ready');
     }else if(d.status==='error'){
       $('ha-progress').className='tag t-not_found';
       $('ha-progress').textContent='Error: '+(d.error_msg||'failed');
       if(isActive){$('badge').className='badge b-idle';$('dot').className='dot d-idle';$('status-txt').textContent='Error';}
-      setButtons('stopped','health');stopHaPoll();
+      setButtons('stopped','health');stopHaPoll();stopReportTimer('ha');
     }else if(d.status==='stopped'){
       $('ha-progress').className='tag t-unknown';
       if(isActive){$('badge').className='badge b-idle';$('dot').className='dot d-idle';$('status-txt').textContent='Stopped';}
-      setButtons('stopped','health');stopHaPoll();
+      setButtons('stopped','health');stopHaPoll();stopReportTimer('ha');
     }else{
       $('ha-progress').className='tag t-yes';
       if(isActive){$('badge').className='badge b-running';$('dot').className='dot d-running';$('status-txt').textContent='Running - '+pct+'%';$('prog').style.width=pct+'%';$('prog-lbl').textContent=prog;}
@@ -3040,7 +3120,7 @@ function haReset(){
   $('health-active').classList.add('hidden');
   $('ha-log').textContent='';
   $('btn-ha-download').disabled=true;
-  setButtons('idle','health');stopHaPoll();
+  setButtons('idle','health');stopHaPoll();resetReportTimer('ha');
 }
 
 /* ===================== gsc audit ===================== */
@@ -3059,16 +3139,20 @@ async function gscPoll(){
     if(d.status==='completed'){
       $('gsc-progress').className='tag t-yes';
       $('btn-gsc-download').disabled=false;
-      setButtons('completed','gsc');stopGscPoll();toast('GSC audit report ready');
+      finishSharedProgressBar('gsc','Completed');
+      setButtons('completed','gsc');stopGscPoll();stopReportTimer('gsc');toast('GSC audit report ready');
     }else if(d.status==='error'){
       $('gsc-progress').className='tag t-not_found';
       $('gsc-progress').textContent='Error: '+(d.error_msg||'failed');
-      setButtons('stopped','gsc');stopGscPoll();
+      finishSharedProgressBar('gsc','Error');
+      setButtons('stopped','gsc');stopGscPoll();stopReportTimer('gsc');
     }else if(d.status==='stopped'){
       $('gsc-progress').className='tag t-unknown';
-      setButtons('stopped','gsc');stopGscPoll();
+      finishSharedProgressBar('gsc','Stopped');
+      setButtons('stopped','gsc');stopGscPoll();stopReportTimer('gsc');
     }else{
       $('gsc-progress').className='tag t-yes';
+      updateSharedProgressBar('gsc',d.progress);
     }
   }catch(e){}
 }
@@ -3079,7 +3163,7 @@ function gscReset(){
   $('gsc-active').classList.add('hidden');
   $('gsc-log').textContent='';
   $('btn-gsc-download').disabled=true;
-  setButtons('idle','gsc');stopGscPoll();
+  setButtons('idle','gsc');stopGscPoll();resetReportTimer('gsc');
 }
 /* ===================== brief analysis ===================== */
 let baTimer=null;
@@ -3097,16 +3181,20 @@ async function baPoll(){
     if(d.status==='completed'){
       $('ba-progress').className='tag t-yes';
       $('btn-ba-download').disabled=false;
-      setButtons('completed','brief');stopBaPoll();toast('Brief analysis report ready');
+      finishSharedProgressBar('brief','Completed');
+      setButtons('completed','brief');stopBaPoll();stopReportTimer('ba');toast('Brief analysis report ready');
     }else if(d.status==='error'){
       $('ba-progress').className='tag t-not_found';
       $('ba-progress').textContent='Error: '+(d.error_msg||'failed');
-      setButtons('stopped','brief');stopBaPoll();
+      finishSharedProgressBar('brief','Error');
+      setButtons('stopped','brief');stopBaPoll();stopReportTimer('ba');
     }else if(d.status==='stopped'){
       $('ba-progress').className='tag t-unknown';
-      setButtons('stopped','brief');stopBaPoll();
+      finishSharedProgressBar('brief','Stopped');
+      setButtons('stopped','brief');stopBaPoll();stopReportTimer('ba');
     }else{
       $('ba-progress').className='tag t-yes';
+      updateSharedProgressBar('brief',d.progress);
     }
   }catch(e){}
 }
@@ -3117,7 +3205,7 @@ function baReset(){
   $('brief-active').classList.add('hidden');
   $('ba-log').textContent='';
   $('btn-ba-download').disabled=true;
-  setButtons('idle','brief');stopBaPoll();
+  setButtons('idle','brief');stopBaPoll();resetReportTimer('ba');
 }
 
 /* ===================== seranking audit ===================== */
@@ -3135,16 +3223,20 @@ async function srPoll(){
     if(d.status==='completed'){
       $('sr-progress').textContent='Completed';$('sr-progress').className='tag t-yes';
       $('btn-sr-download').disabled=!d.has_file;
-      setButtons('completed','seranking');stopSrPoll();toast('SEranking audit ready');
+      finishSharedProgressBar('seranking','Completed');
+      setButtons('completed','seranking');stopSrPoll();stopReportTimer('sr');toast('SEranking audit ready');
     }else if(d.status==='error'){
       $('sr-progress').className='tag t-not_found';
       $('sr-progress').textContent='Error: '+(d.error_msg||'failed');
-      setButtons('stopped','seranking');stopSrPoll();
+      finishSharedProgressBar('seranking','Error');
+      setButtons('stopped','seranking');stopSrPoll();stopReportTimer('sr');
     }else if(d.status==='stopped'){
       $('sr-progress').className='tag t-unknown';
-      setButtons('stopped','seranking');stopSrPoll();
+      finishSharedProgressBar('seranking','Stopped');
+      setButtons('stopped','seranking');stopSrPoll();stopReportTimer('sr');
     }else{
-      $('sr-progress').textContent='Running...';$('sr-progress').className='tag t-yes';
+      $('sr-progress').textContent=d.progress||'Running...';$('sr-progress').className='tag t-yes';
+      updateSharedProgressBar('seranking',d.progress);
     }
   }catch(e){}
 }
@@ -3157,7 +3249,7 @@ function srReset(){
   $('btn-sr-download').disabled=true;
   $('sr-file').value='';
   $('sr-pdf').value='';
-  setButtons('idle','seranking');stopSrPoll();
+  setButtons('idle','seranking');stopSrPoll();resetReportTimer('sr');
 }
 
 /* ===================== geo / ai optimization ===================== */
@@ -3175,16 +3267,20 @@ async function geoPoll(){
     if(d.status==='completed'){
       $('geo-progress').textContent='Completed';$('geo-progress').className='tag t-yes';
       $('btn-geo-download').disabled=!d.has_file;
-      setButtons('completed','geo');stopGeoPoll();toast('GEO report ready');
+      finishSharedProgressBar('geo','Completed');
+      setButtons('completed','geo');stopGeoPoll();stopReportTimer('geo');toast('GEO report ready');
     }else if(d.status==='error'){
       $('geo-progress').className='tag t-not_found';
       $('geo-progress').textContent='Error: '+(d.error_msg||'failed');
-      setButtons('stopped','geo');stopGeoPoll();
+      finishSharedProgressBar('geo','Error');
+      setButtons('stopped','geo');stopGeoPoll();stopReportTimer('geo');
     }else if(d.status==='stopped'){
       $('geo-progress').className='tag t-unknown';
-      setButtons('stopped','geo');stopGeoPoll();
+      finishSharedProgressBar('geo','Stopped');
+      setButtons('stopped','geo');stopGeoPoll();stopReportTimer('geo');
     }else{
-      $('geo-progress').textContent='Running...';$('geo-progress').className='tag t-yes';
+      $('geo-progress').textContent=d.progress||'Running...';$('geo-progress').className='tag t-yes';
+      updateSharedProgressBar('geo',d.progress);
     }
   }catch(e){}
 }
@@ -3198,7 +3294,7 @@ function geoReset(){
   $('geo-targets').value='';
   $('geo-keywords').value='';
   $('geo-pages').value='';
-  setButtons('idle','geo');stopGeoPoll();
+  setButtons('idle','geo');stopGeoPoll();resetReportTimer('geo');
 }
 
 /* ===================== keyword search volume ===================== */
@@ -3357,16 +3453,19 @@ async function wbPoll(){
     if(d.status==='completed'){
       $('wb-progress').textContent='Completed';$('wb-progress').className='tag t-yes';
       const _wasRunning=_modeState.wayback==='running'||_modeState.wayback==='starting';
-      setButtons('completed','wayback');stopWbPoll();toast('Wayback submission complete');
+      finishSharedProgressBar('wayback','Completed');
+      setButtons('completed','wayback');stopWbPoll();stopReportTimer('wb');toast('Wayback submission complete');
       // Auto-download into the configured folder on completion, same as the
       // batch tools - guarded on _wasRunning so this fires once, not on
       // every subsequent poll while sitting on the completed tab.
       if(_wasRunning&&d.results&&d.results.length)wbExport();
     }else if(d.status==='stopped'){
       $('wb-progress').textContent='Stopped';$('wb-progress').className='tag t-unknown';
-      setButtons('stopped','wayback');stopWbPoll();
+      finishSharedProgressBar('wayback','Stopped');
+      setButtons('stopped','wayback');stopWbPoll();stopReportTimer('wb');
     }else{
-      $('wb-progress').textContent='Running...';$('wb-progress').className='tag t-yes';
+      $('wb-progress').textContent=d.progress||'Running...';$('wb-progress').className='tag t-yes';
+      updateSharedProgressBar('wayback',d.progress);
     }
   }catch(e){}
 }
@@ -3378,7 +3477,7 @@ function wbReset(){
   $('wb-log').textContent='';
   $('wb-results-body').innerHTML='';
   $('btn-wb-export').disabled=true;
-  setButtons('idle','wayback');stopWbPoll();
+  setButtons('idle','wayback');stopWbPoll();resetReportTimer('wb');
 }
 
 let _gscEmail='';
