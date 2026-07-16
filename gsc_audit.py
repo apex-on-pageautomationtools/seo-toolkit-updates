@@ -49,10 +49,18 @@ GSC_AUTH_FILE = _gsc_auth_file()
 OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
-SCOPES = "https://www.googleapis.com/auth/webmasters https://www.googleapis.com/auth/userinfo.email"
+# analytics.readonly added for the Performance Report's Google Analytics (GA4)
+# section - already-connected accounts need one re-authorize click to pick up
+# this new scope (a stored refresh_token only carries the scopes it was
+# originally granted; the token refresh endpoint doesn't add new ones).
+SCOPES = ("https://www.googleapis.com/auth/webmasters "
+          "https://www.googleapis.com/auth/userinfo.email "
+          "https://www.googleapis.com/auth/analytics.readonly")
 
 GSC_API_BASE = "https://www.googleapis.com/webmasters/v3"
 SEARCH_ANALYTICS_URL = "https://searchconsole.googleapis.com/webmasters/v3"
+GA4_ADMIN_URL = "https://analyticsadmin.googleapis.com/v1beta"
+GA4_DATA_URL = "https://analyticsdata.googleapis.com/v1beta"
 URL_INSPECTION_URL = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect"
 
 # ---------------------------------------------------------------------------
@@ -664,6 +672,11 @@ def fetch_top_pages(token, property_url, start_date, end_date, limit=25):
                                   dimensions=["page"], row_limit=limit)
 
 
+def fetch_top_countries(token, property_url, start_date, end_date, limit=25):
+    return fetch_search_analytics(token, property_url, start_date, end_date,
+                                  dimensions=["country"], row_limit=limit)
+
+
 def fetch_image_perf(token, property_url, start_date, end_date, limit=10):
     encoded = urllib.parse.quote(property_url, safe="")
     body = {
@@ -678,6 +691,54 @@ def fetch_image_perf(token, property_url, start_date, end_date, limit=10):
         token, body, timeout=30
     )
     return resp.get("rows", [])
+
+
+# --------------------------------------------------------------------------- #
+# GA4 (Google Analytics Data/Admin API) - for the standalone Performance
+# Report tool. Reuses the same OAuth token/refresh plumbing as GSC above (the
+# analytics.readonly scope added to SCOPES) and the same _api_get/_api_post
+# helpers - GA4's REST APIs take a plain Bearer token exactly like GSC's do.
+# --------------------------------------------------------------------------- #
+def list_ga4_properties(token):
+    """Every GA4 property this account can see, across all its GA accounts -
+    flattened for a simple "pick one" dropdown rather than a nested tree,
+    since a user picking a property for a specific domain doesn't care which
+    GA account it happens to live under."""
+    resp = _api_get(f"{GA4_ADMIN_URL}/accountSummaries?pageSize=200", token)
+    out = []
+    for acct in resp.get("accountSummaries", []):
+        acct_name = acct.get("displayName", "")
+        for prop in acct.get("propertySummaries", []):
+            out.append({
+                "property": prop.get("property", ""),  # "properties/123456789"
+                "displayName": prop.get("displayName", ""),
+                "accountName": acct_name,
+            })
+    return out
+
+
+def run_ga4_report(token, property_name, start_date, end_date, dimensions, metrics, limit=100):
+    """dimensions/metrics are plain name lists, e.g. dimensions=["date"],
+    metrics=["activeUsers","sessions"] - property_name is the "properties/123..."
+    resource name from list_ga4_properties(), not a bare numeric ID."""
+    body = {
+        "dateRanges": [{"startDate": start_date, "endDate": end_date}],
+        "dimensions": [{"name": d} for d in dimensions],
+        "metrics": [{"name": m} for m in metrics],
+        "limit": limit,
+    }
+    resp = _api_post(f"{GA4_DATA_URL}/{property_name}:runReport", token, body, timeout=30)
+    dim_names = [d["name"] for d in resp.get("dimensionHeaders", [])]
+    met_names = [m["name"] for m in resp.get("metricHeaders", [])]
+    rows = []
+    for row in resp.get("rows", []):
+        entry = {}
+        for i, dv in enumerate(row.get("dimensionValues", [])):
+            entry[dim_names[i]] = dv.get("value", "")
+        for i, mv in enumerate(row.get("metricValues", [])):
+            entry[met_names[i]] = mv.get("value", "")
+        rows.append(entry)
+    return rows
 
 
 def inspect_url(token, property_url, url_to_inspect):

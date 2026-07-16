@@ -404,6 +404,10 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
       <span class="sb-label">GEO / AI Optimization</span>
     </button>
+    <button class="sb-item" id="tab-performance" data-tip="Performance Report" onclick="switchTab('performance')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      <span class="sb-label">Performance Report</span>
+    </button>
     <!-- Hidden for everyone for now - the Google Ads Developer Token behind
          Keyword Search Volume is still on Test Access (blocks real customer
          data with a 403), a Basic Access application is pending Google's
@@ -1233,6 +1237,40 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <div class="note" style="margin-top:12px">Can take several minutes - generates 6 files (xlsx, llms-full.txt, and 4 docx), each with its own AI calls and, for the xlsx, one browser query per generated FAQ if visibility checking is on. All suggestions are verified against the page's real crawled content before being included - a suggestion whose text doesn't actually exist on the page is dropped, not guessed.</div>
     </section>
 
+    <section class="card panel" id="panel-performance" style="display:none">
+      <div class="card-t">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        Performance Report
+      </div>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">A standalone monthly performance deck (pptx) built from real Google Search Console + Google Analytics 4 data - real charts, not screenshots. Connect a GSC account below (the same accounts as GSC Audit); if it was connected before this feature existed, reconnect it once to grant the extra Analytics permission. GA4 requires the connected Google account to have Viewer access in that GA4 property.</p>
+      <div class="field">
+        <label>Domain</label>
+        <input type="text" id="perf-domain" placeholder="example.com" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>GSC Account <span class="hint">(for Search Console data - optional if you only want GA4)</span></label>
+        <select id="perf-gsc-account" onchange="perfLoadGa4Properties()">
+          <option value="">Loading accounts...</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>GA4 Property <span class="hint">(for Analytics data - pick an account above first; optional if you only want GSC)</span></label>
+        <select id="perf-ga4-property">
+          <option value="">Select a GSC account first</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Reporting window</label>
+        <select id="perf-days">
+          <option value="7">Last 7 days</option>
+          <option value="28" selected>Last 28 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+      </div>
+      <div class="note" style="margin-top:12px">This is "james" format - the first Performance Report layout. More formats will be added the same way On-Page formats were, once real client references exist for them. Rank-tracking (SE Ranking) and GSC Security/Links sections aren't included yet - separate data sources not wired up.</div>
+    </section>
+
     <section class="card panel" id="panel-keywordvolume" style="display:none">
       <div class="card-t">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
@@ -1532,6 +1570,30 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
             </button>
             <button class="btn btn-tonal" onclick="geoReset()">New Report</button>
             <button class="btn btn-tonal" onclick="copyLogText('geo-log')">Copy Log</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- performance report -->
+      <div id="tbl-performance" style="flex:1;display:none">
+        <div class="empty" id="empty-performance">
+          <div class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
+          <p>Enter a domain, pick a GSC account and/or GA4 property, and click <b>Start</b> to generate the performance report.</p>
+        </div>
+        <div id="performance-active" class="hidden">
+          <div style="margin-bottom:12px">
+            <span class="tag t-yes" id="perf-progress">Starting...</span>
+            <span id="perf-timer" style="font-size:12px;color:var(--text-3);margin-left:8px"></span>
+          </div>
+          <div class="prog" style="margin-bottom:12px"><div class="prog-bar" id="perf-progbar"></div></div>
+          <div class="log" id="perf-log" style="height:350px;overflow-y:auto;font-size:12px"></div>
+          <div style="margin-top:14px;display:flex;gap:10px">
+            <button class="btn btn-primary" id="btn-perf-download" onclick="perfDownload()" disabled>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Download Report (PPTX)
+            </button>
+            <button class="btn btn-tonal" onclick="perfReset()">New Report</button>
+            <button class="btn btn-tonal" onclick="copyLogText('perf-log')">Copy Log</button>
           </div>
         </div>
       </div>
@@ -2185,6 +2247,7 @@ function switchTab(m){
   $('panel-wayback').style.display=m==='wayback'?'':'none';
   $('panel-seranking').style.display=m==='seranking'?'':'none';
   $('panel-geo').style.display=m==='geo'?'':'none';
+  $('panel-performance').style.display=m==='performance'?'':'none';
   $('panel-keywordvolume').style.display=m==='keywordvolume'?'':'none';
   $('tbl-ranking').style.display=m==='ranking'?'':'none';
   $('tbl-index').style.display=m==='index'?'':'none';
@@ -2199,8 +2262,9 @@ function switchTab(m){
   $('tbl-wayback').style.display=m==='wayback'?'':'none';
   $('tbl-seranking').style.display=m==='seranking'?'':'none';
   $('tbl-geo').style.display=m==='geo'?'':'none';
+  $('tbl-performance').style.display=m==='performance'?'':'none';
   $('tbl-keywordvolume').style.display=m==='keywordvolume'?'':'none';
-  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',wayback:'Wayback Machine Submitter',seranking:'SEranking Audit',geo:'GEO / AI Optimization',keywordvolume:'Keyword Search Volume',admin:'Admin Panel'};
+  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',wayback:'Wayback Machine Submitter',seranking:'SEranking Audit',geo:'GEO / AI Optimization',performance:'Performance Report',keywordvolume:'Keyword Search Volume',admin:'Admin Panel'};
   const subs={ranking:'Find where your domain ranks on Google - across regions, CAPTCHA-resistant.',
     index:'Check if your URLs are indexed in Google - searches site:url to verify.',
     count:'Get Google\'s total "About N results" number for each keyword - regional, CAPTCHA-resistant.',
@@ -2213,6 +2277,7 @@ function switchTab(m){
     wayback:'Submit URLs to the Wayback Machine\'s Save Page Now for a fresh, dated archive snapshot.',
     seranking:'Turn a SEranking Site Audit export into a suggestion-filled final workbook.',
     geo:'AI-searchable keywords + FAQ suggestions, plus a no-login check of whether the site is already cited in AI answers (Perplexity reliable; Google/ChatGPT best-effort). Testing phase.',
+    performance:'Monthly performance deck built from real Google Search Console + Google Analytics 4 data - real charts, not screenshots.',
     keywordvolume:'Real Keyword Planner search volume data from the Google Ads API - avg monthly searches, competition, CPC, filtered by location/language. Testing phase.',
     admin:'Manage users, cities, and app configuration.'};
   $('page-title').textContent=titles[m];
@@ -2223,6 +2288,7 @@ function switchTab(m){
   $('activity-bar').style.display=m==='admin'?'':'none';
   if(m==='admin'){admLoadUsers();admLoadBuildings();admLoadProxies();admLoadCities();admLoadConfig();admLoadKeysStatus();fetchActivityLog();}
   if(m==='crawl'){crawlLoadUrls();}
+  if(m==='performance'){perfLoadGscAccounts();}
   // Refresh buttons and shared status bar for the newly selected tab
   setButtons(_modeState[m], m);
   const st=_modeState[m];
@@ -2483,6 +2549,26 @@ async function doStart(){
     startGeoPoll();
     startReportTimer('geo');resetToolProgress('geo');
     return;
+  }else if(mode==='performance'){
+    const perfDomain=$('perf-domain').value.trim();
+    if(!perfDomain){toast('Enter a domain');return;}
+    const perfGscAccount=$('perf-gsc-account').value;
+    const perfGa4Property=$('perf-ga4-property').value;
+    if(!perfGscAccount&&!perfGa4Property){toast('Pick a GSC account and/or a GA4 property');return;}
+    setButtons('starting','performance');   // instant feedback, before the network round-trip
+    $('empty-performance').style.display='none';
+    $('performance-active').classList.remove('hidden');
+    $('perf-log').textContent='Starting...';
+    const rp=await fetch('/api/performance/start',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({domain:perfDomain,gsc_account:perfGscAccount,ga4_property:perfGa4Property,days:parseInt($('perf-days').value)})});
+    const dp=await rp.json();
+    if(dp.error){toast(dp.error);setButtons('idle','performance');$('empty-performance').style.display='block';$('performance-active').classList.add('hidden');return;}
+    toast('Performance report started');
+    $('btn-perf-download').disabled=true;
+    setButtons('running','performance');
+    startPerfPoll();
+    startReportTimer('perf');resetToolProgress('perf');
+    return;
   }else if(mode==='keywordvolume'){
     const kvKeywords=$('kv-keywords').value.split('\n').map(l=>l.trim()).filter(l=>l);
     if(!kvKeywords.length){toast('Enter at least one keyword');return;}
@@ -2639,6 +2725,7 @@ async function doStop(){
   if(mode==='wayback'){await wbStop();return;}
   if(mode==='seranking'){await srStop();return;}
   if(mode==='geo'){await geoStop();return;}
+  if(mode==='performance'){await perfStop();return;}
   if(mode==='keywordvolume'){return;}  // synchronous request - nothing to cancel mid-flight
   const m=mode;await fetch('/api/stop',_mkbody(m));setButtons('stopped',m);stopPoll(m);showAlert(false);toast('Stopped');
 }
@@ -2653,6 +2740,7 @@ async function doReset(){
   if(mode==='wayback'){wbReset();return;}
   if(mode==='seranking'){srReset();return;}
   if(mode==='geo'){geoReset();return;}
+  if(mode==='performance'){perfReset();return;}
   if(mode==='keywordvolume'){kvReset();return;}
   const m=mode;await fetch('/api/reset',_mkbody(m));setButtons('idle',m);showAlert(false);clearResults(m);updateProgress(0,0,'');setStatus('idle');stopPoll(m);$('log').textContent='';}
 async function loadPrevious(){
@@ -2773,7 +2861,7 @@ function updateProgress(cur,tot,kw){
   $('prog-lbl').textContent=cur+' / '+tot;
   $('cur-kw').textContent=(kw&&cur>0&&cur<=tot)?'Checking: "'+kw+'"':'';
 }
-const _modeState={ranking:'idle',index:'idle',count:'idle',backlink:'idle',onpage:'idle',health:'idle',gsc:'idle',crawl:'idle',brief:'idle',wayback:'idle',seranking:'idle',geo:'idle',keywordvolume:'idle',admin:'idle'};
+const _modeState={ranking:'idle',index:'idle',count:'idle',backlink:'idle',onpage:'idle',health:'idle',gsc:'idle',crawl:'idle',brief:'idle',wayback:'idle',seranking:'idle',geo:'idle',performance:'idle',keywordvolume:'idle',admin:'idle'};
 function setButtons(s, m){
   m = m || mode;
   _modeState[m] = s;
@@ -3296,6 +3384,78 @@ function geoReset(){
   $('geo-keywords').value='';
   $('geo-pages').value='';
   setButtons('idle','geo');stopGeoPoll();resetReportTimer('geo');resetToolProgress('geo');
+}
+
+/* ===================== performance report ===================== */
+let perfTimer=null;
+function startPerfPoll(){stopPerfPoll();perfTimer=setInterval(perfPoll,2000);}
+function stopPerfPoll(){if(perfTimer){clearInterval(perfTimer);perfTimer=null;}}
+async function perfPoll(){
+  try{
+    const r=await fetch('/api/performance/status');
+    const d=await r.json();
+    const el=$('perf-log');
+    if(d.log&&d.log.length) el.textContent=d.log.join('\n');
+    el.scrollTop=el.scrollHeight;
+    mirrorSidebarLog(d.log,'performance');
+    if(d.status==='completed'){
+      $('perf-progress').textContent='Completed';$('perf-progress').className='tag t-yes';
+      $('btn-perf-download').disabled=!d.has_file;
+      finishToolProgress('perf',true);
+      setButtons('completed','performance');stopPerfPoll();stopReportTimer('perf');toast('Performance report ready');
+    }else if(d.status==='error'){
+      $('perf-progress').className='tag t-not_found';
+      $('perf-progress').textContent='Error: '+(d.error_msg||'failed');
+      finishToolProgress('perf',false);
+      setButtons('stopped','performance');stopPerfPoll();stopReportTimer('perf');
+    }else if(d.status==='stopped'){
+      $('perf-progress').className='tag t-unknown';
+      finishToolProgress('perf',false);
+      setButtons('stopped','performance');stopPerfPoll();stopReportTimer('perf');
+    }else{
+      $('perf-progress').textContent=d.progress||'Running...';$('perf-progress').className='tag t-yes';
+      setToolProgress('perf',d.progress);
+    }
+  }catch(e){}
+}
+function perfDownload(){window.location.href='/api/performance/download';}
+async function perfStop(){await fetch('/api/performance/stop',{method:'POST'});toast('Stopping...');}
+function perfReset(){
+  $('empty-performance').style.display='block';
+  $('performance-active').classList.add('hidden');
+  $('perf-log').textContent='';
+  $('btn-perf-download').disabled=true;
+  setButtons('idle','performance');stopPerfPoll();resetReportTimer('perf');resetToolProgress('perf');
+}
+async function perfLoadGscAccounts(){
+  const sel=$('perf-gsc-account');
+  try{
+    const r=await fetch('/api/gsc/accounts');
+    const accs=await r.json();
+    if(accs&&accs.length){
+      sel.innerHTML='<option value="">None</option>'+accs.map(a=>'<option value="'+esc(a.email)+'">'+esc(a.email)+'</option>').join('');
+    }else{
+      sel.innerHTML='<option value="">No connected accounts - connect one in GSC Audit tab first</option>';
+    }
+  }catch(e){
+    sel.innerHTML='<option value="">Could not load accounts</option>';
+  }
+}
+async function perfLoadGa4Properties(){
+  const email=$('perf-gsc-account').value;
+  const sel=$('perf-ga4-property');
+  if(!email){sel.innerHTML='<option value="">Select a GSC account first</option>';return;}
+  sel.innerHTML='<option value="">Loading GA4 properties...</option>';
+  try{
+    const r=await fetch('/api/performance/ga4-properties?account='+encodeURIComponent(email));
+    const d=await r.json();
+    if(d.error){sel.innerHTML='<option value="">'+esc(d.error)+'</option>';return;}
+    if(!d.properties||!d.properties.length){sel.innerHTML='<option value="">No GA4 properties visible to this account</option>';return;}
+    sel.innerHTML='<option value="">None</option>'+d.properties.map(p=>
+      '<option value="'+esc(p.property)+'">'+esc(p.displayName)+' ('+esc(p.accountName)+')</option>').join('');
+  }catch(e){
+    sel.innerHTML='<option value="">Could not load GA4 properties</option>';
+  }
 }
 
 /* ===================== keyword search volume ===================== */

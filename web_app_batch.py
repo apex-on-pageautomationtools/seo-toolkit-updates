@@ -3966,6 +3966,134 @@ def api_geo_download():
 
 
 # --------------------------------------------------------------------------- #
+# Performance Report - standalone monthly deck built from real GSC + GA4 data.
+# Deliberately its own tool, not folded into GSC Audit or any other report.
+# --------------------------------------------------------------------------- #
+perf_state = {"status": "idle", "log": [], "domain": "", "output_file": "", "error_msg": "", "progress": ""}
+perf_lock = threading.Lock()
+perf_stop = threading.Event()
+
+
+def _run_performance_report(domain, gsc_account, ga4_property, days):
+    with perf_lock:
+        perf_state.update({"status": "running", "log": [], "domain": domain,
+                           "output_file": "", "error_msg": "", "progress": "Starting..."})
+    perf_stop.clear()
+    activity(f"Performance Report started ({domain})")
+
+    def _log(msg):
+        with perf_lock:
+            perf_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            if msg.startswith("["):
+                perf_state["progress"] = msg
+
+    out_dir = _domain_folder(domain, "performance")
+    out_path = os.path.join(out_dir, f"Performance Report - {domain}.pptx")
+
+    python_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "python", "python.exe")
+    script = os.path.join(SCRIPTS_DIR, "generate_performance_report.py")
+    cmd = [python_exe, "-u", script, domain, "--out", out_path, "--days", str(days)]
+    if gsc_account:
+        cmd += ["--gsc-account", gsc_account]
+    if ga4_property:
+        cmd += ["--ga4-property", ga4_property]
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, bufsize=1, cwd=SCRIPTS_DIR,
+                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        for line in proc.stdout:
+            if perf_stop.is_set():
+                proc.kill()
+                _log("Stopped by user.")
+                with perf_lock:
+                    perf_state["status"] = "stopped"
+                return
+            _log(line.rstrip())
+        proc.wait()
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            with perf_lock:
+                perf_state["status"] = "error"
+                perf_state["error_msg"] = f"Script failed (exit code {proc.returncode})"
+            _log(f"Script exited with code {proc.returncode}")
+            return
+        with perf_lock:
+            perf_state["status"] = "completed"
+            perf_state["output_file"] = out_path
+        _log("Done.")
+    except Exception as e:
+        _log(f"Error: {e}")
+        with perf_lock:
+            perf_state["status"] = "error"
+            perf_state["error_msg"] = str(e)
+
+
+@app.route("/api/performance/ga4-properties")
+def api_performance_ga4_properties():
+    email = (request.args.get("account") or "").strip()
+    if not email:
+        return jsonify({"error": "account is required"}), 400
+    try:
+        token = gsc_audit.get_access_token(email)
+        props = gsc_audit.list_ga4_properties(token)
+        return jsonify({"properties": props})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/performance/start", methods=["POST"])
+def api_performance_start():
+    with perf_lock:
+        if perf_state["status"] == "running":
+            return jsonify({"error": "Performance Report already running."}), 400
+    data = request.get_json(silent=True) or {}
+    domain = (data.get("domain") or "").strip()
+    if not domain:
+        return jsonify({"error": "Domain is required."}), 400
+    gsc_account = (data.get("gsc_account") or "").strip() or None
+    ga4_property = (data.get("ga4_property") or "").strip() or None
+    if not gsc_account and not ga4_property:
+        return jsonify({"error": "Connect a GSC account and/or pick a GA4 property first."}), 400
+    try:
+        days = max(7, min(90, int(data.get("days", 28))))
+    except (TypeError, ValueError):
+        days = 28
+    t = threading.Thread(target=_run_performance_report,
+                          args=(domain, gsc_account, ga4_property, days), daemon=True)
+    t.start()
+    return jsonify({"status": "started"})
+
+
+@app.route("/api/performance/status")
+def api_performance_status():
+    with perf_lock:
+        return jsonify({
+            "status": perf_state["status"],
+            "log": perf_state["log"][-200:],
+            "error_msg": perf_state["error_msg"],
+            "has_file": bool(perf_state["output_file"]),
+            "progress": perf_state["progress"],
+        })
+
+
+@app.route("/api/performance/stop", methods=["POST"])
+def api_performance_stop():
+    perf_stop.set()
+    return jsonify({"status": "stopping"})
+
+
+@app.route("/api/performance/download")
+def api_performance_download():
+    with perf_lock:
+        out_path = perf_state.get("output_file", "")
+    if not out_path or not os.path.exists(out_path):
+        return jsonify({"error": "No report available for download."}), 404
+    resp = send_file(out_path, as_attachment=True, download_name=os.path.basename(out_path))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+# --------------------------------------------------------------------------- #
 # Keyword Search Volume - real Google Ads / Keyword Planner data via REST
 # (google_ads_keywords.py). Access is controlled the same way as every other
 # tool - purely via each user's Allowed Tools list in the admin panel, no

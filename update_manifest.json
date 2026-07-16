@@ -18,7 +18,7 @@
     },
     {
       "path": "gsc_audit.py",
-      "hash": "013129850ec066923bbe9f5633053545fc940ffbbbb5495b66d093e1c60cb444",
+      "hash": "ee5108a7624f4d981a36d33137463d2b743006db8c310359bc2b4176fa715e00",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/gsc_audit.py"
     },
     {
@@ -33,7 +33,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "414e477262c66c3e178233df69adc53ff7ad095ae034ec85096a0773025669ae",
+      "hash": "fea0e93cf43dba92681bb53effda1d886f45005e3711cbbe17c3292079beae3f",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -138,7 +138,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "31ae031eb8ef54d1644a042cc88a47cbb0207bae48b85f0ed8d188e905abebe4",
+      "hash": "6defa2dadb58fa0566dc892b4809bb08db8622ba2048e83be303fae0c3b66130",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {
@@ -185,6 +185,11 @@
       "path": "scripts/generate_geo_report.py",
       "hash": "aea73470500d8514ed77bc42ef52c5bba4c3ef68c41bd80b2661ab7f1a15d450",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_geo_report.py"
+    },
+    {
+      "path": "scripts/generate_performance_report.py",
+      "hash": "9e2e76d224ae0579b9cda4916112eaa2b53a54e345fd58a151c954a936f6caeb",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_performance_report.py"
     },
     {
       "path": "scripts/covers/cover_deltafl.png",
