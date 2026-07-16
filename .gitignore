@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
+# Personal/admin-only tools, deliberately separate from the shared app -
+# never distributed via the OTA updater or pushed to the team's repos.
+standalone_tools/
 chrome_profile*/
 *.log
 *.csv
