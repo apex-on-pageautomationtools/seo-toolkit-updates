@@ -50,17 +50,54 @@ def log(msg):
 # Column-name based classification - works for "however many sheets" the input
 # actually has, not a fixed list, since exports vary run to run.
 # --------------------------------------------------------------------------- #
-TITLE_COLS = {"suggested title"}
+TITLE_COLS = {"suggested title", "suggestedtitle"}
 DESC_COLS = {"suggested description"}
 H1_COLS = {"suggested h1"}
-PAGE_COLS = ("page with issues", "page url", "target pages", "url")
-EXISTING_TITLE_COLS = {"existing title", "existing title and h1 tag", "title"}
+# "page with isues" - a typo the team's own hand-built reports consistently
+# use (verified against a real client-facing report) - matched here on input
+# so those sheets aren't silently skipped, without ever writing the typo back
+# out ourselves.
+PAGE_COLS = ("page with issues", "page with isues", "page url", "target pages", "url")
+EXISTING_TITLE_COLS = {"existing title", "existing title and h1 tag", "existing title & h1", "title"}
 EXISTING_DESC_COLS = {"existing description", "description"}
 EXISTING_H1_COLS = {"existing h1", "h1"}
-ALT_COLS = {"suggested alt text", "alt text suggestion"}
+ALT_COLS = {"suggested alt text", "alt text suggestion", "suggested image alt tag"}
 CANON_COLS = {"suggested canonical", "recommended canonical tag", "recommended canonical"}
 EXISTING_CANON_COLS = {"existing canonical", "existing canonical tag"}
-IMAGE_URL_COLS = {"image url"}
+IMAGE_URL_COLS = {"image url", "resource url"}
+
+# Issue types where the team writes ONE generic developer note (not a
+# per-page suggestion) in the first data row only - verified against a real
+# client-facing report (Website Audit Report - anoasisofhealing.com.xlsx).
+# Matched by sheet-name pattern; the boilerplate text is the team's own
+# wording from that report, output under a clean "Suggestion For Developer"
+# header regardless of how the input sheet happened to spell its own column.
+GENERIC_ADVICE_SHEETS = [
+    (re.compile(r"slow loading", re.I),
+     "Optimize the HTML code for the pages specified in the report. This is important because if "
+     "the HTML code of the page isn't optimized, the page will take longer to load. Also, consider "
+     "checking your web server, as it may be the root of the problem. If optimizing your code "
+     "doesn't help, consider moving to a faster web server."),
+    (re.compile(r"orphaned page", re.I),
+     "Review all orphaned pages in your sitemap.xml files and do either of the following: If a page "
+     "is no longer needed, remove it; If a page has valuable content and brings traffic to your "
+     "website, link to it from another page on your website; If a page serves a specific need and "
+     "requires no internal linking, leave it as is."),
+    (re.compile(r"crawl depth", re.I),
+     "Make sure that pages with important content can be reached within a few clicks. If any of "
+     "them are buried too deep in your site, consider changing your internal link architecture."),
+    (re.compile(r"permanent redirect", re.I),
+     "We've identified a permanent (301) redirect issue - please replace the URL in the source page "
+     "with the final destination URL directly, instead of routing through a redirect."),
+    (re.compile(r"text.{0,3}html.{0,3}ratio", re.I),
+     "Split your webpage's text content and code into separate files and compare their size. If the "
+     "size of your code file exceeds the size of the text file, review your page's HTML code and "
+     "consider optimizing its structure and removing embedded scripts and styles."),
+    (re.compile(r"unminified.*(javascript|css)|minif", re.I),
+     "Minify your JavaScript and CSS files. If your webpage uses CSS and JS files that are hosted on "
+     "an external site, contact the website owner and ask them to minify their files. If this issue "
+     "doesn't affect your page load time, simply ignore it."),
+]
 
 
 def _norm(s):
@@ -110,6 +147,44 @@ def _read_sheet(ws):
             continue
         rows.append(list(row))
     return headers, rows
+
+
+def _apply_generic_advice(sheet_name, headers, rows):
+    """Issue types the team never writes a per-page suggestion for (Slow
+    loading speed, orphaned pages in sitemap, page crawl depth, permanent
+    redirects, text/html ratio, unminified JS/CSS) - one boilerplate developer
+    note in the FIRST data row only, blank everywhere else, matching the
+    team's own reports. Note this is applied regardless of what the input
+    sheet's own suggestion column already had (including a merge-forward-
+    filled duplicate on every row) - it always collapses back to row 1 only."""
+    text = None
+    for pattern, boilerplate in GENERIC_ADVICE_SHEETS:
+        if pattern.search(sheet_name):
+            text = boilerplate
+            break
+    if text is None:
+        return headers, rows
+
+    sug_col = None
+    for i, h in enumerate(headers):
+        if "suggest" in _norm(h):
+            sug_col = i
+            break
+    headers = list(headers)
+    if sug_col is None:
+        headers.append("Suggestion For Developer")
+        sug_col = len(headers) - 1
+    else:
+        headers[sug_col] = "Suggestion For Developer"
+
+    new_rows = []
+    for i, row in enumerate(rows):
+        row = list(row)
+        while len(row) <= sug_col:
+            row.append(None)
+        row[sug_col] = text if i == 0 else None
+        new_rows.append(row)
+    return headers, new_rows
 
 
 # --------------------------------------------------------------------------- #
@@ -637,9 +712,37 @@ def _classify_xls_report(headers):
     return (distinctive[0] if distinctive else "Pages") + " Issues"
 
 
+def _write_all_issue_sheet(wb_out, issue_sheet_names, label):
+    """"All issue" index sheet (verified against a real client-facing report) -
+    lists every issue-type sheet actually present in this run with a "Click
+    Here For Solution" pointer to it. The team's own version also shows an
+    overall "Issues : NN%" score, but that comes from SEranking's own site
+    health scoring model which this script has no access to (it only ever
+    sees the per-issue exports, never an aggregate score) - shown as "Issues
+    Found" instead of guessing a number, consistent with never fabricating
+    data this script can't actually verify."""
+    ws = wb_out.create_sheet("All issue")
+    header_font = Font(bold=True, size=12, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="2F5496")
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    ws.cell(1, 1, "Issues Found").font = header_font
+    ws.cell(1, 1).fill = header_fill
+    ws.cell(1, 1).alignment = left
+    ws.cell(1, 2, label).font = header_font
+    ws.cell(1, 2).fill = header_fill
+    ws.cell(1, 2).alignment = left
+    for r, name in enumerate(issue_sheet_names, 2):
+        ws.cell(r, 1, name).alignment = left
+        ws.cell(r, 2, "Click Here For Solution").alignment = left
+    ws.column_dimensions["A"].width = 42
+    ws.column_dimensions["B"].width = 34
+    wb_out.move_sheet("All issue", offset=-len(wb_out.sheetnames) + 1)
+
+
 def process_workbook(in_path, out_path, brand, pdf_path=None, zip_path=None):
     wb_out = openpyxl.Workbook()
     wb_out.remove(wb_out.active)
+    issue_sheet_names = []
 
     # Pre-scan total row count across all sources so the AI paid-tier gate
     # (onpage2.BULK_AI_PAGE_LIMIT) reflects the real scale of this run before
@@ -661,12 +764,21 @@ def process_workbook(in_path, out_path, brand, pdf_path=None, zip_path=None):
         wb_in = openpyxl.load_workbook(in_path, data_only=True)
         for i, sheet_name in enumerate(wb_in.sheetnames):
             log(f"[{i + 1}/{len(wb_in.sheetnames)}] Processing '{sheet_name}'...")
+            # An "All issue"-style summary sheet already in the input (e.g. a
+            # previously-generated report accidentally fed back in) would
+            # collide with the one this script builds below - skip copying
+            # it through rather than producing a workbook with two sheets of
+            # the same name (undefined/broken behavior in Excel).
+            if _norm(sheet_name) == "all issue":
+                continue
             ws_in = wb_in[sheet_name]
             headers, rows = _read_sheet(ws_in)
             if not headers:
                 continue
             headers, rows = _apply_suggestions(sheet_name, headers, rows, brand)
+            headers, rows = _apply_generic_advice(sheet_name, headers, rows)
             _write_sheet(wb_out, sheet_name, headers, rows)
+            issue_sheet_names.append(sheet_name)
 
     if zip_path:
         log(f"Reading zip: {zip_path}")
@@ -676,14 +788,22 @@ def process_workbook(in_path, out_path, brand, pdf_path=None, zip_path=None):
             log(f"[{i + 1}/{len(members)}] '{fname}' -> '{display_name}' ({len(rows)} row(s))...")
             if not headers:
                 continue
+            if _norm(display_name) == "all issue":
+                continue
             headers, rows = _apply_suggestions(display_name, headers, rows, brand)
+            headers, rows = _apply_generic_advice(display_name, headers, rows)
             _write_sheet(wb_out, display_name, headers, rows)
+            issue_sheet_names.append(display_name)
 
     if pdf_path:
         log(f"Reading PDF: {pdf_path}")
         rows = build_pdf_summary_rows(pdf_path)
         log(f"   Extracted {len(rows)} line(s) of text.")
         _write_sheet(wb_out, "PDF Summary", ["#", "Text"], rows)
+
+    if issue_sheet_names:
+        label = brand or Path(in_path or zip_path or out_path).stem
+        _write_all_issue_sheet(wb_out, issue_sheet_names, label)
 
     wb_out.save(out_path)
     log(f"[DONE] {out_path}")
