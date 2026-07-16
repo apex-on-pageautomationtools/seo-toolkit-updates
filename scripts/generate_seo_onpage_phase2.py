@@ -1758,9 +1758,28 @@ def audit_site(domain, pages_data, dry_run=False):
     # www vs non-www (issue if www serves 200 without redirecting to non-www)
     if dry_run:
         f["www_redirect_issue"] = True
+        f["url_version_checks"] = []
     else:
         wst, _, wfinal = _http(f"https://www.{d}/")
         f["www_redirect_issue"] = wst == 200 and "www." in urllib.parse.urlparse(wfinal).netloc
+
+        # Real per-version check (http/https x www/non-www) for the
+        # Redirection Issue Check table - which version was actually
+        # requested and where it really ended up, not just a single
+        # yes/no www flag.
+        f["url_version_checks"] = []
+        for scheme in ("http", "https"):
+            for host_prefix in ("", "www."):
+                variant = f"{scheme}://{host_prefix}{d}/"
+                try:
+                    vst, _, vfinal = _http(variant)
+                except Exception:
+                    vst, vfinal = 0, ""
+                f["url_version_checks"].append({
+                    "version": variant,
+                    "status": vst if vst else "No response",
+                    "final_url": vfinal or "-",
+                })
 
     # custom 404 (a clearly-missing URL should return 404, not 200/redirect)
     f["has_custom_404"] = (not dry_run) and _http(root + "/sos-404-probe-zzz")[0] == 404
@@ -2381,8 +2400,38 @@ def _setup_docx(domain, use_cover=True):
         rec.font.bold = True
         para("")
 
+    def simple_table(headers, rows):
+        """A generic bordered Word table (orange header row, matching the
+        existing Broken Link/Redirection tables' house style) - for any
+        shared section helper (_sec_external_links, etc.) that needs to show
+        real per-row data instead of just a summary sentence."""
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+        tbl = doc.add_table(rows=1 + len(rows), cols=len(headers))
+        tbl.style = 'Table Grid'
+        for ci, htext in enumerate(headers):
+            cell = tbl.rows[0].cells[ci]
+            cell.text = ""
+            p = cell.paragraphs[0]
+            r = p.add_run(htext)
+            r.font.name = FONT
+            r.font.size = Pt(SIZE)
+            r.font.bold = True
+            shd = OxmlElement('w:shd')
+            shd.set(qn('w:fill'), 'FFC000')
+            shd.set(qn('w:val'), 'clear')
+            cell._tc.get_or_add_tcPr().append(shd)
+        for ri, row_vals in enumerate(rows, start=1):
+            for ci, val in enumerate(row_vals):
+                cell = tbl.rows[ri].cells[ci]
+                cell.text = ""
+                r = cell.paragraphs[0].add_run(str(val))
+                r.font.name = FONT
+                r.font.size = Pt(SIZE)
+
     return doc, {"label_body": label_body, "para": para, "para_red": para_red, "shot": shot,
                  "ribbon": ribbon, "result": result, "green": green, "summary_table": summary_table,
+                 "simple_table": simple_table,
                  "d": d, "root": root, "FONT": FONT, "SIZE": SIZE, "_style_run": _style_run}
 
 
@@ -2549,6 +2598,10 @@ def _sec_redirection(h, findings, captured):
                     "the www version to the non-www version using a 301 permanent redirect.")
     else:
         h["result"]("No redirection issue found on the website. It is good from a search engine point of view.")
+    url_checks = findings.get("url_version_checks") or []
+    if url_checks:
+        h["simple_table"](("URL Version Checked", "Status Code", "Final Destination"),
+                          [(item["version"], item["status"], item["final_url"]) for item in url_checks])
     h["shot"]("redirect", captured)
 
 def _sec_404(h, findings, root, captured):
@@ -2581,8 +2634,10 @@ def _sec_external_links(h, findings, captured):
     h["result"](f"{findings.get('ext_count', len(detail))} external links found on the target pages checked.")
     if detail:
         h["para_red"]("Please verify whether any external links are harmful or beneficial as per need.")
-        for item in detail[:30]:            # cap the listing - large sites can have hundreds
-            h["para"](f"  {item['link']}   (on {item['page']})")
+        # Capped at 30 rows in the table itself - large sites can have hundreds,
+        # and an unbounded table makes the docx unwieldy to review.
+        h["simple_table"](("Source Page", "External Link"),
+                          [(item["page"], item["link"]) for item in detail[:30]])
         if len(detail) > 30:
             h["para"](f"  ...and {len(detail) - 30} more.")
 
@@ -3987,6 +4042,20 @@ def _build_docx_gamma(domain, pages_data, findings, captured, brand, out_path):
                    "version to the non-www version using a 301 permanent redirect.")
     else:
         conclusion("No redirection issue found on the website. It is good from a search engine point of view.")
+    url_checks = findings.get("url_version_checks") or []
+    if url_checks:
+        vtbl = doc.add_table(rows=1 + len(url_checks), cols=3)
+        vtbl.style = 'Table Grid'
+        for ci, htext in enumerate(("URL Version Checked", "Status Code", "Final Destination")):
+            c = vtbl.rows[0].cells[ci]
+            _shade(c._tc.get_or_add_tcPr(), "FFC000")
+            c.text = ""
+            _run(c.paragraphs[0], htext, bold=True, color=BLACK, size=11)
+        for ri, item in enumerate(url_checks, start=1):
+            for ci, val in enumerate((item["version"], str(item["status"]), item["final_url"])):
+                c = vtbl.rows[ri].cells[ci]
+                c.text = ""
+                _run(c.paragraphs[0], str(val), bold=False, color=BLACK, size=11)
 
     # ---- External Linking Suggestion ----
     header("External Linking Suggestion")
@@ -3994,9 +4063,25 @@ def _build_docx_gamma(domain, pages_data, findings, captured, brand, out_path):
                 "External linking refers to the practice of hyperlinking to pages on different websites. "
                 "These links can enhance the credibility of your content by directing users to reputable "
                 "sources and providing additional information.")
+    ext_detail = findings.get("external_links_detail") or []
     ext_count = findings.get("ext_count", 0)
-    conclusion(f"{ext_count} external link(s) are found on the website, and none appear harmful from an "
-               "SEO perspective.")
+    if ext_detail:
+        conclusion(f"{ext_count} external link(s) are found on the website, and none appear harmful from "
+                   "an SEO perspective. See the full list below.")
+        etbl = doc.add_table(rows=1 + len(ext_detail), cols=2)
+        etbl.style = 'Table Grid'
+        for ci, htext in enumerate(("Source Page", "External Link")):
+            c = etbl.rows[0].cells[ci]
+            _shade(c._tc.get_or_add_tcPr(), "FFC000")
+            c.text = ""
+            _run(c.paragraphs[0], htext, bold=True, color=BLACK, size=11)
+        for ri, item in enumerate(ext_detail, start=1):
+            for ci, val in enumerate((item.get("page", ""), item.get("link", ""))):
+                c = etbl.rows[ri].cells[ci]
+                c.text = ""
+                _run(c.paragraphs[0], str(val), bold=False, color=BLACK, size=11)
+    else:
+        conclusion("No external links were found on the target pages checked.")
 
     # ---- Internal Linking Suggestion ----
     header("Internal Linking Suggestion")
