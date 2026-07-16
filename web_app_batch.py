@@ -271,7 +271,8 @@ def _ai_key_env():
     for cfg_key, env_key in (("gemini_api_key", "GEMINI_API_KEY"),
                               ("groq_api_key", "GROQ_API_KEY"),
                               ("openrouter_api_key", "OPENROUTER_API_KEY"),
-                              ("openai_api_key", "OPENAI_API_KEY")):
+                              ("openai_api_key", "OPENAI_API_KEY"),
+                              ("firecrawl_api_key", "FIRECRAWL_API_KEY")):
         val = CONFIG.get(cfg_key, "").strip()
         if val:
             env[env_key] = val
@@ -3487,11 +3488,43 @@ def _submit_wayback_url(url, max_tries=3, timeout=45):
     """Submit `url` to the Wayback Machine's Save Page Now, rotating through a
     different proxy each attempt (archive.org blocks/limits by IP, so retrying on
     the SAME IP would just fail the same way). Capped at max_tries so a slow/blocked
-    archive.org can never hang the job - returns None on exhausted retries."""
+    archive.org can never hang the job - returns None on exhausted retries.
+
+    Uses the authenticated SPN2 API (POST + Authorization: LOW key:secret) when
+    an archive.org S3 API key is configured (Admin -> API Keys -
+    archive.org account -> Settings -> "S3 API Keys", free) - the anonymous GET
+    endpoint this falls back to without a key frequently hands back an EXISTING
+    snapshot instead of making a fresh capture (confirmed live: a same-day
+    resubmission returned an 11-hour-old snapshot). SPN2 is far more reliable
+    about actually capturing fresh. Either way, the caller already only ever
+    trusts the snapshot timestamp Wayback's own response embeds - see
+    _parse_wayback_snapshot_time - never assumes success means "fresh"."""
     import re as _re
+    access_key = CONFIG.get("archive_org_access_key", "").strip()
+    secret_key = CONFIG.get("archive_org_secret_key", "").strip()
     proxies_pool = list(CONFIG.get("proxies", [])) + _shared_proxies()
     attempts = (random.sample(proxies_pool, min(max_tries, len(proxies_pool)))
                 if proxies_pool else [None] * max_tries)
+
+    if access_key and secret_key:
+        for proxy in attempts:
+            try:
+                kwargs = {}
+                if proxy:
+                    pu = _wayback_proxy_url(proxy)
+                    kwargs["proxies"] = {"http": pu, "https": pu}
+                r = http_requests.post(
+                    "https://web.archive.org/save/", data={"url": url, "capture_all": "1"},
+                    headers={"User-Agent": "Mozilla/5.0 SEOToolkitPro",
+                            "Authorization": f"LOW {access_key}:{secret_key}"},
+                    timeout=timeout, **kwargs)
+                loc = r.headers.get("Content-Location", "")
+                if loc and _re.search(r"/web/\d{10,}/https?://", loc):
+                    return "https://web.archive.org" + loc
+            except Exception:
+                continue
+        return None
+
     save_url = "https://web.archive.org/save/" + url
     for proxy in attempts:
         try:
@@ -3832,6 +3865,23 @@ geo_lock = threading.Lock()
 geo_stop = threading.Event()
 
 
+def _geo_safe_domain(domain):
+    """Mirrors generate_seo_onpage_phase2.safe_domain() exactly (strip scheme,
+    lowercase, strip a leading www., strip path) - generate_geo_report.py
+    normalizes the domain this same way before naming its output zip, so this
+    MUST match or the completion check below looks for a filename that was
+    never created (confirmed live: entering "https://kidscover.be/" produced
+    a working "GEO Report - kidscover.be.zip", but the check looked for the
+    literal "GEO Report - https://kidscover.be/.zip" and reported the run as
+    failed even though it succeeded - exit code 0, but marked "Script Failed
+    (Exit Code 0)" anyway)."""
+    d = (domain or "").strip().lower()
+    import re as _re
+    d = _re.sub(r"^https?://", "", d).rstrip("/")
+    d = _re.sub(r"^www\.", "", d)
+    return d.split("/")[0]
+
+
 def _run_geo_report(domain, targets_path, check_visibility, keywords, pages, faqs_per_page=5):
     with geo_lock:
         geo_state.update({"status": "running", "log": [], "domain": domain,
@@ -3876,7 +3926,7 @@ def _run_geo_report(domain, targets_path, check_visibility, keywords, pages, faq
                 return
             _log(line.rstrip())
         proc.wait()
-        out_path = os.path.join(out_dir, f"GEO Report - {domain}.zip")
+        out_path = os.path.join(out_dir, f"GEO Report - {_geo_safe_domain(domain)}.zip")
         if proc.returncode != 0 or not os.path.exists(out_path):
             with geo_lock:
                 geo_state["status"] = "error"
@@ -3988,7 +4038,7 @@ def _run_performance_report(domain, gsc_account, ga4_property, days):
                 perf_state["progress"] = msg
 
     out_dir = _domain_folder(domain, "performance")
-    out_path = os.path.join(out_dir, f"Performance Report - {domain}.pptx")
+    out_path = os.path.join(out_dir, f"Performance Report - {_geo_safe_domain(domain)}.pptx")
 
     python_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "python", "python.exe")
     script = os.path.join(SCRIPTS_DIR, "generate_performance_report.py")
@@ -4732,8 +4782,9 @@ def api_auth_is_admin():
 # Admin config (Apps Script URL, API key sync)
 # --------------------------------------------------------------------------- #
 SENSITIVE_KEYS = {"psi_api_key", "gemini_api_key", "groq_api_key", "openrouter_api_key",
-                  "imgbb_api_key", "gsc_client_id", "gsc_client_secret",
-                  "auth_api_url", "user_auth_url", "gsc_projects"}
+                  "openai_api_key", "imgbb_api_key", "archive_org_access_key",
+                  "archive_org_secret_key", "firecrawl_api_key", "gsc_client_id",
+                  "gsc_client_secret", "auth_api_url", "user_auth_url", "gsc_projects"}
 
 @app.route("/api/admin/save_config", methods=["POST"])
 def api_admin_save_config():
@@ -4774,7 +4825,11 @@ def api_admin_sync_keys():
 def api_admin_keys_status():
     key_names = {"psi_api_key": "PageSpeed API Key", "gemini_api_key": "Gemini API Key",
                 "groq_api_key": "Groq API Key", "openrouter_api_key": "OpenRouter API Key",
-                "imgbb_api_key": "ImgBB API Key (ranking screenshot URLs)"}
+                "openai_api_key": "OpenAI API Key (bulk-gated paid tier)",
+                "imgbb_api_key": "ImgBB API Key (ranking screenshot URLs)",
+                "archive_org_access_key": "Archive.org S3 Access Key (Wayback fresh captures)",
+                "archive_org_secret_key": "Archive.org S3 Secret Key (Wayback fresh captures)",
+                "firecrawl_api_key": "Firecrawl API Key (whole-site llms.txt for GEO)"}
     status = {}
     for k, label in key_names.items():
         val = CONFIG.get(k, "")

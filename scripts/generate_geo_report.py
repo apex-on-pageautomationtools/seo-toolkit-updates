@@ -466,6 +466,65 @@ def _html_to_markdown(html, base_url):
     return "\n\n".join(out)
 
 
+def generate_llms_txt_via_firecrawl(domain, out_dir, timeout_s=180):
+    """Real whole-site llms.txt/llms-full.txt via Firecrawl's own API - the same
+    service llmstxt.firecrawl.dev uses, which is what the team's manual process
+    already relies on. Crawls the ENTIRE site (not just this run's target
+    pages), so this is a materially different, more complete result than
+    build_llms_full_txt()'s target-pages-only fallback below. Requires
+    FIRECRAWL_API_KEY (Admin -> API Keys) - returns False (caller falls back)
+    if no key is configured or the call fails; never raises."""
+    import json as _json
+    import time as _time
+    import urllib.request
+    import urllib.error
+    api_key = os.environ.get("FIRECRAWL_API_KEY", "").strip()
+    if not api_key:
+        return False
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    try:
+        body = _json.dumps({"url": f"https://{domain}", "maxUrls": 100, "showFullText": True}).encode()
+        req = urllib.request.Request("https://api.firecrawl.dev/v1/llmstxt", data=body,
+                                     headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            job = _json.loads(r.read().decode())
+        job_id = job.get("id")
+        if not job_id:
+            log(f"   [warn] Firecrawl llmstxt: no job id in response: {job}")
+            return False
+
+        deadline = _time.time() + timeout_s
+        while _time.time() < deadline:
+            _time.sleep(5)
+            req = urllib.request.Request(f"https://api.firecrawl.dev/v1/llmstxt/{job_id}", headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                status = _json.loads(r.read().decode())
+            state = status.get("status")
+            if state == "completed":
+                data = status.get("data", {})
+                full_txt = data.get("llmsfulltxt") or data.get("llmstxt") or ""
+                if not full_txt:
+                    log("   [warn] Firecrawl llmstxt completed but returned no text")
+                    return False
+                (out_dir / "llms-full.txt").write_text(full_txt, encoding="utf-8")
+                short_txt = data.get("llmstxt") or ""
+                if short_txt:
+                    (out_dir / "llms.txt").write_text(short_txt, encoding="utf-8")
+                log(f"   -> llms-full.txt written via Firecrawl (whole-site crawl)")
+                return True
+            if state == "failed":
+                log(f"   [warn] Firecrawl llmstxt job failed: {status.get('error', 'unknown error')}")
+                return False
+        log("   [warn] Firecrawl llmstxt job timed out - falling back to target-pages-only build")
+        return False
+    except urllib.error.HTTPError as e:
+        log(f"   [warn] Firecrawl llmstxt HTTP {e.code}: {e.read().decode('utf-8', 'ignore')[:200]}")
+        return False
+    except Exception as e:
+        log(f"   [warn] Firecrawl llmstxt failed: {type(e).__name__}: {e}")
+        return False
+
+
 def build_llms_full_txt(domain, pages_data, faqs_by_page, out_path):
     lines = [f"# https://{domain}/ llms-full.txt", ""]
     for pd in pages_data:
@@ -650,6 +709,16 @@ def generate_content_modifications(page_data, brand, n=2):
         "lead-in question naturally answered by the surrounding text. Each passage you pick MUST "
         "be an EXACT quote copied from the content above (so it can be found with a find/replace) "
         "- do not paraphrase the 'find' text.\n"
+        "Only pick genuine marketing/informational copy a visitor would actually read (product "
+        "descriptions, service info, headings, answers to real questions). NEVER pick boilerplate/"
+        "system text - cookie notices, privacy/legal disclaimers, footer copyright lines, cart/"
+        "checkout messages, or any other technical notice - those aren't real content to optimize "
+        "and turning one into a question (e.g. a cookie warning into 'Why does X not work...') "
+        "makes no sense. If nothing on the page qualifies, return an empty list rather than picking "
+        "one of these anyway.\n"
+        "Write 'replace' in EXACTLY the same language as the original 'find' passage - if the "
+        "content is in Dutch/German/French/etc., the edited version must stay in that same "
+        "language, never translated to English.\n"
         'Return ONLY JSON: [{"find": "<exact original passage>", "replace": "<edited passage>"}, ...]'
     )
     result = op._ai_suggest(prompt)
@@ -677,12 +746,22 @@ def build_content_modification_docx(domain, pages_data, brand, out_path):
     for pd in pages_data:
         log(f"   -> content modifications: {pd['url']}")
         mods = generate_content_modifications(pd, brand)
-        if not mods:
-            continue
-        any_content = True
         p = doc.add_paragraph()
         r = p.add_run(f"Page URL: - {pd['url']}")
         r.bold = True
+        if not mods:
+            # Every page gets its own section, even with nothing to suggest -
+            # a page silently missing from this doc used to read as "we forgot
+            # to check it", not "we checked it and there was nothing worth
+            # editing" (e.g. the page's body text was empty, or every real
+            # sentence was already fine).
+            no_body = not (pd.get("body_text") or "").strip()
+            note = doc.add_paragraph()
+            note.add_run("No content found on this page to check." if no_body else
+                         "No content modification suggestions for this page - the "
+                         "existing copy didn't need changes.").italic = True
+            continue
+        any_content = True
         for m in mods:
             p1 = doc.add_paragraph()
             r1 = p1.add_run(f"Find: - {m['find']}")
@@ -763,6 +842,13 @@ def generate_internal_links(page_data, other_pages, sitemap_urls, brand, n=2):
         "paraphrase) where inserting an internal link to ONE OF THE PAGES LISTED ABOVE would make "
         "sense - the target must be genuinely relevant to what the sentence is about, not just any "
         "page. Use a natural anchor text that is a substring of that same sentence.\n"
+        "Only pick real prose sentences a visitor would actually read. Crawled text from category/"
+        "listing pages often runs product cards together as one block (name + rating + price + "
+        "'Add to wishlist'/'Add to cart'/'Add to compare' button labels, e.g. 'Rating: 0% €29,99 "
+        "Aan verlanglijst toevoegen In winkelwagen') - that is UI/button boilerplate, NOT a sentence, "
+        "even though it appears verbatim in the content above. Never pick a passage that contains "
+        "cart/wishlist/compare/rating widget text. If nothing on the page has a real sentence worth "
+        "linking from, return an empty list rather than picking one of these anyway.\n"
         'Return ONLY JSON: [{"find": "<exact original sentence>", "anchor_text": "<words within '
         'find that become the link>", "target_url": "<one of the exact page URLs listed above>"}, ...]'
     )
@@ -827,12 +913,15 @@ def build_internal_linking_docx(domain, pages_data, brand, out_path):
         others = [o for o in pages_data if o["url"] != pd["url"]]
         log(f"   -> internal linking: {pd['url']}")
         links = generate_internal_links(pd, others, sitemap_urls, brand)
-        if not links:
-            continue
-        any_content = True
         p = doc.add_paragraph()
         r = p.add_run(f"Page URL: - {pd['url']}")
         r.bold = True
+        if not links:
+            note = doc.add_paragraph()
+            note.add_run("No internal linking suggestions for this page - no real sentence on it "
+                         "had a genuinely relevant target page to link to.").italic = True
+            continue
+        any_content = True
         for l in links:
             p1 = doc.add_paragraph()
             r1 = p1.add_run("Find With: - ")
@@ -933,7 +1022,8 @@ def main():
                              seed_keywords=seed_keywords)
 
     if not args.keywords_only:
-        build_llms_full_txt(domain, pages_data, faqs_by_page, work / "llms-full.txt")
+        if not generate_llms_txt_via_firecrawl(domain, work):
+            build_llms_full_txt(domain, pages_data, faqs_by_page, work / "llms-full.txt")
         build_schema_docx(domain, faqs_by_page,
                            work / f"{domain} - (GEO Work) Schema Suggestions.docx")
         build_technical_optimization_docx(domain, pages_data, brand,
