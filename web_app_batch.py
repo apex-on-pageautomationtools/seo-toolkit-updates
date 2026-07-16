@@ -4088,7 +4088,14 @@ def api_performance_ga4_properties():
         props = gsc_audit.list_ga4_properties(token)
         return jsonify({"properties": props})
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        # This account was connected before analytics.readonly was added to
+        # SCOPES - its stored refresh_token only carries whatever scopes it
+        # was originally granted, so a GA4 call 403s with "insufficient
+        # authentication scopes" until it's reconnected. Flagged separately
+        # so the frontend can offer a one-click Reconnect instead of just
+        # showing a raw error string.
+        needs_reauth = "insufficient authentication scopes" in str(e).lower()
+        return jsonify({"error": str(e), "needs_reauth": needs_reauth}), 400
 
 
 @app.route("/api/performance/start", methods=["POST"])

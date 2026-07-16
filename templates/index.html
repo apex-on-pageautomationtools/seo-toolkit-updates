@@ -1259,6 +1259,10 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <select id="perf-ga4-property">
           <option value="">Select a GSC account first</option>
         </select>
+        <div id="perf-ga4-reauth" class="hidden" style="margin-top:6px">
+          <span style="font-size:12px;color:var(--text-3)">This account needs to be reconnected to grant Analytics access.</span>
+          <button class="btn btn-tonal" style="font-size:12px;padding:4px 12px;margin-left:6px" onclick="perfReconnectForGa4()">Reconnect</button>
+        </div>
       </div>
       <div class="field">
         <label>Reporting window</label>
@@ -3445,18 +3449,41 @@ async function perfLoadGscAccounts(){
 async function perfLoadGa4Properties(){
   const email=$('perf-gsc-account').value;
   const sel=$('perf-ga4-property');
+  const reauth=$('perf-ga4-reauth');
+  reauth.classList.add('hidden');
   if(!email){sel.innerHTML='<option value="">Select a GSC account first</option>';return;}
   sel.innerHTML='<option value="">Loading GA4 properties...</option>';
   try{
     const r=await fetch('/api/performance/ga4-properties?account='+encodeURIComponent(email));
     const d=await r.json();
-    if(d.error){sel.innerHTML='<option value="">'+esc(d.error)+'</option>';return;}
+    if(d.error){
+      sel.innerHTML='<option value="">'+esc(d.error)+'</option>';
+      if(d.needs_reauth)reauth.classList.remove('hidden');
+      return;
+    }
     if(!d.properties||!d.properties.length){sel.innerHTML='<option value="">No GA4 properties visible to this account</option>';return;}
     sel.innerHTML='<option value="">None</option>'+d.properties.map(p=>
       '<option value="'+esc(p.property)+'">'+esc(p.displayName)+' ('+esc(p.accountName)+')</option>').join('');
   }catch(e){
     sel.innerHTML='<option value="">Could not load GA4 properties</option>';
   }
+}
+async function perfReconnectForGa4(){
+  // Reuses the exact same OAuth flow GSC Audit's "Connect" button already
+  // uses - this account needs to go through Google's consent screen again
+  // to pick up the analytics.readonly scope its stored token doesn't have.
+  // Whichever Google account is logged into in the browser that opens
+  // becomes the reconnected one - same as reconnecting from GSC Audit.
+  toast('Launching Google login to reconnect this account...');
+  try{
+    const r=await fetch('/api/gsc/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({browser:'edge'})});
+    const d=await r.json();
+    if(d.error){toast(d.error,'err');return;}
+    toast('Reconnected: '+d.email);
+    await perfLoadGscAccounts();
+    $('perf-gsc-account').value=d.email;
+    await perfLoadGa4Properties();
+  }catch(e){toast('Reconnect failed','err');}
 }
 
 /* ===================== keyword search volume ===================== */
