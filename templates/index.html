@@ -1417,18 +1417,25 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
   <div class="col">
     <section class="card" style="min-height:520px;display:flex;flex-direction:column">
 
-      <!-- progress -->
-      <div class="statusbar">
-        <span class="badge b-idle" id="badge"><span class="dot d-idle" id="dot"></span><span id="status-txt">Idle</span></span>
-        <span class="count-chip" id="count">0 results</span>
-        <button class="btn btn-tonal btn-sm" id="btn-export" onclick="exportCSV()" disabled style="margin-left:auto">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Export CSV
-        </button>
+      <!-- progress - only relevant to the 4 batch checkers (ranking/index/
+           count/backlink); every report tool has its own dedicated status
+           tag + progress bar inside its own panel, so this whole block is
+           hidden for those tabs in switchTab() to avoid showing two
+           progress bars at once (confirmed live: this one sat stuck at 0%
+           above the tool's own real one). -->
+      <div id="shared-status-block">
+        <div class="statusbar">
+          <span class="badge b-idle" id="badge"><span class="dot d-idle" id="dot"></span><span id="status-txt">Idle</span></span>
+          <span class="count-chip" id="count">0 results</span>
+          <button class="btn btn-tonal btn-sm" id="btn-export" onclick="exportCSV()" disabled style="margin-left:auto">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export CSV
+          </button>
+        </div>
+        <div class="cur-kw" id="cur-kw"></div>
+        <div class="prog"><div class="prog-bar" id="prog"></div></div>
+        <div class="prog-lbl" id="prog-lbl">0 / 0</div>
       </div>
-      <div class="cur-kw" id="cur-kw"></div>
-      <div class="prog"><div class="prog-bar" id="prog"></div></div>
-      <div class="prog-lbl" id="prog-lbl">0 / 0</div>
 
       <div class="results-head" style="margin-top:18px">
         <div class="card-t" style="margin:0">
@@ -2291,6 +2298,10 @@ function switchTab(m){
   // not just the current one) - only useful/shown on the Admin tab, so each tool's
   // own panel only ever shows that tool's own log, matching every other tool here.
   $('activity-bar').style.display=m==='admin'?'':'none';
+  // Only the 4 batch checkers use this shared status/progress block - every
+  // report tool has its own dedicated one inside its own panel, so showing
+  // both at once read as two progress bars for the same run.
+  $('shared-status-block').style.display=BATCH.includes(m)?'':'none';
   if(m==='admin'){admLoadUsers();admLoadBuildings();admLoadProxies();admLoadCities();admLoadConfig();admLoadKeysStatus();fetchActivityLog();}
   if(m==='crawl'){crawlLoadUrls();}
   if(m==='performance'){perfLoadGscAccounts();}
