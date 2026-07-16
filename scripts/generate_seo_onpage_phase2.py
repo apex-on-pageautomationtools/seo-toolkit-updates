@@ -6941,6 +6941,10 @@ def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, f
         "james": _build_docx_james, "omega": _build_docx_omega,
         "neon": _build_docx_neon, "xenon": _build_docx_xenon,
         "gamma": _build_docx_gamma, "sara": _build_docx_sara,
+        # "beta" doesn't have its own reference yet - deliberately aliased to
+        # "peta" for now (confirmed with the team) rather than a hidden
+        # accidental alias. Give it a real _build_docx_beta once a distinct
+        # reference is available.
         "peta": _build_docx_peta, "beta": _build_docx_peta,
         "deltafl": _build_docx_deltafl, "deltafvr": _build_docx_deltafvr,
         "deltaup": _build_docx_deltaup, "octal": _build_docx_octal,

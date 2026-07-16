@@ -516,11 +516,33 @@ def _read_seranking_zip(zip_path):
     return out
 
 
-# Column-signature -> display name. Matched against a normalized set of header
-# names; order matters (more specific signatures checked first). The chosen
-# name is fed into the SAME _apply_suggestions()/_NAME_JUDGMENT_RULES path the
-# combined-.xlsx sheets use, so e.g. "Title Issues" still gets a real
-# "Suggested Title" column generated - no separate suggestion logic needed.
+_GENERIC_XLS_STEMS = {"report", "export", "data", "sheet", "untitled", "download"}
+
+
+def _display_name_from_filename(fname):
+    """The zip-of-per-issue-exports format names each file exactly after the
+    issue it covers (e.g. "Duplicate H1.xls", "Alt text missing.xls") - a far
+    more reliable signal than guessing from columns, since SEranking's own
+    per-issue exports often DON'T include a column literally saying "Duplicate
+    H1" or "Alt text missing" (confirmed real case: Duplicate H1.xls's actual
+    columns are just Page URL/H1/H1 length/... - no "duplicate" column at all,
+    so the old column-only classifier mislabeled it as generic "Word counts
+    Issues" and it silently got no H1 suggestions, unlike its sibling H1
+    sheets). Returns None (caller falls back to column-based guessing) for a
+    generic/uninformative filename."""
+    stem = re.sub(r"\.(xlsx?|csv)$", "", fname, flags=re.I).strip()
+    if not stem or _norm(stem) in _GENERIC_XLS_STEMS:
+        return None
+    return stem
+
+
+# Column-signature -> display name. Fallback for when the filename itself
+# isn't usable (see _display_name_from_filename above) - matched against a
+# normalized set of header names; order matters (more specific signatures
+# checked first). The chosen name is fed into the SAME
+# _apply_suggestions()/_NAME_JUDGMENT_RULES path the combined-.xlsx sheets
+# use, so e.g. "Title Issues" still gets a real "Suggested Title" column
+# generated - no separate suggestion logic needed.
 def _classify_xls_report(headers):
     cols = {_norm(h) for h in headers}
     has = lambda *names: all(n in cols for n in names)
@@ -563,7 +585,7 @@ def process_workbook(in_path, out_path, brand, pdf_path=None, zip_path=None):
         log(f"Reading zip: {zip_path}")
         members = _read_seranking_zip(zip_path)
         for i, (fname, headers, rows) in enumerate(members):
-            display_name = _classify_xls_report(headers)
+            display_name = _display_name_from_filename(fname) or _classify_xls_report(headers)
             log(f"[{i + 1}/{len(members)}] '{fname}' -> '{display_name}' ({len(rows)} row(s))...")
             if not headers:
                 continue
