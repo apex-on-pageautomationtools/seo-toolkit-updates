@@ -1224,16 +1224,24 @@ def write_canonical_xlsx(canons, out_path, fmt=None):
     wb.save(out_path)
 
 
-def write_targets_xlsx(targets, out_path):
+# Values: (sheet_name, [2 header labels for Keywords/Target Pages], color)
+FORMAT_TARGETS_XLSX = {
+    "theta": ("Target Page", ["Keywords", "Target Page"], "93C47D"),
+}
+
+
+def write_targets_xlsx(targets, out_path, fmt=None):
     """The complete list of target pages + their keywords, as its own sheet."""
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Target Pages"
-    header_fill = PatternFill("solid", fgColor="2F5496")
+    spec = FORMAT_TARGETS_XLSX.get(str(fmt or "").strip().lower())
+    sheet_name, labels, color_hex = spec if spec else ("Target Pages", ["Keywords", "Target Pages"], "2F5496")
+    ws.title = sheet_name
+    header_fill = PatternFill("solid", fgColor=color_hex)
     header_font = Font(bold=True, size=14, color="FFFFFF")
-    ws.append(["Keywords", "Target Pages"])
+    ws.append(labels)
     for c in ws[1]:
         c.font = header_font
         c.fill = header_fill
@@ -1336,21 +1344,22 @@ def write_webarchive_xlsx(pages_data, out_path, sheet_name="Webarchive URL", col
 
 
 def write_indexing_status_xlsx(pages_data, gsc_indexing, out_path, sheet_name="Indexing Status",
-                                split_target_nontarget=False, target_urls=None):
+                                split_target_nontarget=False, target_urls=None, labels=None, color="215967"):
     """Page URL / Status sheet from real GSC URL Inspection results (findings[
     "gsc_indexing"] - already fetched via check_gsc_indexing). When
     split_target_nontarget, writes two sheets ("target pages" / "Non target page")
     like the Delta FL reference; otherwise a single sheet like Delta Up/Sara."""
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill
+    labels = labels or ["Page URL", "Status"]
     status_by_url = {item.get("url"): item.get("coverageState") or item.get("verdict") or "Unknown"
                      for item in (gsc_indexing or [])}
-    header_fill = PatternFill("solid", fgColor="215967")
+    header_fill = PatternFill("solid", fgColor=color)
     header_font = Font(bold=True, size=11, color="FFFFFF")
     left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
     def _fill_sheet(ws, urls):
-        for c, label in enumerate(["Page URL", "Status"], 1):
+        for c, label in enumerate(labels, 1):
             cell = ws.cell(1, c, label)
             cell.font = header_font
             cell.fill = header_fill
@@ -7428,12 +7437,13 @@ def main():
     # Neon + James: include Alt Tag XLSX + Target Pages
     if fmt == "omega":
         targets_x = work / f"Target-pages-and-keywords-Report - {domain}.xlsx"
-        write_targets_xlsx(targets, targets_x)
+        write_targets_xlsx(targets, targets_x, fmt=fmt)
     else:
         alt_x = work / f"Image Alt Tag Suggestions - {domain}.xlsx"
         write_alt_xlsx(all_self_hosted, all_external_cdn, alt_x, fmt=fmt)
-        targets_x = work / f"Target Pages & Keywords Report - {domain}.xlsx"
-        write_targets_xlsx(targets, targets_x)
+        targets_x = work / (f"Final Target Page - {domain}.xlsx" if fmt == "theta"
+                            else f"Target Pages & Keywords Report - {domain}.xlsx")
+        write_targets_xlsx(targets, targets_x, fmt=fmt)
 
     # Crawl status (Target Page / Last Crawl Date) - generated for EVERY format
     # when GSC access is available, not just Xenon (whose own reference has this
@@ -7474,6 +7484,17 @@ def main():
     if fmt in ("deltafvr", "deltafl", "deltaup", "sara"):
         checklist_x = work / f"2nd Phase Checklist sheet - {domain}.xlsx"
         write_checklist_xlsx(domain, pages_data, findings, targets, sitemap_url, sitemap_body, checklist_x)
+
+    # Note: Sara's reference also has a "Non-Target Pages Crawling" sheet, but
+    # this script only ever crawls the target pages the user specified - it
+    # never does a full-site crawl, so there's no real non-target-page data to
+    # report. Generating that sheet would mean either fabricating rows or
+    # emitting a misleadingly-empty "checked, found none" sheet - skipped
+    # entirely rather than doing either.
+    if fmt == "sara" and findings.get("gsc_indexing"):
+        tgt_x = work / f"Target Pages Crawling - {domain}.xlsx"
+        write_indexing_status_xlsx(pages_data, findings["gsc_indexing"], tgt_x,
+                                    labels=["Target Pages", "Crawling Status"], color="215967")
 
     # robots.txt: attach the existing one
     if findings.get("robots_body"):
