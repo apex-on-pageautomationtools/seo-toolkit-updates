@@ -1087,6 +1087,53 @@ FORMAT_ALT_XLSX = {
 }
 
 
+# Sara/Theta's Meta sheet has an extra leading "Keywords" column the other
+# formats don't - the team supplies a keywords+target-pages sheet as input, so
+# each row needs the keyword(s) targeted for that specific page, not just the
+# page itself. Values: (sheet_name, [8 header labels], color).
+FORMAT_META_XLSX_KEYWORDS = {
+    "sara": ("Meta Suggestion", ["Keywords", "Target Pages", "Existing Title", "Suggested Title",
+                                 "Existing Meta Description", "Suggested Description",
+                                 "Existing H1 Tag", "Suggested H1 Tag"], "215967"),
+    "theta": ("Meta", ["Keywords", "Address", "Existing Title", "Suggested Title",
+                       "Existing Meta Description", "Suggested Meta Description",
+                       "Existing H1", "Suggested H1"], "0070C0"),
+}
+
+
+def write_meta_xlsx_with_keywords(metas, targets, out_path, fmt):
+    """Meta Suggestions sheet with a leading Keywords column (Sara/Theta reference
+    format) - the keyword(s) targeted for each page, looked up from the same
+    `targets` list (page -> keywords) the rest of the report already uses."""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill
+    sheet_name, labels, color_hex = FORMAT_META_XLSX_KEYWORDS[fmt]
+    kw_by_page = {t["page"]: ", ".join(t.get("keywords") or []) for t in targets}
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+    header_fill = PatternFill("solid", fgColor=color_hex)
+    header_font = Font(bold=True, size=11, color="FFFFFF")
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    for c, label in enumerate(labels, 1):
+        cell = ws.cell(1, c, label)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = left
+    ws.freeze_panes = "A2"
+    widths = [30, 40, 34, 34, 40, 40, 30, 30]
+    for i, w in enumerate(widths):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = w
+
+    for r, m in enumerate(metas, 2):
+        row = [kw_by_page.get(m["page"], ""), m["page"], m["existing_title"], m["suggested_title"],
+               m["existing_description"], m["suggested_description"], m["existing_h1"], m["suggested_h1"]]
+        for c, val in enumerate(row, 1):
+            ws.cell(r, c, val).alignment = left
+    wb.save(out_path)
+
+
 def _clone_and_clear(template, header_rows=1):
     import openpyxl
     wb = openpyxl.load_workbook(template)
@@ -7430,7 +7477,10 @@ def main():
     can_x = work / f"Canonical Tag Suggestions - {domain}.xlsx"
     doc_f = work / doc_name
 
-    write_meta_xlsx(metas, meta_x, fmt=fmt)
+    if fmt in FORMAT_META_XLSX_KEYWORDS:
+        write_meta_xlsx_with_keywords(metas, targets, meta_x, fmt)
+    else:
+        write_meta_xlsx(metas, meta_x, fmt=fmt)
     write_canonical_xlsx(canons, can_x, fmt=fmt)
 
     # Omega: no separate Alt Tag XLSX; has Target-pages-and-keywords-Report
