@@ -1989,7 +1989,23 @@ def _get_organic_links(src):
     links, seen = [], set()
 
     def add(href):
-        if not href or not href.startswith("http"):
+        if not href:
+            return
+        # Some SERP renders serve the title anchor's href as a relative
+        # Google redirect ("/url?q=<real url>&sa=...") instead of the direct
+        # absolute URL - every one of the 5 extraction strategies below calls
+        # this same add(), so requiring startswith("http") here silently
+        # dropped ALL results on any page rendered this way (confirmed live:
+        # a page with real result elements - h3/jsname/zReHs counts all > 0 -
+        # extracted zero links, reporting a real top-10 ranking as "not
+        # found"). Unwrap /url?q= to the real destination before filtering.
+        if href.startswith("/url?") or "/url?q=" in href:
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(href).query)
+            real = (qs.get("q") or qs.get("url") or [""])[0]
+            if real:
+                href = real
+        if not href.startswith("http"):
             return
         low = href.lower()
         if "google." in low or "/search?" in low or "webcache" in low:
