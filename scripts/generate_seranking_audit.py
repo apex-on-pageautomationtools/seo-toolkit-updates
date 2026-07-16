@@ -28,6 +28,7 @@ import zlib
 import argparse
 import urllib.request
 import urllib.error
+import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).parent.resolve()
@@ -43,7 +44,15 @@ import generate_seo_onpage_phase2 as onpage2
 
 
 def log(msg):
-    print(msg, flush=True)
+    # Windows' console can be a legacy codepage (cp1252) that can't encode
+    # every character a scraped page title/URL might contain (e.g. Cyrillic)
+    # - crashing on a log line about a harmless fetch failure took down the
+    # entire run. Falls back to a lossy-but-safe encode rather than raising.
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:
+        enc = sys.stdout.encoding or "ascii"
+        print(str(msg).encode(enc, errors="replace").decode(enc), flush=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -326,9 +335,22 @@ def build_pdf_summary_rows(pdf_path):
 _UA = "Mozilla/5.0 SERankingAuditBot"
 
 
+def _safe_url(url):
+    """Non-ASCII URLs (e.g. a Cyrillic path segment) crash deep inside
+    http.client, which builds the raw HTTP request line as ASCII - percent-
+    encode the path/query the same way a browser would before requesting."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        path = urllib.parse.quote(parts.path, safe="/%")
+        query = urllib.parse.quote(parts.query, safe="=&%")
+        return urllib.parse.urlunsplit((parts.scheme, parts.netloc, path, query, parts.fragment))
+    except Exception:
+        return url
+
+
 def _fetch_page_data(url):
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": _UA})
+        req = urllib.request.Request(_safe_url(url), headers={"User-Agent": _UA})
         with urllib.request.urlopen(req, timeout=15) as r:
             html = r.read().decode("utf-8", "ignore")
     except Exception as e:
@@ -446,7 +468,7 @@ def _suggest_canonical(page_url):
 # --------------------------------------------------------------------------- #
 def _suggest_broken_link_fix(url):
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": _UA}, method="HEAD")
+        req = urllib.request.Request(_safe_url(url), headers={"User-Agent": _UA}, method="HEAD")
         with urllib.request.urlopen(req, timeout=12) as r:
             final = r.geturl()
             if final and final.rstrip("/") != url.rstrip("/"):
