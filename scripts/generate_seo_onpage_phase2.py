@@ -856,23 +856,31 @@ def suggest_meta(page_data, keywords, brand, keyword_ranks=None):
                 "include the primary keyword naturally, and end the title with the "
                 "brand name if it fits within the length.")
             ai = _ai_suggest(prompt)
+
+        def _trim(text, limit):
+            """Trim to a word boundary at or before `limit` chars (never mid-word)."""
+            text = text.strip()
+            if len(text) <= limit:
+                return text
+            cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,-")
+            return cut or text[:limit]
+
         if isinstance(ai, dict) and ai.get("title") and ai.get("description"):
+            # The prompt asks for 50-60/140-160 chars, but LLMs (especially the
+            # free-tier models in the fallback chain) are unreliable at exact
+            # character counts and sometimes return noticeably longer text -
+            # confirmed live (a generated description came back well over 160
+            # chars). Enforce the real SEO limits here rather than trusting the
+            # model's own count, same word-boundary-safe trim the heuristic
+            # fallback below already used.
             if need_title:
-                suggested_title = str(ai["title"]).strip()
+                suggested_title = _trim(str(ai["title"]).strip(), 60)
             if need_desc:
-                suggested_desc = str(ai["description"]).strip()
+                suggested_desc = _trim(str(ai["description"]).strip(), 160)
         else:
             # Heuristic fallback (no Gemini key, or the call failed) - still built from
             # the page's own H1/content rather than a formulaic "keyword | brand".
             topic = existing_h1 if existing_h1 and existing_h1 != MISSING else (primary_kw.title() or "Page")
-
-            def _trim(text, limit):
-                """Trim to a word boundary at or before `limit` chars (never mid-word)."""
-                text = text.strip()
-                if len(text) <= limit:
-                    return text
-                cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,-")
-                return cut or text[:limit]
 
             if need_title:
                 if primary_kw and primary_kw.lower() not in topic.lower():
