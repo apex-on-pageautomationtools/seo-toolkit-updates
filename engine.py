@@ -1411,6 +1411,22 @@ def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en"):
         "--disable-popup-blocking",
         "--disable-blink-features=AutomationControlled",
         "--mute-audio",
+        # Windows' native window-occlusion tracking treats an off-screen
+        # (headless: --window-position=-32000,-32000) or background window as
+        # "not visible" and Chromium throttles/backgrounds that renderer as a
+        # result - a well-documented cause of exactly the renderer-hang
+        # timeouts seen live here ("Timed out receiving message from
+        # renderer: 45.000", Edge's own "This page is having a problem /
+        # Error code: 39"). Disabling occlusion tracking and the associated
+        # backgrounding/throttling keeps every renderer running at full
+        # speed regardless of window visibility - relevant since this app
+        # can run several browser instances in parallel (only one window is
+        # ever actually foreground) and uses off-screen positioning for
+        # headless mode.
+        "--disable-features=CalculateNativeWinOcclusion",
+        "--disable-renderer-backgrounding",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-background-timer-throttling",
     ]
 
     # Extensions (Buster, VPN) + proxy-auth helper need a visible browser.
