@@ -1477,7 +1477,9 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
         page_num = 1
         total_links = len(links_page1)
         blocked_incomplete = False
+        incomplete_reason = "block"
         from selenium.webdriver.common.by import By
+        from selenium.common.exceptions import TimeoutException
 
         # stop_on_found: stop as soon as domain is found on any page
         # check_all / multiple: keep going through all pages to find every occurrence
@@ -1541,6 +1543,43 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                         break
                 except BrowserClosedError:
                     raise
+                except TimeoutException:
+                    # Google occasionally serves a SERP (deep pagination
+                    # especially) whose renderer never finishes painting -
+                    # confirmed live via Edge's own "This page is having a
+                    # problem / Error code: 39" page. Previously this was an
+                    # unqualified "Pagination error" -> break, which reported
+                    # a false "not found" even when the domain ranked on a
+                    # page that was never actually reached. Cancel the hung
+                    # load and try to recover in place (same machinery as a
+                    # blocked/empty page) before giving up on this keyword.
+                    add_log(f"Page {page_num + 1}: renderer hang (timeout) - attempting recovery...")
+                    try:
+                        sess.driver.execute_script("window.stop();")
+                    except Exception:
+                        pass
+                    if not is_alive(sess.driver):
+                        raise BrowserClosedError("Browser was closed")
+                    time.sleep(2)
+                    page_links, reason = _recover_page(sess, page_num + 1)
+                    if page_links:
+                        page_num += 1
+                        prev_total = total_links
+                        total_links += len(page_links)
+                        add_log(f"Page {page_num}: {len(page_links)} links (recovered after timeout)")
+                        page_matches = find_domain_in_page(sess.driver, domain_clean, page_offset=prev_total)
+                        if page_matches:
+                            all_matches.extend(page_matches)
+                            add_log(f"  Found at position {page_matches[0]['position']}")
+                            _shot_serp_page(page_matches)
+                        if search_mode == "stop_on_found" and all_matches:
+                            break
+                        continue
+                    add_log(f"Page {page_num + 1}: could not recover after renderer timeout - "
+                            f"stopping (results may be incomplete)")
+                    blocked_incomplete = True
+                    incomplete_reason = "timeout"
+                    break
                 except Exception as e:
                     add_log(f"Pagination error: {e}")
                     break
@@ -1558,15 +1597,16 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     f"({total_links} results across {page_num} pages)")
             return {"status": "found", "matches": matches, "pages": page_num}
         if blocked_incomplete:
+            reason_txt = "a block" if incomplete_reason == "block" else "a renderer timeout"
             max_retries = CONFIG.get("max_block_retries", 3)
             if _try < max_retries:
-                add_log(f"'{keyword}': search cut short by a block at page {page_num} - "
+                add_log(f"'{keyword}': search cut short by {reason_txt} at page {page_num} - "
                         f"restarting keyword from page 1 (retry {_try + 1}/{max_retries})")
                 _reanchor_locale(sess, country, lang)
                 continue
-            add_log(f"'{keyword}': search cut short by a block at page {page_num} - "
+            add_log(f"'{keyword}': search cut short by {reason_txt} at page {page_num} - "
                     f"ranking may exist deeper ({total_links} results seen)")
-            return {"status": f"not_found (incomplete - blocked at page {page_num})",
+            return {"status": f"not_found (incomplete - {incomplete_reason} at page {page_num})",
                     "matches": [], "pages": page_num, "incomplete": True}
         add_log(f"'{keyword}': not in top {page_num} pages ({total_links} results)")
         return {"status": f"not_found in {page_num} pages", "matches": [], "pages": page_num}
@@ -1722,6 +1762,8 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
             # retry the SAME keyword from scratch once it's reopened, rather than
             # losing the whole run - everything checked before this point is safe
             # in state["results"] already.
+            from selenium.common.exceptions import TimeoutException as _TimeoutException
+            _timeout_retries = 0
             while True:
                 try:
                     result = rank_one(sess, kw, kw_domain, country, max_pages, search_mode, city=city, lang=lang)
@@ -1730,6 +1772,23 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
                     if not _browser_closed_pause(sess):
                         raise BrowserClosedError("Browser closed and the run was stopped")
                     add_log(f"Retrying '{kw}' from the start after the browser reopened...")
+                except _TimeoutException:
+                    # A renderer-hang timeout that leaked past safe_get's own
+                    # retry (some other unguarded Selenium call, e.g. a click
+                    # that triggers navigation) - don't let one hung page
+                    # crash the whole batch run (confirmed live: this used to
+                    # surface as an unrecoverable "Fatal error", killing every
+                    # remaining keyword). Retry the same keyword once if the
+                    # browser is still alive; only escalate to the browser-
+                    # closed recovery flow if it genuinely isn't.
+                    _timeout_retries += 1
+                    if _timeout_retries > 2:
+                        raise
+                    if is_alive(sess.driver):
+                        add_log(f"Renderer timeout on '{kw}' - retrying (attempt {_timeout_retries}/2)...")
+                        time.sleep(3)
+                    elif not _browser_closed_pause(sess):
+                        raise BrowserClosedError("Browser closed and the run was stopped")
 
             with state_lock:
                 row = _make_row(kw, kw_target, result)

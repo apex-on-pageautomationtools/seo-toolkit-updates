@@ -1435,7 +1435,7 @@ https://example.com/page-2"></textarea>
         Action needed
       </div>
       <div class="msg" id="alert-msg"></div>
-      <button class="btn btn-ok btn-w" onclick="doResume()">Resume</button>
+      <button class="btn btn-ok btn-w" id="alert-btn" onclick="doResume()">Resume</button>
     </div>
 
     <!-- ACTIVITY LOG -->
@@ -2908,7 +2908,7 @@ function apply(d,m){
     if(isActive){
       $('cur-kw').textContent='';
       if(d.results&&d.results.length) $('btn-export').disabled=false;
-      if(d.status==='error'&&d.error_msg) showAlert(true,d.error_msg);
+      if(d.status==='error'&&d.error_msg) showAlert(true,d.error_msg,false);
     }
     const transitioned=(applyPrev[m]==='running'||applyPrev[m]==='starting');
     if(d.status==='completed'&&transitioned){
@@ -2972,9 +2972,24 @@ function _applyStatusBadge(st){
     $('status-txt').textContent='Idle';
   }
 }
-function showAlert(show,msg){
+function showAlert(show,msg,resumable){
   $('alert').classList.toggle('show',!!show);
   if(msg) $('alert-msg').textContent=msg;
+  // A terminal "error" status can't actually be resumed - the run's thread
+  // has already exited, so /api/resume is a silent no-op there. Previously
+  // this alert always showed a "Resume" button regardless, which looked
+  // identical to the genuinely-resumable "paused" case (and sat right above
+  // the OTHER Resume button in the control bar, which correctly stayed
+  // disabled for "error" - reported as "another resume button... not
+  // highlighted", i.e. two buttons that looked inconsistent). Swap the
+  // button to a non-actionable "Dismiss" whenever this isn't a real pause.
+  if(resumable===false){
+    $('alert-btn').textContent='Dismiss';
+    $('alert-btn').onclick=()=>showAlert(false);
+  }else{
+    $('alert-btn').textContent='Resume';
+    $('alert-btn').onclick=doResume;
+  }
 }
 // Clear ONLY the given tool's table. The four browser tools run in parallel, so
 // starting/resetting one must never touch another's results (nor an on-page/health

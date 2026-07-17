@@ -1645,10 +1645,36 @@ def human_type(element, text):
 
 
 def safe_get(driver, url):
+    """driver.get() with one retry on a renderer-hang timeout. Google
+    occasionally serves a SERP (deep pagination especially) that the
+    renderer never finishes painting - confirmed live via Edge's own
+    "This page is having a problem / Error code: 39" page plus a Selenium
+    "Timed out receiving message from renderer: 45.000" exception. Without
+    this, that single hung page load either got misreported as "not
+    found" (pagination gave up early) or crashed the whole batch run
+    (an uncaught TimeoutException bubbling past every retry point). A
+    hung renderer almost always recovers if the in-flight load is
+    cancelled (window.stop()) and retried once - only escalate to
+    BrowserClosedError/re-raise if that doesn't work."""
+    from selenium.common.exceptions import TimeoutException
     if not is_alive(driver):
         raise BrowserClosedError("Browser was closed")
     try:
         driver.get(url)
+    except TimeoutException:
+        try:
+            driver.execute_script("window.stop();")
+        except Exception:
+            pass
+        if not is_alive(driver):
+            raise BrowserClosedError("Browser was closed")
+        time.sleep(2)
+        try:
+            driver.get(url)
+        except Exception:
+            if not is_alive(driver):
+                raise BrowserClosedError("Browser was closed")
+            raise
     except Exception:
         if not is_alive(driver):
             raise BrowserClosedError("Browser was closed")
