@@ -238,11 +238,6 @@ DEFAULT_CONFIG = {
     "min_keyword_delay": 2,
     "default_country": "us",
     "default_pages": 5,
-    # Name/email identifying this machine's user for the shared "Submit for
-    # Indexing" pool's per-user daily quota - not a login, just a label the
-    # VPS indexing service uses to keep one person from consuming the whole
-    # team's shared daily allowance.
-    "indexing_user_id": "",
 }
 
 def load_config():
@@ -4954,7 +4949,11 @@ def api_admin_keys_status():
 def _indexing_creds():
     url = (CONFIG.get("indexing_api_url") or "").strip().rstrip("/")
     key = (CONFIG.get("indexing_api_key") or "").strip()
-    user = (CONFIG.get("indexing_user_id") or "").strip()
+    # The per-user daily quota is tracked against whoever is actually logged
+    # into the app - no separate "enter your name" step, since the app
+    # already knows who's using it.
+    auth_result = auth.check_saved_auth()
+    user = (auth_result.get("email") or "").strip().lower()
     return url, key, user
 
 INDEXING_MAX_PER_REQUEST = 10
@@ -5004,7 +5003,7 @@ def api_indexing_status():
         return jsonify({"error": "Submit for Indexing isn't configured yet - "
                                   "an admin needs to set the VPS URL/key in Admin Panel."}), 400
     if not user:
-        return jsonify({"error": "Set 'Your name' first (used for the shared daily quota)."}), 400
+        return jsonify({"error": "Not logged in - log in to the app first."}), 400
     try:
         r = http_requests.get(f"{url}/status", params={"user": user},
                               headers={"X-Api-Key": key}, timeout=15)
@@ -5020,7 +5019,7 @@ def api_indexing_submit():
         return jsonify({"error": "Submit for Indexing isn't configured yet - "
                                   "an admin needs to set the VPS URL/key in Admin Panel."}), 400
     if not user:
-        return jsonify({"error": "Set 'Your name' first (used for the shared daily quota)."}), 400
+        return jsonify({"error": "Not logged in - log in to the app first."}), 400
     data = request.get_json(silent=True) or {}
     raw_urls = [u.strip() for u in (data.get("urls") or []) if u.strip()]
     if not raw_urls:

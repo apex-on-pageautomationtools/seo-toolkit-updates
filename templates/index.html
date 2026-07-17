@@ -1285,15 +1285,8 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         Submit for Indexing <span class="testing-badge">(testing)</span>
       </div>
-      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Submits URLs to Google's Indexing API via a shared pool of service-account keys hosted on our VPS (not this machine). Each person on the team shares one daily pool, with a per-person daily cap so one run can't use up everyone else's allowance. Once your daily cap is hit, a second option below lets you continue through the real Search Console "Request Indexing" button (~10/day per connected GSC account) using a GSC Browser Session.</p>
-      <div class="field">
-        <label>Your name <span class="hint">(used only to track your share of the daily pool - not a login)</span></label>
-        <div style="display:flex;gap:8px">
-          <input type="text" id="idx-user" placeholder="e.g. vishal" autocomplete="off" style="flex:1">
-          <button class="btn btn-tonal" onclick="idxSaveUser()">Save</button>
-        </div>
-      </div>
-      <div id="idx-quota" class="note" style="margin-top:4px">Set your name and click Save to see today's quota.</div>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Submits URLs to Google's Indexing API via a shared pool of service-account keys hosted on our VPS (not this machine). Once today's shared allowance is used up, a second option below lets you continue through the real Search Console "Request Indexing" button (~10/day per connected GSC account) using a GSC Browser Session.</p>
+      <div id="idx-quota" class="note" style="margin-top:4px">Checking today's quota...</div>
       <div class="field">
         <label>URLs to submit <span class="hint">(one per line, max 10 per submit - duplicates removed automatically, each checked for a real 200 OK before it counts against quota)</span></label>
         <textarea id="idx-urls" rows="8" placeholder="https://example.com/page-1
@@ -3572,23 +3565,8 @@ async function perfReconnectForGa4(){
 
 /* ===================== submit for indexing ===================== */
 async function idxInit(){
-  if(!$('idx-user').value){
-    try{
-      const cfg=await(await fetch('/api/config')).json();
-      if(cfg.indexing_user_id) $('idx-user').value=cfg.indexing_user_id;
-    }catch(e){}
-  }
-  if($('idx-user').value.trim()) idxCheckQuota();
+  idxCheckQuota();
   idxLoadFallbackAccounts();
-}
-async function idxSaveUser(){
-  const name=$('idx-user').value.trim();
-  if(!name){toast('Enter a name first','err');return;}
-  try{
-    await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({indexing_user_id:name})});
-    toast('Saved');
-    idxCheckQuota();
-  }catch(e){toast('Save failed','err');}
 }
 async function idxCheckQuota(){
   const box=$('idx-quota');
@@ -3597,20 +3575,20 @@ async function idxCheckQuota(){
     const r=await fetch('/api/indexing/status');
     const d=await r.json();
     if(d.error){box.textContent=d.error;return;}
-    box.innerHTML='You: <b>'+d.user_used+'/'+d.user_daily_cap+'</b> used today &middot; '
-      +'Team pool: <b>'+d.pool_used+'/'+d.pool_total+'</b> used today ('+d.pool_remaining+' left)';
+    // Only the pool-wide number is shown - the per-person cap is enforced
+    // server-side but not surfaced here as an individual limit.
+    box.innerHTML='Today\'s shared allowance: <b>'+d.pool_remaining+'</b> remaining';
   }catch(e){box.textContent='Could not reach the indexing service.';}
 }
 let _idxLastLeftover=[];
 async function idxSubmit(){
   const raw=$('idx-urls').value.split('\n').map(s=>s.trim()).filter(Boolean);
   if(!raw.length){toast('Enter at least one URL','err');return;}
-  if(!$('idx-user').value.trim()){toast('Set your name first','err');return;}
   const urls=[...new Set(raw)];  // dedupe client-side too, for an accurate count before the request
   const dupes=raw.length-urls.length;
   if(urls.length>10) toast('Only the first 10 URLs will be submitted (10/request limit) - the rest are listed as skipped below.');
   const box=$('idx-results');
-  box.innerHTML='<div class="note">Submitting '+Math.min(urls.length,10)+' URL(s)'+(dupes?' ('+dupes+' duplicate(s) removed)':'')+' - each is checked for a real 200 OK before it counts against your quota...</div>';
+  box.innerHTML='<div class="note">Submitting '+Math.min(urls.length,10)+' URL(s)'+(dupes?' ('+dupes+' duplicate(s) removed)':'')+' - each is checked for a real 200 OK before it counts against quota...</div>';
   try{
     const r=await fetch('/api/indexing/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls})});
     const d=await r.json();
@@ -3618,7 +3596,7 @@ async function idxSubmit(){
     _idxLastLeftover=(d.results||[]).filter(x=>!x.ok && (x.message==='user_daily_cap_reached'||x.message==='pool_exhausted')).map(x=>x.url);
     let rows=(d.results||[]).map(x=>'<tr><td style="font-size:11px;padding:3px 6px;word-break:break-all">'+esc(x.url)+'</td>'
       +'<td style="font-size:11px;padding:3px 6px;color:'+(x.ok?'var(--ok)':'var(--err,#c00)')+'">'+(x.ok?'Submitted':esc(x.message))+'</td></tr>').join('');
-    const quotaLine=(d.user_remaining!=null)?(' - '+d.user_remaining+' left in your quota today, '+d.pool_remaining+' left in the team pool.'):'';
+    const quotaLine=(d.pool_remaining!=null)?(' - '+d.pool_remaining+' left in today\'s shared allowance.'):'';
     box.innerHTML='<div class="note" style="margin-bottom:6px">Submitted '+(d.submitted||0)+'/'+urls.length
       +(d.dropped_duplicates?' ('+d.dropped_duplicates+' duplicate(s) removed)':'')+quotaLine+'</div>'
       +'<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table>';
