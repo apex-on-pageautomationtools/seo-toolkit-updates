@@ -538,6 +538,31 @@ def _extract_json(text):
 _AI_BROKEN_PROVIDERS = set()
 _PERMANENT_HTTP_CODES = {401, 403, 404}
 
+# A 429 (rate limit) isn't necessarily permanent - a short burst can clear up
+# mid-run. But a free-tier daily quota being fully exhausted also returns 429,
+# and that will NOT clear up before the run ends - confirmed live (a Delta FI
+# on-page run for al-dirassa.com hit Gemini 429 on every single one of 14
+# pages, ~every 30s for 5+ minutes straight, since nothing ever tripped a
+# breaker for it). Once a provider hits 429 this many times in a row, treat
+# it the same as a permanent failure for the rest of this run.
+_AI_429_STREAK_LIMIT = 2
+_ai_429_streaks = {}
+
+
+def _ai_note_429(provider):
+    """Returns True if this provider should now be treated as broken for the
+    rest of the run (streak limit reached)."""
+    n = _ai_429_streaks.get(provider, 0) + 1
+    _ai_429_streaks[provider] = n
+    if n >= _AI_429_STREAK_LIMIT:
+        _AI_BROKEN_PROVIDERS.add(provider)
+        return True
+    return False
+
+
+def _ai_note_success(provider):
+    _ai_429_streaks[provider] = 0
+
 
 def _ai_suggest_gemini(prompt):
     """Google Gemini's FREE tier when GEMINI_API_KEY is set (free key:
@@ -562,11 +587,14 @@ def _ai_suggest_gemini(prompt):
         req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=40) as r:
             data = json.loads(r.read())
+        _ai_note_success("gemini")
         return _extract_json(data["candidates"][0]["content"]["parts"][0]["text"])
     except urllib.error.HTTPError as e:
         if e.code in _PERMANENT_HTTP_CODES:
             _AI_BROKEN_PROVIDERS.add("gemini")
             log(f"   [warn] Gemini suggestion failed: HTTP Error {e.code} - won't retry Gemini for the rest of this run.")
+        elif e.code == 429 and _ai_note_429("gemini"):
+            log(f"   [warn] Gemini suggestion failed: HTTP Error {e.code} - rate-limited repeatedly, won't retry Gemini for the rest of this run.")
         else:
             log(f"   [warn] Gemini suggestion failed: HTTP Error {e.code}")
         return None
@@ -599,11 +627,14 @@ def _ai_suggest_groq(prompt):
         })
         with urllib.request.urlopen(req, timeout=40) as r:
             data = json.loads(r.read())
+        _ai_note_success("groq")
         return _extract_json(data["choices"][0]["message"]["content"])
     except urllib.error.HTTPError as e:
         if e.code in _PERMANENT_HTTP_CODES:
             _AI_BROKEN_PROVIDERS.add("groq")
             log(f"   [warn] Groq suggestion failed: HTTP Error {e.code} - won't retry Groq for the rest of this run.")
+        elif e.code == 429 and _ai_note_429("groq"):
+            log(f"   [warn] Groq suggestion failed: HTTP Error {e.code} - rate-limited repeatedly, won't retry Groq for the rest of this run.")
         else:
             log(f"   [warn] Groq suggestion failed: HTTP Error {e.code}")
         return None
@@ -642,11 +673,14 @@ def _ai_suggest_openrouter(prompt):
         })
         with urllib.request.urlopen(req, timeout=40) as r:
             data = json.loads(r.read())
+        _ai_note_success("openrouter")
         return _extract_json(data["choices"][0]["message"]["content"])
     except urllib.error.HTTPError as e:
         if e.code in _PERMANENT_HTTP_CODES:
             _AI_BROKEN_PROVIDERS.add("openrouter")
             log(f"   [warn] OpenRouter suggestion failed: HTTP Error {e.code} - won't retry OpenRouter for the rest of this run.")
+        elif e.code == 429 and _ai_note_429("openrouter"):
+            log(f"   [warn] OpenRouter suggestion failed: HTTP Error {e.code} - rate-limited repeatedly, won't retry OpenRouter for the rest of this run.")
         else:
             log(f"   [warn] OpenRouter suggestion failed: HTTP Error {e.code}")
         return None
@@ -681,11 +715,14 @@ def _ai_suggest_openai(prompt):
         })
         with urllib.request.urlopen(req, timeout=40) as r:
             data = json.loads(r.read())
+        _ai_note_success("openai")
         return _extract_json(data["choices"][0]["message"]["content"])
     except urllib.error.HTTPError as e:
         if e.code in _PERMANENT_HTTP_CODES:
             _AI_BROKEN_PROVIDERS.add("openai")
             log(f"   [warn] OpenAI suggestion failed: HTTP Error {e.code} - won't retry OpenAI for the rest of this run.")
+        elif e.code == 429 and _ai_note_429("openai"):
+            log(f"   [warn] OpenAI suggestion failed: HTTP Error {e.code} - rate-limited repeatedly, won't retry OpenAI for the rest of this run.")
         else:
             log(f"   [warn] OpenAI suggestion failed: HTTP Error {e.code}")
         return None
@@ -1441,12 +1478,55 @@ def write_indexing_status_xlsx(pages_data, gsc_indexing, out_path, sheet_name="I
     wb.save(out_path)
 
 
+def _checklist_domain_age(domain):
+    """Domain age via WHOIS/RDAP (falls back to Wayback's first capture) -
+    reuses brief_analysis.py's existing lookup rather than duplicating it.
+    Not literally "as per duplichecker.com" (that's a specific paid web tool
+    with no API), but the same underlying fact (how old the domain is) is
+    genuinely computable, so this was wrongly left blank before."""
+    try:
+        import sys as _sys
+        _repo = str(ROOT.parent)
+        if _repo not in _sys.path:
+            _sys.path.insert(0, _repo)
+        import brief_analysis
+        clean = re.sub(r'^\s*https?://', '', domain).strip().strip('/').split('/')[0]
+        info = brief_analysis._whois_data(clean)
+        created = info.get("created")
+        if not created:
+            created = brief_analysis._wayback_first_capture(clean)
+            if created:
+                age_years = (datetime.datetime.now() - created).days // 365
+                return f"~{age_years} yr old (first archived {created.strftime('%Y-%m-%d')} - Wayback Machine, no WHOIS creation date)"
+        if created:
+            age_years = (datetime.datetime.now() - created).days // 365
+            return f"~{age_years} yr old (registered {created.strftime('%Y-%m-%d')})"
+    except Exception as e:
+        log(f"   [info] domain age lookup failed ({type(e).__name__}) - manual review required")
+    return ""
+
+
+def _checklist_dummy_content(domain):
+    """Reuses health_audit.py's existing Google 'site:domain lorem' dummy-content
+    check rather than duplicating it - genuinely computable without a human."""
+    try:
+        import sys as _sys
+        _repo = str(ROOT.parent)
+        if _repo not in _sys.path:
+            _sys.path.insert(0, _repo)
+        import health_audit
+        return health_audit.check_dummy_content(domain)
+    except Exception as e:
+        log(f"   [info] dummy content check failed ({type(e).__name__}) - manual review required")
+        return ""
+
+
 # 2nd Phase Checklist points this script can answer from data it already
-# collects (robots.txt/sitemap/noindex/https/www checks, etc). Anything the
-# real reference asks for that needs a human or an external tool (domain age
-# via duplichecker, SE-ranking traffic status, who verified target pages,
-# recent traffic drops, "dummy content" judgment calls) is intentionally left
-# blank rather than guessed - this script never fabricates data it can't verify.
+# collects (robots.txt/sitemap/noindex/https/www checks, domain age, dummy
+# content, etc). Anything the real reference asks for that genuinely needs a
+# human (SE-ranking traffic status/drops, who verified target pages, a
+# judgment call on "critical issues") is intentionally left blank rather than
+# guessed - this script never fabricates data it can't verify.
 def _build_checklist_rows(domain, pages_data, findings, targets, sitemap_url, sitemap_body):
     from urllib.parse import urlparse
     any_www = any(urlparse(pd["url"]).netloc.lower().startswith("www.") for pd in pages_data)
@@ -1466,12 +1546,12 @@ def _build_checklist_rows(domain, pages_data, findings, targets, sitemap_url, si
         ("www or non www", "www" if any_www else "Non www"),
         ("Slash and Non Slash", "Slash" if any_trailing_slash else "Non-Slash" if any_trailing_slash is not None else "Unknown"),
         ("Indexing Status Checked", "Yes" if findings.get("gsc_indexing") else "No"),
-        ("Domain Age as per duplichecker", ""),
+        ("Domain Age as per duplichecker", _checklist_domain_age(domain)),
         ("Traffic Status on SE rank tool", ""),
         ("Target Pages Verified By", ""),
         ("Any Critical issue in the website", ""),
         ("Any frequent drop in traffic in last 2-3 month", ""),
-        ("Dummy content on pages", ""),
+        ("Dummy content on pages", _checklist_dummy_content(domain)),
     ]
 
 

@@ -3707,13 +3707,14 @@ async function gscLoadAccounts(){
     if(accs&&accs.length){
       // keep the current selection if it's still connected, else default to the first
       if(!_gscEmail||!accs.some(a=>a.email===_gscEmail)) _gscEmail=accs[0].email;
+      // Read-only list - which account is "active" is chosen automatically
+      // per-domain from the config sheet (see gscCheckDomain()'s auto-select),
+      // so there's no manual switch and no disconnect here.
       list.innerHTML=accs.map(a=>{
         const sel=a.email===_gscEmail;
         return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--border)">'+
-          '<input type="radio" name="gsc-acct" '+(sel?'checked':'')+' onclick="gscSelectAccount(\''+esc(a.email)+'\')" title="Use this account" style="cursor:pointer">'+
           '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.4"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'+
           '<span style="flex:1;font-size:12px;font-weight:'+(sel?'700':'500')+'">'+esc(a.email)+(sel?' <span style="color:var(--ok);font-size:10px">(active)</span>':'')+'</span>'+
-          '<button class="btn btn-tonal" style="font-size:10px;padding:3px 10px" onclick="gscDisconnect(\''+esc(a.email)+'\')">Disconnect</button>'+
         '</div>';
       }).join('');
       $('gsc-none').style.display='none';
@@ -3725,13 +3726,6 @@ async function gscLoadAccounts(){
   }catch(e){}
 }
 function gscSelectAccount(email){_gscEmail=email;gscLoadAccounts();}
-async function gscDisconnect(email){
-  if(!email)return;
-  await fetch('/api/gsc/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email})});
-  toast('Disconnected '+email);
-  if(email===_gscEmail)_gscEmail='';
-  gscLoadAccounts();
-}
 
 /* ===================== GSC Browser Sessions ===================== */
 async function gscSessionsLoad(){
