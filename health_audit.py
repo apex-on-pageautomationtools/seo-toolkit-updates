@@ -1011,11 +1011,33 @@ SCREENSHOT_URLS = {
     "robots": "https://{domain}/robots.txt",
     "sitemap": "https://{domain}/sitemap.xml",
     "meta_source": "https://{domain}/",
-    "layout": "https://web.archive.org/web/2/https://{domain}/",
+    "layout": "https://web.archive.org/web/2999/https://{domain}/",
     "dummy": "https://www.google.com/search?q=site:{domain}+lorem",
     "serp": "https://www.google.com/search?q=site:{domain}",
     "blank_page": "https://{domain}/",
 }
+
+
+def _latest_wayback_snapshot_url(domain, log_fn=None):
+    """Resolve the actual latest-archived snapshot URL via the Wayback
+    Availability API, instead of guessing a timestamp. Returns None if
+    the domain has never been archived (caller should skip the
+    screenshot rather than capture archive.org's "not found" page)."""
+    import json as _json
+    log_fn = log_fn or print
+    try:
+        req = _ur.Request(
+            f"https://archive.org/wayback/available?url=https://{domain}/",
+            headers={"User-Agent": _UA},
+        )
+        with _ur.urlopen(req, timeout=15) as resp:
+            data = _json.loads(resp.read().decode("utf-8", "replace"))
+        snap = (data.get("archived_snapshots") or {}).get("closest") or {}
+        if snap.get("available") and snap.get("url"):
+            return snap["url"]
+    except Exception as e:
+        log_fn(f"  [warn] layout: Wayback availability lookup failed ({e})")
+    return None
 
 
 # ---------- Selenium screenshot capture ----------
@@ -1034,6 +1056,17 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
             continue
 
         url = url_tmpl.format(domain=domain)
+        if key == "layout":
+            # The old guessed URL (timestamp "2") resolved to the
+            # OLDEST archived snapshot, not the latest as the report
+            # caption claims - and if that earliest capture was broken
+            # or never completed, the screenshot came out blank.
+            # Resolve the real latest snapshot via the Availability API.
+            real_url = _latest_wayback_snapshot_url(domain, log_fn)
+            if not real_url:
+                log_fn("  [warn] layout: no archived snapshot found for this domain, skipping screenshot")
+                continue
+            url = real_url
         path = os.path.join(out_dir, f"{key}.png")
 
         try:
@@ -2005,7 +2038,13 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
     if not no_capture and driver is not None:
         log_fn(f"[2/{total_steps}] Capturing screenshots...")
         ss_dir = os.path.join(out_dir or tempfile.gettempdir(), "health_screenshots")
-        ss = capture_screenshots_selenium(driver, domain, ss_dir, use_keys, log_fn)
+        # "blank_page" already has a real rendered results table from
+        # prepare_health_data() above when target pages were checked - a raw
+        # homepage screenshot here would silently overwrite that table (or,
+        # if the raw capture fails, leave the checkpoint with nothing at
+        # all). Only fall back to a raw screenshot when there's no table.
+        capture_keys = [k for k in use_keys if not (k == "blank_page" and "blank_page" in captured)]
+        ss = capture_screenshots_selenium(driver, domain, ss_dir, capture_keys, log_fn)
         captured.update(ss)
 
         gsc_keys = {"manual_action", "security_issues"} & set(use_keys)
@@ -2056,12 +2095,28 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
                         elif isinstance(gsc_ss, dict) and gsc_ss.get("error") == "session_expired":
                             log_fn(f"  Session {sess.get('label', sess['id'])} needs re-login in GSC Sessions.")
                     if not gsc_captured:
+                        # A connected GSC *account* (OAuth token, used for API calls
+                        # elsewhere in this report) is a separate thing from a GSC
+                        # *browser session* (a logged-in Selenium profile, required
+                        # here because Manual Actions/Security Issues have no public
+                        # API and must be scraped from the UI). Reporting these as a
+                        # plain "Not found" when the real reason is "couldn't check"
+                        # is misleading, so put the real reason in the report body.
                         if not sessions:
+                            reason = ("Could not verify - no GSC Browser Session is set up. "
+                                      "Create one in GSC Audit > Browser Sessions (this is separate "
+                                      "from connecting the GSC account).")
                             log_fn("  No GSC browser session found - create one in GSC Audit > Browser Sessions")
                         elif not gsc_email:
+                            reason = "Could not verify - no GSC account is connected."
                             log_fn("  GSC not connected - skipping manual_action/security_issues screenshots")
                         else:
+                            reason = ("Could not verify - the GSC Browser Session is not logged in "
+                                      "for this account. Re-create it in GSC Audit > Browser Sessions.")
                             log_fn("  No valid GSC browser session found - create one in GSC Audit > Browser Sessions")
+                        statuses = captured.setdefault("_statuses", {})
+                        for gp in gsc_pages:
+                            statuses[gp["key"]] = reason
                         try:
                             import json as _json, urllib.request as _ur2, urllib.parse as _up2
                             _bd = os.path.dirname(os.path.abspath(__file__))
@@ -2099,7 +2154,7 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
     elif fmt == "omega":
         path, placed, miss = build_health_pptx_omega(domain, captured, computed, out_dir)
     elif fmt == "neon":
-        path, placed, miss = build_health_docx(domain, captured, computed, out_dir, NEON_KEYS, voice="i", header_fill="215868")
+        path, placed, miss = build_health_docx(domain, captured, computed, out_dir, use_keys, voice="i", header_fill="215868")
     else:
         path, placed, miss = build_health_docx(domain, captured, computed, out_dir, use_keys, page_border=True)
 
