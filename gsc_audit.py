@@ -130,15 +130,15 @@ def oauth_login_selenium(driver, client_id, client_secret, log_fn=None):
     })
     auth_url = f"{OAUTH_AUTH_URL}?{params}"
 
-    original_window = driver.current_window_handle
-    driver.execute_script("window.open(arguments[0], '_blank', 'width=500,height=700');", auth_url)
+    # Navigate the SAME window directly rather than opening a popup via
+    # window.open() - the popup was never actually needed (this is a classic
+    # server-side "response_type=code" flow; Google's authorization endpoint
+    # redirects to redirect_uri identically whether rendered in a popup or a
+    # normal tab) and confirmed live as a real UX bug: clicking "Connect
+    # Account" visibly opened two separate browser windows.
+    driver.get(auth_url)
 
-    # Wait for the OAuth redirect
     import time as _t
-    new_handles = [h for h in driver.window_handles if h != original_window]
-    if new_handles:
-        driver.switch_to.window(new_handles[0])
-
     log_fn("  Waiting for Google authorization (log in and click Allow)...")
 
     code = None
@@ -166,17 +166,6 @@ def oauth_login_selenium(driver, client_id, client_secret, log_fn=None):
         except Exception:
             # Window might be closed
             break
-
-    # Close the OAuth popup
-    try:
-        if driver.current_window_handle != original_window:
-            driver.close()
-    except Exception:
-        pass
-    try:
-        driver.switch_to.window(original_window)
-    except Exception:
-        pass
 
     if not code:
         raise Exception("OAuth authorization failed - no code received. Please try again.")

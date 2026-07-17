@@ -14,6 +14,7 @@ import urllib.error as _ue
 from pathlib import Path
 from datetime import datetime
 from html.parser import HTMLParser
+import engine
 
 # ---------- HTTP helpers ----------
 _UA = "Mozilla/5.0 (compatible; SEOToolkitPro-HealthBot/1.0)"
@@ -1009,7 +1010,7 @@ SCREENSHOT_URLS = {
     "sucuri": "https://sitecheck.sucuri.net/results/https/{domain}",
     "robots": "https://{domain}/robots.txt",
     "sitemap": "https://{domain}/sitemap.xml",
-    "meta_source": "view-source:https://{domain}/",
+    "meta_source": "https://{domain}/",
     "layout": "https://web.archive.org/web/2/https://{domain}/",
     "dummy": "https://www.google.com/search?q=site:{domain}+lorem",
     "serp": "https://www.google.com/search?q=site:{domain}",
@@ -1054,6 +1055,27 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
             else:
                 time.sleep(4)
 
+            if key in ("serp", "dummy"):
+                # These checkpoints hit a raw Google search URL, which can
+                # trip Google's bot-detection (reCAPTCHA / "unusual traffic")
+                # and leave a CAPTCHA baked into the saved screenshot instead
+                # of real SERP results. Detect it (reusing engine.py's
+                # existing classify_page, already proven for the ranking
+                # checker) and retry once with backoff before giving up.
+                state = engine.classify_page(driver.page_source)
+                if state in ("captcha", "soft_block"):
+                    log_fn(f"  [warn] {key}: Google bot-check detected ({state}), retrying after backoff...")
+                    time.sleep(20)
+                    try:
+                        driver.get(url)
+                        time.sleep(5)
+                    except Exception:
+                        pass
+                    state = engine.classify_page(driver.page_source)
+                    if state in ("captcha", "soft_block"):
+                        log_fn(f"  [warn] {key}: still bot-checked after retry, skipping screenshot to avoid capturing a CAPTCHA")
+                        continue
+
             if key == "sucuri":
                 # Sucuri shows a cookie-consent bar over the verdict. Click "Accept"
                 # so it isn't in the screenshot; then remove any leftover banner.
@@ -1078,34 +1100,34 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
                 )
                 time.sleep(0.6)
             elif key == "meta_source":
-                # Scroll the view-source page to the meta description (or title)
-                # tag so the screenshot is a tight crop of the relevant lines,
-                # not just the top of the file.
+                # A view-source: URL used to be navigated here and the
+                # screenshot just scrolled near the meta tag - two real
+                # problems: view-source: is a privileged scheme some
+                # automated/webdriver-controlled browsers restrict or refuse
+                # to navigate to at all (confirmed live: "meta suggestions
+                # not being found" across every format tested), and even
+                # when it did load, scrolling near a line isn't actually
+                # highlighting it. This instead reads the REAL rendered
+                # page's title/meta description straight from the DOM (no
+                # view-source: needed) and injects a clearly highlighted
+                # on-page overlay showing them - a genuine visual highlight,
+                # and immune to view-source: being blocked.
                 try:
                     driver.execute_script("""
-                        var targets = ['meta name="description"', "meta name='description'",
-                                       '<title', 'meta name="description"'.toLowerCase()];
-                        var w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-                        var n, found = null;
-                        while ((n = w.nextNode())) {
-                            var v = n.nodeValue || '';
-                            var low = v.toLowerCase();
-                            if (low.indexOf('name="description"') !== -1 || low.indexOf("name='description'") !== -1) {
-                                found = n; break;
-                            }
-                        }
-                        if (!found) {
-                            var w2 = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-                            while ((n = w2.nextNode())) {
-                                if ((n.nodeValue || '').toLowerCase().indexOf('<title') !== -1) { found = n; break; }
-                            }
-                        }
-                        if (found) {
-                            (found.parentElement || document.body).scrollIntoView({block: 'center'});
-                            window.scrollBy(0, -120);
-                        }
+                        var title = document.title || '(missing)';
+                        var descEl = document.querySelector('meta[name="description"]');
+                        var desc = descEl ? (descEl.getAttribute('content') || '(empty)') : '(missing)';
+                        var box = document.createElement('div');
+                        box.id = '__meta_suggestion_overlay';
+                        box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;'
+                            + 'background:#fff59d;color:#000;padding:16px 20px;font:14px/1.5 Arial,sans-serif;'
+                            + 'border-bottom:4px solid #f9a825;box-shadow:0 2px 8px rgba(0,0,0,.3);';
+                        var esc = function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+                        box.innerHTML = '<b>Title:</b> ' + esc(title) + '<br><b>Meta Description:</b> ' + esc(desc);
+                        document.body.insertBefore(box, document.body.firstChild);
+                        window.scrollTo(0, 0);
                     """)
-                    time.sleep(1)
+                    time.sleep(0.5)
                 except Exception:
                     pass
             else:
