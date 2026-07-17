@@ -667,6 +667,146 @@ def request_indexing_via_session(session_id, property_url, email, urls,
 
 
 # ---------------------------------------------------------------------------
+# Bulk-add a new user (typically an Indexing API pool service account) as
+# Owner across many properties, via a GSC Browser Session already logged in
+# as an account that's ALREADY an Owner on those properties - Google only
+# lets an existing Owner grant Owner access to someone else, there's no way
+# around that. Superadmin-only in the desktop app (see web_app_batch.py) -
+# granting Owner access is a materially more consequential action than
+# submitting a URL for indexing.
+#
+# NOTE: the exact click targets on GSC's real Users & Permissions page are
+# best-effort text-matching (same resilient pattern as
+# request_indexing_via_session above), not verified against the live page
+# from here - the first real run may need one round of selector adjustment
+# if Google's UI text doesn't match what's guessed below.
+# ---------------------------------------------------------------------------
+def add_owner_to_property(driver, property_url, new_user_email, log_fn=None):
+    """Add new_user_email as Owner on property_url, using the driver's
+    current (already GSC-logged-in) session. Returns (ok, message)."""
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
+    if log_fn is None:
+        log_fn = print
+    try:
+        driver.get(build_gsc_url("users", property_url))
+        time.sleep(4)
+        body_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+        if "accounts.google.com" in (driver.current_url or "").lower():
+            return False, "session_expired"
+        if new_user_email.lower() in body_text:
+            return True, "already_a_user"
+
+        add_btn = None
+        for el in driver.find_elements(
+            By.XPATH,
+            "//*[normalize-space(text())='Add user' or normalize-space(text())='ADD USER' "
+            "or normalize-space(text())='Add User']"
+        ):
+            add_btn = el
+            break
+        if not add_btn:
+            return False, "add_user_button_not_found"
+        add_btn.click()
+        time.sleep(1.5)
+
+        email_field = None
+        for el in driver.find_elements(By.CSS_SELECTOR, "input[type='email'], input[type='text']"):
+            try:
+                if el.is_displayed():
+                    email_field = el
+                    break
+            except Exception:
+                continue
+        if not email_field:
+            return False, "email_field_not_found"
+        email_field.click()
+        email_field.send_keys(new_user_email)
+        time.sleep(0.5)
+
+        owner_radio = None
+        for el in driver.find_elements(
+            By.XPATH, "//*[normalize-space(text())='Owner' or normalize-space(text())='Full']"
+        ):
+            if el.text.strip().lower() == "owner":
+                owner_radio = el
+                break
+        if owner_radio:
+            try:
+                owner_radio.click()
+            except Exception:
+                pass
+        time.sleep(0.5)
+
+        submit_btn = None
+        for el in driver.find_elements(
+            By.XPATH, "//*[normalize-space(text())='Add' or normalize-space(text())='ADD']"
+        ):
+            submit_btn = el
+            break
+        if submit_btn:
+            submit_btn.click()
+        else:
+            email_field.send_keys(Keys.ENTER)
+        time.sleep(3)
+
+        confirm_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+        if new_user_email.lower() in confirm_text:
+            return True, "added"
+        return True, "added (unconfirmed - check manually)"
+    except Exception as e:
+        return False, str(e)[:200]
+
+
+def bulk_add_owner(session_id, property_urls, new_user_email, browser_pref="edge", log_fn=None):
+    """add_owner_to_property() for many properties, reusing ONE browser
+    session/launch. Returns a list of {"property", "ok", "message"} dicts."""
+    if log_fn is None:
+        log_fn = print
+    results = []
+    profile_dir = os.path.join(_sessions_dir(), session_id, "chrome_profile")
+    lock = _profile_lock(profile_dir)
+    acquired = lock.acquire(timeout=180)
+    if not acquired:
+        log_fn("  Another capture is using this Google session - timed out waiting.")
+        return [{"property": p, "ok": False, "message": "session_busy"} for p in property_urls]
+
+    import engine
+    driver = None
+    try:
+        driver = engine.build_driver(
+            profile_dir, proxy=None, headless=False,
+            country="us", extra_extensions=[],
+            logger=log_fn, browser_pref=browser_pref,
+        )
+        driver.get("https://search.google.com/search-console")
+        time.sleep(3)
+        cur = (driver.current_url or "").lower()
+        if "accounts.google.com" in cur or "/signin" in cur or "servicelogin" in cur:
+            log_fn("  Session needs re-login in GSC Browser Sessions.")
+            return [{"property": p, "ok": False, "message": "session_expired"} for p in property_urls]
+
+        for prop in property_urls:
+            log_fn(f"  Adding {new_user_email} as Owner on {prop}...")
+            ok, message = add_owner_to_property(driver, prop, new_user_email, log_fn)
+            results.append({"property": prop, "ok": ok, "message": message})
+            time.sleep(2)
+        _trim_session_cache(profile_dir)
+    except Exception as e:
+        log_fn(f"  Bulk add-owner error: {e}")
+        for prop in property_urls[len(results):]:
+            results.append({"property": prop, "ok": False, "message": str(e)[:200]})
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+        lock.release()
+    return results
+
+
+# ---------------------------------------------------------------------------
 # GSC API helpers
 # ---------------------------------------------------------------------------
 

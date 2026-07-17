@@ -1755,6 +1755,26 @@ https://example.com/page-2"></textarea>
           <div id="adm-buildings-list" style="font-size:13px">Loading buildings...</div>
         </div>
 
+        <!-- Bulk Add Owner (superadmin only) - adds a new user (e.g. an
+             Indexing API pool service account) as Owner across every domain
+             an existing agency account already owns. Separate from the
+             regular Submit for Indexing tool (team-wide) since granting
+             Owner access is a materially bigger, harder-to-reverse action. -->
+        <div class="card" style="margin-bottom:16px" id="adm-bulkowner-card">
+          <div class="card-t" style="margin-bottom:12px">Bulk Add Owner <span class="testing-badge">(testing)</span></div>
+          <p class="note" style="margin:-4px 0 10px">Adds a new user as Owner across every domain an existing agency account already has Owner access to (Google requires the granting account to already be an Owner - there's no way to do this on domains we don't already own). Typically used to add an Indexing API pool service account so it can be used directly instead of only via the reuse-existing-account path.</p>
+          <div class="field">
+            <label>New user's email <span class="hint">(e.g. a service account's client_email)</span></label>
+            <input type="text" id="bo-email" placeholder="indexing-bot@indexing-pool-2-xxxxx.iam.gserviceaccount.com" autocomplete="off">
+          </div>
+          <div style="display:flex;gap:8px;margin:8px 0">
+            <button class="btn btn-tonal" onclick="boPreview()">Preview affected domains</button>
+            <button class="btn btn-primary" id="bo-confirm-btn" onclick="boRun()" disabled>Confirm and Run</button>
+          </div>
+          <div id="bo-preview" class="note"></div>
+          <div id="bo-results"></div>
+        </div>
+
         <!-- Shared Proxy Pool (admin/superadmin only) -->
         <div class="card" style="margin-bottom:16px" id="adm-proxies-card">
           <div class="card-t" style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
@@ -3636,6 +3656,42 @@ async function idxFallbackSubmit(){
   }catch(e){box.innerHTML='<div class="note" style="color:var(--err,#c00)">Fallback submission failed.</div>';}
 }
 
+/* ===================== bulk add owner (superadmin only) ===================== */
+let _boPreviewDomains=[];
+async function boPreview(){
+  const box=$('bo-preview');
+  box.textContent='Loading...';
+  $('bo-confirm-btn').disabled=true;
+  try{
+    const r=await fetch('/api/admin/bulk-add-owner-preview');
+    const d=await r.json();
+    if(d.error){box.innerHTML='<div style="color:var(--err,#c00)">'+esc(d.error)+'</div>';return;}
+    _boPreviewDomains=d.domains||[];
+    if(!_boPreviewDomains.length){box.textContent='No domains with an existing Owner-access account found.';return;}
+    box.innerHTML='<b>'+d.total+' domain(s)</b> will be affected:<br>'
+      +'<div style="max-height:140px;overflow-y:auto;font-size:11px;margin-top:4px">'+_boPreviewDomains.map(esc).join('<br>')+'</div>';
+    $('bo-confirm-btn').disabled=false;
+  }catch(e){box.textContent='Could not load preview.';}
+}
+async function boRun(){
+  const email=$('bo-email').value.trim();
+  if(!email){toast('Enter the new user\'s email first','err');return;}
+  if(!_boPreviewDomains.length){toast('Preview first','err');return;}
+  if(!confirm('Add '+email+' as Owner on '+_boPreviewDomains.length+' domain(s)? This opens a real browser window and cannot be easily undone.'))return;
+  const box=$('bo-results');
+  box.innerHTML='<div class="note">Running - opening a real browser window, this can take a while for many domains...</div>';
+  $('bo-confirm-btn').disabled=true;
+  try{
+    const r=await fetch('/api/admin/bulk-add-owner',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({new_user_email:email,domains:_boPreviewDomains})});
+    const d=await r.json();
+    if(d.error){box.innerHTML='<div class="note" style="color:var(--err,#c00)">'+esc(d.error)+'</div>';return;}
+    let rows=(d.results||[]).map(x=>'<tr><td style="font-size:11px;padding:3px 6px">'+esc(x.domain)+'</td>'
+      +'<td style="font-size:11px;padding:3px 6px;color:'+(x.ok?'var(--ok)':'var(--err,#c00)')+'">'+(x.ok?'Added':esc(x.message))+'</td></tr>').join('');
+    box.innerHTML='<div class="note" style="margin-bottom:6px">Added on '+d.submitted+'/'+d.total+' domain(s).</div>'
+      +'<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table>';
+  }catch(e){box.innerHTML='<div class="note" style="color:var(--err,#c00)">Bulk add-owner failed.</div>';}
+}
+
 /* ===================== keyword search volume ===================== */
 let kvSelectedGeo=[];
 let kvLastSuggestions=[];
@@ -4122,6 +4178,7 @@ async function admCheckAdmin(){
       $('tab-admin').style.display='';
       MY_ADMIN_ROLE=r.role||'admin';MY_ADMIN_BUILDING=r.building||'';
       $('adm-buildings-card').style.display=admIsSuper()?'':'none';
+      $('adm-bulkowner-card').style.display=admIsSuper()?'':'none';
     }
   }catch(e){}
 }

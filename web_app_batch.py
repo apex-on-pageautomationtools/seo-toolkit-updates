@@ -5095,6 +5095,91 @@ def api_indexing_fallback_submit():
     return jsonify({"results": results, "submitted": submitted, "dropped_duplicates": dropped_dupes})
 
 # --------------------------------------------------------------------------- #
+# Bulk add-owner - superadmin only. Adds a new user (typically one of the
+# Indexing API pool's service accounts) as Owner across every domain an
+# existing agency account already has Owner access to - the only case this
+# can work at all, since Google requires the granting account to already be
+# an Owner. Kept separate from the regular Submit for Indexing tool (which
+# stays available to the whole team) since granting Owner access is a
+# materially more consequential, harder-to-reverse action.
+# --------------------------------------------------------------------------- #
+def _require_superadmin():
+    auth_result = auth.check_saved_auth()
+    return auth_result.get("role") == "superadmin"
+
+@app.route("/api/admin/bulk-add-owner-preview")
+def api_admin_bulk_add_owner_preview():
+    if not _require_superadmin():
+        return jsonify({"error": "Superadmin only."}), 403
+    mapping = _gsc_mapping()
+    owner_domains = sorted(
+        d for d, info in mapping.items() if (info.get("accessLevel") or "").lower().startswith("owner")
+    )
+    return jsonify({"domains": owner_domains, "total": len(owner_domains)})
+
+@app.route("/api/admin/bulk-add-owner", methods=["POST"])
+def api_admin_bulk_add_owner():
+    if not _require_superadmin():
+        return jsonify({"error": "Superadmin only."}), 403
+    data = request.get_json(silent=True) or {}
+    new_user_email = (data.get("new_user_email") or "").strip()
+    if not new_user_email:
+        return jsonify({"error": "new_user_email is required."}), 400
+    requested = data.get("domains")
+    requested_set = {str(d).strip().lower() for d in requested} if requested else None
+
+    mapping = _gsc_mapping()
+    owner_domains = {
+        d: info for d, info in mapping.items()
+        if (info.get("accessLevel") or "").lower().startswith("owner")
+        and (requested_set is None or d in requested_set)
+    }
+    if not owner_domains:
+        return jsonify({"error": "No domains with an existing Owner-access account found."}), 400
+
+    by_email = {}
+    for d, info in owner_domains.items():
+        by_email.setdefault(info.get("email", ""), []).append(d)
+
+    sessions = gsc_audit.list_sessions()
+    all_results = []
+
+    def _log(msg):
+        activity(f"[bulk add-owner] {msg}")
+
+    for email, domains in by_email.items():
+        sess = next((s for s in sessions if email.lower() in [a.lower() for a in s.get("accounts", [])]), None)
+        if not sess:
+            for d in domains:
+                all_results.append({"domain": d, "ok": False, "message": f"no_browser_session_for_{email}"})
+            continue
+        try:
+            token = gsc_audit.get_access_token(email)
+        except Exception as e:
+            for d in domains:
+                all_results.append({"domain": d, "ok": False, "message": str(e)[:200]})
+            continue
+        property_urls, prop_to_domain = [], {}
+        for d in domains:
+            try:
+                prop = gsc_audit.resolve_property(token, d)
+                property_urls.append(prop)
+                prop_to_domain[prop] = d
+            except Exception as e:
+                all_results.append({"domain": d, "ok": False, "message": str(e)[:200]})
+        if not property_urls:
+            continue
+        results = gsc_audit.bulk_add_owner(sess["id"], property_urls, new_user_email, log_fn=_log)
+        for r in results:
+            all_results.append({"domain": prop_to_domain.get(r["property"], r["property"]),
+                                "ok": r["ok"], "message": r["message"]})
+
+    submitted = sum(1 for r in all_results if r["ok"])
+    activity(f"Bulk add-owner: {submitted}/{len(all_results)} propert{'y' if len(all_results)==1 else 'ies'} "
+             f"got {new_user_email} added")
+    return jsonify({"results": all_results, "submitted": submitted, "total": len(all_results)})
+
+# --------------------------------------------------------------------------- #
 # Admin user management - proxies to central_gateway_apps_script.js (the live
 # multi-tenant backend: a central "users" sheet for super admins + one users sheet
 # per building, roles user/admin/superadmin). Every call is authorized as WHOEVER
