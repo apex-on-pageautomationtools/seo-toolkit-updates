@@ -508,6 +508,165 @@ def capture_gsc_with_session(session_id, property_url, email, out_dir,
 
 
 # ---------------------------------------------------------------------------
+# Submit for Indexing - browser-based fallback for once a user's shared-pool
+# daily cap (see the VPS indexing_service) is used up. Google's real Search
+# Console UI has its own unofficial ~10-15/day "Request Indexing" limit per
+# property, tracked here per GSC account and reset daily. Uses the exact
+# same GSC Browser Session mechanism as Manual Actions/Security Issues
+# capture above - a real, visible, Selenium-launched browser where the user
+# does their own Google login; no automation of Google's login/credential
+# entry, only navigating pages after the human is already signed in.
+# ---------------------------------------------------------------------------
+FALLBACK_DAILY_CAP_PER_ACCOUNT = 10
+
+
+def _indexing_fallback_state_path():
+    return os.path.join(os.path.dirname(_sessions_dir()), "indexing_fallback_usage.json")
+
+
+def _load_indexing_fallback_state():
+    p = _indexing_fallback_state_path()
+    today = datetime.now().strftime("%Y-%m-%d")
+    try:
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            if state.get("date") == today:
+                return state
+    except Exception:
+        pass
+    return {"date": today, "accounts": {}}
+
+
+def _save_indexing_fallback_state(state):
+    p = _indexing_fallback_state_path()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+
+def indexing_fallback_remaining(email):
+    """How many more Request-Indexing clicks this GSC account has left today."""
+    state = _load_indexing_fallback_state()
+    used = state["accounts"].get(email.lower(), 0)
+    return max(0, FALLBACK_DAILY_CAP_PER_ACCOUNT - used)
+
+
+def _record_indexing_fallback_use(email, n=1):
+    state = _load_indexing_fallback_state()
+    key = email.lower()
+    state["accounts"][key] = state["accounts"].get(key, 0) + n
+    _save_indexing_fallback_state(state)
+
+
+_INDEXING_QUOTA_MARKERS = (
+    "exceeded your quota", "reached your quota", "quota for url",
+    "try again in 24 hours", "try again later",
+)
+_INDEXING_SUCCESS_MARKERS = (
+    "indexing request", "already indexed", "url is on google",
+    "request received", "we'll let you know",
+)
+
+
+def request_indexing_via_session(session_id, property_url, email, urls,
+                                  browser_pref="edge", log_fn=None):
+    """Click "Request Indexing" in the real GSC URL Inspection UI for each
+    URL, via an already-logged-in GSC Browser Session. Stops early (without
+    burning the rest of the day's clicks) if either this account's own
+    local 10/day tracker or Google's own quota message is hit. Returns a
+    list of {"url", "ok", "message"} dicts, one per URL passed in (URLs
+    beyond whichever cap is hit first are marked, not silently dropped)."""
+    if log_fn is None:
+        log_fn = print
+    results = []
+    remaining = indexing_fallback_remaining(email)
+    if remaining <= 0:
+        log_fn(f"  {email}: today's Request Indexing allowance (10/day) is already used.")
+        return [{"url": u, "ok": False, "message": "account_daily_cap_reached"} for u in urls]
+
+    to_attempt = urls[:remaining]
+    skipped = urls[remaining:]
+
+    import engine
+    from selenium.webdriver.common.by import By
+    profile_dir = os.path.join(_sessions_dir(), session_id, "chrome_profile")
+    lock = _profile_lock(profile_dir)
+    acquired = lock.acquire(timeout=180)
+    if not acquired:
+        log_fn("  Another capture is using this Google session - timed out waiting.")
+        return [{"url": u, "ok": False, "message": "session_busy"} for u in urls]
+
+    driver = None
+    quota_hit = False
+    try:
+        driver = engine.build_driver(
+            profile_dir, proxy=None, headless=False,
+            country="us", extra_extensions=[],
+            logger=log_fn, browser_pref=browser_pref,
+        )
+        driver.get("https://search.google.com/search-console")
+        time.sleep(3)
+        cur = (driver.current_url or "").lower()
+        if "accounts.google.com" in cur or "/signin" in cur or "servicelogin" in cur:
+            log_fn(f"  {email}: session needs re-login in GSC Browser Sessions.")
+            return [{"url": u, "ok": False, "message": "session_expired"} for u in urls] \
+                + [{"url": u, "ok": False, "message": "skipped_daily_cap"} for u in skipped]
+
+        for url in to_attempt:
+            if quota_hit:
+                results.append({"url": url, "ok": False, "message": "google_quota_exceeded"})
+                continue
+            try:
+                inspect_url = build_gsc_url("inspect", property_url) + "&id=" + urllib.parse.quote(url, safe="")
+                driver.get(inspect_url)
+                time.sleep(6)
+                body_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+                if any(m in body_text for m in _INDEXING_QUOTA_MARKERS):
+                    log_fn(f"  {email}: Google's own daily Request Indexing quota is exhausted.")
+                    results.append({"url": url, "ok": False, "message": "google_quota_exceeded"})
+                    quota_hit = True
+                    continue
+                btn = None
+                for el in driver.find_elements(By.XPATH, "//*[normalize-space(text())='REQUEST INDEXING' or normalize-space(text())='Request indexing']"):
+                    btn = el
+                    break
+                if not btn:
+                    results.append({"url": url, "ok": False, "message": "request_indexing_button_not_found"})
+                    continue
+                btn.click()
+                _record_indexing_fallback_use(email)
+                time.sleep(5)
+                confirm_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+                if any(m in confirm_text for m in _INDEXING_QUOTA_MARKERS):
+                    log_fn(f"  {email}: Google's own daily Request Indexing quota is exhausted.")
+                    results.append({"url": url, "ok": False, "message": "google_quota_exceeded"})
+                    quota_hit = True
+                elif any(m in confirm_text for m in _INDEXING_SUCCESS_MARKERS):
+                    results.append({"url": url, "ok": True, "message": "requested"})
+                else:
+                    results.append({"url": url, "ok": True, "message": "requested (unconfirmed - check manually)"})
+            except Exception as e:
+                results.append({"url": url, "ok": False, "message": str(e)[:200]})
+        _trim_session_cache(profile_dir)
+    except Exception as e:
+        log_fn(f"  Indexing fallback error: {e}")
+        for url in to_attempt[len(results):]:
+            results.append({"url": url, "ok": False, "message": str(e)[:200]})
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+        lock.release()
+
+    for url in skipped:
+        results.append({"url": url, "ok": False, "message": "skipped_daily_cap"})
+    return results
+
+
+# ---------------------------------------------------------------------------
 # GSC API helpers
 # ---------------------------------------------------------------------------
 

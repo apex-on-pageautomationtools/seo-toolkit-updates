@@ -238,6 +238,11 @@ DEFAULT_CONFIG = {
     "min_keyword_delay": 2,
     "default_country": "us",
     "default_pages": 5,
+    # Name/email identifying this machine's user for the shared "Submit for
+    # Indexing" pool's per-user daily quota - not a login, just a label the
+    # VPS indexing service uses to keep one person from consuming the whole
+    # team's shared daily allowance.
+    "indexing_user_id": "",
 }
 
 def load_config():
@@ -3005,6 +3010,14 @@ def api_config():
     cfg["downloads_folder"] = DOWNLOADS_DIR
     cfg["auth_api_url"] = CONFIG.get("auth_api_url", "")
     cfg["user_auth_url"] = CONFIG.get("user_auth_url", "")
+    # indexing_api_url is just an endpoint (like auth_api_url above), safe to
+    # show back for editing. indexing_api_key is a real bearer secret used to
+    # authorize against the shared VPS pool - deliberately NOT re-exposed here
+    # (this endpoint has no admin-only gate), only ever shown masked via
+    # /api/admin/keys_status like every other API key, and write-only from
+    # the Admin UI (typing a new value overwrites it; the old value is never
+    # sent back to the browser).
+    cfg["indexing_api_url"] = CONFIG.get("indexing_api_url", "")
     return jsonify(cfg)
 
 @app.route("/api/export/csv")
@@ -4803,7 +4816,8 @@ def api_auth_is_admin():
 SENSITIVE_KEYS = {"psi_api_key", "gemini_api_key", "groq_api_key", "openrouter_api_key",
                   "openai_api_key", "imgbb_api_key", "archive_org_access_key",
                   "archive_org_secret_key", "firecrawl_api_key", "gsc_client_id",
-                  "gsc_client_secret", "auth_api_url", "user_auth_url", "gsc_projects"}
+                  "gsc_client_secret", "auth_api_url", "user_auth_url", "gsc_projects",
+                  "indexing_api_url", "indexing_api_key"}
 
 @app.route("/api/admin/save_config", methods=["POST"])
 def api_admin_save_config():
@@ -4813,6 +4827,10 @@ def api_admin_save_config():
         CONFIG["auth_api_url"] = data["auth_api_url"].strip()
     if "user_auth_url" in data:
         CONFIG["user_auth_url"] = data["user_auth_url"].strip()
+    if "indexing_api_url" in data:
+        CONFIG["indexing_api_url"] = data["indexing_api_url"].strip().rstrip("/")
+    if "indexing_api_key" in data:
+        CONFIG["indexing_api_key"] = data["indexing_api_key"].strip()
     save_config(CONFIG)
     return jsonify({"saved": True})
 
@@ -4848,7 +4866,9 @@ def api_admin_keys_status():
                 "imgbb_api_key": "ImgBB API Key (ranking screenshot URLs)",
                 "archive_org_access_key": "Archive.org S3 Access Key (Wayback fresh captures)",
                 "archive_org_secret_key": "Archive.org S3 Secret Key (Wayback fresh captures)",
-                "firecrawl_api_key": "Firecrawl API Key (whole-site llms.txt for GEO)"}
+                "firecrawl_api_key": "Firecrawl API Key (whole-site llms.txt for GEO)",
+                "indexing_api_url": "Submit for Indexing - VPS Service URL",
+                "indexing_api_key": "Submit for Indexing - Shared API Key"}
     status = {}
     for k, label in key_names.items():
         val = CONFIG.get(k, "")
@@ -4865,6 +4885,105 @@ def api_admin_keys_status():
         proj_display.append({"name": name, "client_id": masked_id,
                              "properties": p.get("properties", "")})
     return jsonify({"keys": status, "gsc_projects": proj_display})
+
+# --------------------------------------------------------------------------- #
+# Submit for Indexing - proxies to the VPS-hosted service-account pool
+# (vps_tools/indexing_service). The service account private keys never
+# leave the VPS; this app only ever holds the shared secret used to call it.
+# See vps_tools/indexing_service/README.md for what's actually running there.
+# --------------------------------------------------------------------------- #
+def _indexing_creds():
+    url = (CONFIG.get("indexing_api_url") or "").strip().rstrip("/")
+    key = (CONFIG.get("indexing_api_key") or "").strip()
+    user = (CONFIG.get("indexing_user_id") or "").strip()
+    return url, key, user
+
+@app.route("/api/indexing/status")
+def api_indexing_status():
+    url, key, user = _indexing_creds()
+    if not url or not key:
+        return jsonify({"error": "Submit for Indexing isn't configured yet - "
+                                  "an admin needs to set the VPS URL/key in Admin Panel."}), 400
+    if not user:
+        return jsonify({"error": "Set 'Your name' first (used for the shared daily quota)."}), 400
+    try:
+        r = http_requests.get(f"{url}/status", params={"user": user},
+                              headers={"X-Api-Key": key}, timeout=15)
+        r.raise_for_status()
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"error": f"Could not reach the indexing service: {e}"}), 502
+
+@app.route("/api/indexing/submit", methods=["POST"])
+def api_indexing_submit():
+    url, key, user = _indexing_creds()
+    if not url or not key:
+        return jsonify({"error": "Submit for Indexing isn't configured yet - "
+                                  "an admin needs to set the VPS URL/key in Admin Panel."}), 400
+    if not user:
+        return jsonify({"error": "Set 'Your name' first (used for the shared daily quota)."}), 400
+    data = request.get_json(silent=True) or {}
+    urls = [u.strip() for u in (data.get("urls") or []) if u.strip()]
+    if not urls:
+        return jsonify({"error": "No URLs provided."}), 400
+    try:
+        r = http_requests.post(f"{url}/submit", json={"user": user, "urls": urls},
+                               headers={"X-Api-Key": key}, timeout=60)
+        r.raise_for_status()
+        result = r.json()
+        activity(f"Submitted {result.get('submitted', 0)}/{len(urls)} URL(s) for indexing "
+                 f"(user: {user})")
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": f"Could not reach the indexing service: {e}"}), 502
+
+@app.route("/api/indexing/fallback-accounts")
+def api_indexing_fallback_accounts():
+    """Connected GSC accounts that also have a browser session, with today's
+    remaining Request-Indexing allowance (~10/day/account, tracked locally)."""
+    try:
+        accounts = [a for a in gsc_audit.list_accounts() if a.get("has_refresh")]
+        sessions = gsc_audit.list_sessions()
+        out = []
+        for a in accounts:
+            email = a["email"]
+            sess = next((s for s in sessions if email.lower() in [x.lower() for x in s.get("accounts", [])]), None)
+            if not sess:
+                continue
+            out.append({
+                "email": email, "session_id": sess["id"],
+                "remaining_today": gsc_audit.indexing_fallback_remaining(email),
+            })
+        return jsonify({"accounts": out})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/indexing/fallback-submit", methods=["POST"])
+def api_indexing_fallback_submit():
+    """Submit leftover URLs via the real GSC UI's Request Indexing button,
+    for whichever domain/account the caller picked (see
+    /api/indexing/fallback-accounts for the available accounts)."""
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip()
+    session_id = (data.get("session_id") or "").strip()
+    domain = to_domain(data.get("domain") or "")
+    urls = [u.strip() for u in (data.get("urls") or []) if u.strip()]
+    if not (email and session_id and domain and urls):
+        return jsonify({"error": "email, session_id, domain and urls are all required."}), 400
+    try:
+        token = gsc_audit.get_access_token(email)
+        property_url = gsc_audit.resolve_property(token, domain)
+    except Exception as e:
+        return jsonify({"error": f"Could not resolve a GSC property for {domain} on {email}: {e}"}), 400
+
+    def _log(msg):
+        activity(f"[indexing fallback] {msg}")
+
+    results = gsc_audit.request_indexing_via_session(
+        session_id, property_url, email, urls, log_fn=_log)
+    submitted = sum(1 for r in results if r["ok"])
+    activity(f"GSC Request-Indexing fallback: {submitted}/{len(urls)} submitted via {email}")
+    return jsonify({"results": results, "submitted": submitted})
 
 # --------------------------------------------------------------------------- #
 # Admin user management - proxies to central_gateway_apps_script.js (the live

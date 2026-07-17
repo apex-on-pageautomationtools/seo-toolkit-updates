@@ -409,6 +409,10 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
       <span class="sb-label">Performance Report</span>
     </button>
+    <button class="sb-item" id="tab-indexing" data-tip="Submit for Indexing" onclick="switchTab('indexing')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      <span class="sb-label">Submit for Indexing</span>
+    </button>
     <!-- Hidden for everyone for now - the Google Ads Developer Token behind
          Keyword Search Volume is still on Test Access (blocks real customer
          data with a 403), a Basic Access application is pending Google's
@@ -1276,6 +1280,47 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <div class="note" style="margin-top:12px">This is "james" format - the first Performance Report layout. More formats will be added the same way On-Page formats were, once real client references exist for them. Rank-tracking (SE Ranking) and GSC Security/Links sections aren't included yet - separate data sources not wired up.</div>
     </section>
 
+    <section class="card panel" id="panel-indexing" style="display:none">
+      <div class="card-t">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        Submit for Indexing <span class="testing-badge">(testing)</span>
+      </div>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Submits URLs to Google's Indexing API via a shared pool of service-account keys hosted on our VPS (not this machine). Each person on the team shares one daily pool, with a per-person daily cap so one run can't use up everyone else's allowance. Once your daily cap is hit, a second option below lets you continue through the real Search Console "Request Indexing" button (~10/day per connected GSC account) using a GSC Browser Session.</p>
+      <div class="field">
+        <label>Your name <span class="hint">(used only to track your share of the daily pool - not a login)</span></label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="idx-user" placeholder="e.g. vishal" autocomplete="off" style="flex:1">
+          <button class="btn btn-tonal" onclick="idxSaveUser()">Save</button>
+        </div>
+      </div>
+      <div id="idx-quota" class="note" style="margin-top:4px">Set your name and click Save to see today's quota.</div>
+      <div class="field">
+        <label>URLs to submit <span class="hint">(one per line)</span></label>
+        <textarea id="idx-urls" rows="8" placeholder="https://example.com/page-1
+https://example.com/page-2"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin:8px 0">
+        <button class="btn btn-primary" onclick="idxSubmit()">Submit for Indexing</button>
+        <button class="btn btn-tonal" onclick="idxCheckQuota()">Refresh Quota</button>
+      </div>
+      <div id="idx-results"></div>
+
+      <div id="idx-fallback-wrap" class="hidden" style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
+        <div style="font-weight:700;font-size:13px;margin-bottom:6px">Continue via GSC "Request Indexing" (fallback)</div>
+        <p style="color:var(--text-3);font-size:12px;margin:0 0 10px;line-height:1.4">For the URLs above that didn't get submitted because your daily pool cap was reached. Uses a GSC Browser Session (GSC Audit tab) - pick which connected account/domain to use below.</p>
+        <div class="field">
+          <label>Domain <span class="hint">(must match a property the chosen account has access to)</span></label>
+          <input type="text" id="idx-fb-domain" placeholder="example.com" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>GSC account (with a Browser Session)</label>
+          <select id="idx-fb-account"><option value="">Loading...</option></select>
+        </div>
+        <button class="btn btn-tonal" onclick="idxFallbackSubmit()">Submit Leftover URLs via GSC</button>
+        <div id="idx-fallback-results"></div>
+      </div>
+    </section>
+
     <section class="card panel" id="panel-keywordvolume" style="display:none">
       <div class="card-t">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
@@ -1774,6 +1819,16 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
                 <span id="adm-url-status" style="font-size:18px" title=""></span>
               </div>
             </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Submit for Indexing - VPS Service</label>
+              <div class="note" style="margin-bottom:4px">See vps_tools/indexing_service/README.md for how to set this service up. The API key field is write-only - it's never sent back to the browser once saved, only shown masked in API Keys Status below.</div>
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+                <input type="text" id="adm-idx-url" placeholder="https://indexing.yourdomain.com" autocomplete="off" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+              </div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="password" id="adm-idx-key" placeholder="Shared API key (leave blank to keep current)" autocomplete="off" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+              </div>
+            </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <button class="btn btn-primary" style="font-size:12px;padding:6px 18px" onclick="admSaveConfig()">Save Config</button>
               <button class="btn btn-tonal" style="font-size:12px;padding:6px 18px" onclick="admSyncKeys()">Sync API Keys</button>
@@ -2260,6 +2315,7 @@ function switchTab(m){
   $('panel-seranking').style.display=m==='seranking'?'':'none';
   $('panel-geo').style.display=m==='geo'?'':'none';
   $('panel-performance').style.display=m==='performance'?'':'none';
+  $('panel-indexing').style.display=m==='indexing'?'':'none';
   $('panel-keywordvolume').style.display=m==='keywordvolume'?'':'none';
   $('tbl-ranking').style.display=m==='ranking'?'':'none';
   $('tbl-index').style.display=m==='index'?'':'none';
@@ -2276,7 +2332,7 @@ function switchTab(m){
   $('tbl-geo').style.display=m==='geo'?'':'none';
   $('tbl-performance').style.display=m==='performance'?'':'none';
   $('tbl-keywordvolume').style.display=m==='keywordvolume'?'':'none';
-  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',wayback:'Wayback Machine Submitter',seranking:'SEranking Audit',geo:'GEO / AI Optimization',performance:'Performance Report',keywordvolume:'Keyword Search Volume',admin:'Admin Panel'};
+  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',wayback:'Wayback Machine Submitter',seranking:'SEranking Audit',geo:'GEO / AI Optimization',performance:'Performance Report',indexing:'Submit for Indexing',keywordvolume:'Keyword Search Volume',admin:'Admin Panel'};
   const subs={ranking:'Find where your domain ranks on Google - across regions, CAPTCHA-resistant.',
     index:'Check if your URLs are indexed in Google - searches site:url to verify.',
     count:'Get Google\'s total "About N results" number for each keyword - regional, CAPTCHA-resistant.',
@@ -2290,6 +2346,7 @@ function switchTab(m){
     seranking:'Turn a SEranking Site Audit export into a suggestion-filled final workbook.',
     geo:'AI-searchable keywords + FAQ suggestions, plus a no-login check of whether the site is already cited in AI answers (Perplexity reliable; Google/ChatGPT best-effort). Testing phase.',
     performance:'Monthly performance deck built from real Google Search Console + Google Analytics 4 data - real charts, not screenshots. Testing phase.',
+    indexing:'Submit URLs to Google for indexing via a shared team quota, with a real-Search-Console fallback once your daily share is used. Testing phase.',
     keywordvolume:'Real Keyword Planner search volume data from the Google Ads API - avg monthly searches, competition, CPC, filtered by location/language. Testing phase.',
     admin:'Manage users, cities, and app configuration.'};
   $('page-title').textContent=titles[m];
@@ -2305,6 +2362,7 @@ function switchTab(m){
   if(m==='admin'){admLoadUsers();admLoadBuildings();admLoadProxies();admLoadCities();admLoadConfig();admLoadKeysStatus();fetchActivityLog();}
   if(m==='crawl'){crawlLoadUrls();}
   if(m==='performance'){perfLoadGscAccounts();}
+  if(m==='indexing'){idxInit();}
   // Refresh buttons and shared status bar for the newly selected tab
   setButtons(_modeState[m], m);
   const st=_modeState[m];
@@ -3497,6 +3555,90 @@ async function perfReconnectForGa4(){
   }catch(e){toast('Reconnect failed','err');}
 }
 
+/* ===================== submit for indexing ===================== */
+async function idxInit(){
+  if(!$('idx-user').value){
+    try{
+      const cfg=await(await fetch('/api/config')).json();
+      if(cfg.indexing_user_id) $('idx-user').value=cfg.indexing_user_id;
+    }catch(e){}
+  }
+  if($('idx-user').value.trim()) idxCheckQuota();
+  idxLoadFallbackAccounts();
+}
+async function idxSaveUser(){
+  const name=$('idx-user').value.trim();
+  if(!name){toast('Enter a name first','err');return;}
+  try{
+    await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({indexing_user_id:name})});
+    toast('Saved');
+    idxCheckQuota();
+  }catch(e){toast('Save failed','err');}
+}
+async function idxCheckQuota(){
+  const box=$('idx-quota');
+  box.textContent='Checking...';
+  try{
+    const r=await fetch('/api/indexing/status');
+    const d=await r.json();
+    if(d.error){box.textContent=d.error;return;}
+    box.innerHTML='You: <b>'+d.user_used+'/'+d.user_daily_cap+'</b> used today &middot; '
+      +'Team pool: <b>'+d.pool_used+'/'+d.pool_total+'</b> used today ('+d.pool_remaining+' left)';
+  }catch(e){box.textContent='Could not reach the indexing service.';}
+}
+let _idxLastLeftover=[];
+async function idxSubmit(){
+  const urls=$('idx-urls').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(!urls.length){toast('Enter at least one URL','err');return;}
+  if(!$('idx-user').value.trim()){toast('Set your name first','err');return;}
+  const box=$('idx-results');
+  box.innerHTML='<div class="note">Submitting '+urls.length+' URL(s)...</div>';
+  try{
+    const r=await fetch('/api/indexing/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls})});
+    const d=await r.json();
+    if(d.error){box.innerHTML='<div class="note" style="color:var(--err,#c00)">'+esc(d.error)+'</div>';return;}
+    _idxLastLeftover=(d.results||[]).filter(x=>!x.ok && (x.message==='user_daily_cap_reached'||x.message==='pool_exhausted')).map(x=>x.url);
+    let rows=(d.results||[]).map(x=>'<tr><td style="font-size:11px;padding:3px 6px;word-break:break-all">'+esc(x.url)+'</td>'
+      +'<td style="font-size:11px;padding:3px 6px;color:'+(x.ok?'var(--ok)':'var(--err,#c00)')+'">'+(x.ok?'Submitted':esc(x.message))+'</td></tr>').join('');
+    box.innerHTML='<div class="note" style="margin-bottom:6px">Submitted '+d.submitted+'/'+urls.length+' - '
+      +d.user_remaining+' left in your quota today, '+d.pool_remaining+' left in the team pool.</div>'
+      +'<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table>';
+    idxCheckQuota();
+    $('idx-fallback-wrap').classList.toggle('hidden', _idxLastLeftover.length===0);
+  }catch(e){box.innerHTML='<div class="note" style="color:var(--err,#c00)">Could not reach the indexing service.</div>';}
+}
+async function idxLoadFallbackAccounts(){
+  const sel=$('idx-fb-account');
+  try{
+    const r=await fetch('/api/indexing/fallback-accounts');
+    const d=await r.json();
+    const accs=d.accounts||[];
+    if(!accs.length){sel.innerHTML='<option value="">No GSC Browser Session found - create one in GSC Audit tab</option>';return;}
+    sel.innerHTML=accs.map(a=>'<option value="'+esc(a.email)+'|'+esc(a.session_id)+'">'+esc(a.email)+' ('+a.remaining_today+'/10 left today)</option>').join('');
+  }catch(e){sel.innerHTML='<option value="">Could not load accounts</option>';}
+}
+async function idxFallbackSubmit(){
+  const domain=$('idx-fb-domain').value.trim();
+  const sel=$('idx-fb-account').value;
+  if(!domain){toast('Enter the domain first','err');return;}
+  if(!sel){toast('Pick a GSC account','err');return;}
+  const urls=_idxLastLeftover.length?_idxLastLeftover:$('idx-urls').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(!urls.length){toast('No URLs to submit','err');return;}
+  const [email,session_id]=sel.split('|');
+  const box=$('idx-fallback-results');
+  box.innerHTML='<div class="note">Opening a real browser window - log in if prompted, then wait...</div>';
+  try{
+    const r=await fetch('/api/indexing/fallback-submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,session_id,domain,urls})});
+    const d=await r.json();
+    if(d.error){box.innerHTML='<div class="note" style="color:var(--err,#c00)">'+esc(d.error)+'</div>';return;}
+    let rows=(d.results||[]).map(x=>'<tr><td style="font-size:11px;padding:3px 6px;word-break:break-all">'+esc(x.url)+'</td>'
+      +'<td style="font-size:11px;padding:3px 6px;color:'+(x.ok?'var(--ok)':'var(--err,#c00)')+'">'+(x.ok?'Submitted':esc(x.message))+'</td></tr>').join('');
+    box.innerHTML='<div class="note" style="margin-bottom:6px">Submitted '+d.submitted+'/'+urls.length+' via '+esc(email)+'.</div>'
+      +'<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table>';
+    idxLoadFallbackAccounts();
+  }catch(e){box.innerHTML='<div class="note" style="color:var(--err,#c00)">Fallback submission failed.</div>';}
+}
+
 /* ===================== keyword search volume ===================== */
 let kvSelectedGeo=[];
 let kvLastSuggestions=[];
@@ -4308,12 +4450,17 @@ async function admLoadConfig(){
     const urlEl=$('adm-url-status');
     if(c.auth_api_url){urlEl.textContent='✅';urlEl.title='URL configured';}
     else{urlEl.textContent='⚠️';urlEl.title='Not configured (fine for most users - only needed as a fallback)';}
+    $('adm-idx-url').value=c.indexing_api_url||'';
   }catch(e){}
 }
 async function admSaveConfig(){
   try{
-    const r=await fetch('/api/admin/save_config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({auth_api_url:$('adm-script-url').value.trim()})});
+    const body={auth_api_url:$('adm-script-url').value.trim(), indexing_api_url:$('adm-idx-url').value.trim()};
+    const idxKey=$('adm-idx-key').value.trim();
+    if(idxKey) body.indexing_api_key=idxKey;
+    const r=await fetch('/api/admin/save_config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json();toast(d.error||'Config saved');
+    if(idxKey) $('adm-idx-key').value='';  // never keep the plaintext key sitting in the field
     const url=$('adm-script-url').value.trim();
     const urlEl=$('adm-url-status');
     if(url){urlEl.textContent='✅';urlEl.title='URL saved - click Sync API Keys to activate';}
