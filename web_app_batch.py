@@ -4045,6 +4045,18 @@ def _run_performance_report(domain, gsc_account, ga4_property, days):
     cmd = [python_exe, "-u", script, domain, "--out", out_path, "--days", str(days)]
     if gsc_account:
         cmd += ["--gsc-account", gsc_account]
+        # A "session" (logged-in browser profile - see gsc_audit.py) is a
+        # SEPARATE thing from the OAuth token used for the API calls above -
+        # only needed for real dashboard screenshots. Skipped gracefully
+        # (native charts only) if this account has never had one created
+        # (GSC Audit tab's "Connect via Session" flow, used for its own
+        # screenshot capture).
+        session = gsc_audit.find_session_for_email(gsc_account)
+        if session:
+            cmd += ["--session-id", session["id"]]
+        else:
+            _log(f"No browser session for {gsc_account} - report will use native charts "
+                f"instead of real dashboard screenshots (create one in GSC Audit for screenshots).")
     if ga4_property:
         cmd += ["--ga4-property", ga4_property]
 
