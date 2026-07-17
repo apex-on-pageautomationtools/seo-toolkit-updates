@@ -4898,6 +4898,46 @@ def _indexing_creds():
     user = (CONFIG.get("indexing_user_id") or "").strip()
     return url, key, user
 
+INDEXING_MAX_PER_REQUEST = 10
+
+def _check_url_live(u, timeout=10):
+    """A dead/broken URL still costs one submission out of the shared daily
+    quota if we send it anyway - confirm it actually returns 200 first."""
+    try:
+        r = http_requests.head(u, timeout=timeout, allow_redirects=True)
+        if r.status_code == 405 or r.status_code == 404:
+            # Some servers don't support HEAD (405) or misreport it (404) -
+            # a real GET is the only way to be sure in that case.
+            r = http_requests.get(u, timeout=timeout, allow_redirects=True, stream=True)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+def _prep_indexing_urls(raw_urls):
+    """Dedupe (order-preserving), cap to INDEXING_MAX_PER_REQUEST, and drop
+    anything that doesn't return a real 200 - each of those three things
+    protects the shared daily quota from being wasted. Returns
+    (urls_to_submit, skipped) where skipped is a list of {"url","message"}."""
+    seen = set()
+    deduped = []
+    for u in raw_urls:
+        if u not in seen:
+            seen.add(u)
+            deduped.append(u)
+    dropped_dupes = len(raw_urls) - len(deduped)
+
+    capped = deduped[:INDEXING_MAX_PER_REQUEST]
+    over_limit = deduped[INDEXING_MAX_PER_REQUEST:]
+
+    skipped = [{"url": u, "message": "over_10_per_request_limit"} for u in over_limit]
+    to_submit = []
+    for u in capped:
+        if _check_url_live(u):
+            to_submit.append(u)
+        else:
+            skipped.append({"url": u, "message": "not_200_ok - skipped to avoid wasting quota"})
+    return to_submit, skipped, dropped_dupes
+
 @app.route("/api/indexing/status")
 def api_indexing_status():
     url, key, user = _indexing_creds()
@@ -4923,16 +4963,22 @@ def api_indexing_submit():
     if not user:
         return jsonify({"error": "Set 'Your name' first (used for the shared daily quota)."}), 400
     data = request.get_json(silent=True) or {}
-    urls = [u.strip() for u in (data.get("urls") or []) if u.strip()]
-    if not urls:
+    raw_urls = [u.strip() for u in (data.get("urls") or []) if u.strip()]
+    if not raw_urls:
         return jsonify({"error": "No URLs provided."}), 400
+    urls, skipped, dropped_dupes = _prep_indexing_urls(raw_urls)
+    if not urls:
+        return jsonify({"error": "None of the submitted URLs are usable.",
+                        "results": skipped, "submitted": 0, "dropped_duplicates": dropped_dupes}), 200
     try:
         r = http_requests.post(f"{url}/submit", json={"user": user, "urls": urls},
                                headers={"X-Api-Key": key}, timeout=60)
         r.raise_for_status()
         result = r.json()
-        activity(f"Submitted {result.get('submitted', 0)}/{len(urls)} URL(s) for indexing "
-                 f"(user: {user})")
+        result["results"] = skipped + (result.get("results") or [])
+        result["dropped_duplicates"] = dropped_dupes
+        activity(f"Submitted {result.get('submitted', 0)}/{len(raw_urls)} URL(s) for indexing "
+                 f"(user: {user}, {len(skipped)} skipped, {dropped_dupes} duplicate(s) dropped)")
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": f"Could not reach the indexing service: {e}"}), 502
@@ -4967,9 +5013,12 @@ def api_indexing_fallback_submit():
     email = (data.get("email") or "").strip()
     session_id = (data.get("session_id") or "").strip()
     domain = to_domain(data.get("domain") or "")
-    urls = [u.strip() for u in (data.get("urls") or []) if u.strip()]
-    if not (email and session_id and domain and urls):
+    raw_urls = [u.strip() for u in (data.get("urls") or []) if u.strip()]
+    if not (email and session_id and domain and raw_urls):
         return jsonify({"error": "email, session_id, domain and urls are all required."}), 400
+    urls, skipped, dropped_dupes = _prep_indexing_urls(raw_urls)
+    if not urls:
+        return jsonify({"results": skipped, "submitted": 0, "dropped_duplicates": dropped_dupes})
     try:
         token = gsc_audit.get_access_token(email)
         property_url = gsc_audit.resolve_property(token, domain)
@@ -4981,9 +5030,11 @@ def api_indexing_fallback_submit():
 
     results = gsc_audit.request_indexing_via_session(
         session_id, property_url, email, urls, log_fn=_log)
+    results = skipped + results
     submitted = sum(1 for r in results if r["ok"])
-    activity(f"GSC Request-Indexing fallback: {submitted}/{len(urls)} submitted via {email}")
-    return jsonify({"results": results, "submitted": submitted})
+    activity(f"GSC Request-Indexing fallback: {submitted}/{len(raw_urls)} submitted via {email} "
+             f"({len(skipped)} skipped, {dropped_dupes} duplicate(s) dropped)")
+    return jsonify({"results": results, "submitted": submitted, "dropped_duplicates": dropped_dupes})
 
 # --------------------------------------------------------------------------- #
 # Admin user management - proxies to central_gateway_apps_script.js (the live
