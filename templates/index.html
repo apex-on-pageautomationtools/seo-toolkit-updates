@@ -409,7 +409,13 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
       <span class="sb-label">Performance Report</span>
     </button>
-    <button class="sb-item" id="tab-indexing" data-tip="Submit for Indexing" onclick="switchTab('indexing')">
+    <!-- Hidden for everyone for now - the VPS-hosted indexing_service isn't
+         reliably reachable by the whole team yet (team IPs vary, no fixed
+         office IP to firewall-allowlist, and no domain available for a
+         proper HTTPS setup right now). Remove "hidden" below once that
+         access question is resolved and the service is confirmed reachable
+         from wherever the team actually runs the desktop app. -->
+    <button class="sb-item hidden" id="tab-indexing" data-tip="Submit for Indexing" onclick="switchTab('indexing')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
       <span class="sb-label">Submit for Indexing</span>
     </button>
