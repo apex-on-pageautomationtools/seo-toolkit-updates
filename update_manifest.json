@@ -18,12 +18,12 @@
     },
     {
       "path": "gsc_audit.py",
-      "hash": "a77af6e24f9adda8aa5be78319a537ae6842af2e0d6bd3005b0022592ca49a28",
+      "hash": "5000f4fb9d5f9776f4cc77cb478da4421ca6ef2cdd71749631b7725f04be6db6",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/gsc_audit.py"
     },
     {
       "path": "health_audit.py",
-      "hash": "d9e1845493d197af0b9b8fcb055afeadff492f1827575f979a2bf81fb815a3eb",
+      "hash": "30f4c38673447997c8465c8c0f45edd2df7f69cc784b52e0721500d58825dee8",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/health_audit.py"
     },
     {
@@ -33,7 +33,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "0d500ce0464acd84a5d8436b254cee0b5272b6ef9a59d4d7102b4c67e3a6c200",
+      "hash": "eeccd71cbcfa7aca6e832678ac4a5ab213b9e95db97ecf3372c87f6061460301",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -98,7 +98,7 @@
     },
     {
       "path": "scripts/generate_health_report.py",
-      "hash": "2716542b3455bc1e268bc5c26965cc2615cd267e5230453687bc245fa5981dcc",
+      "hash": "4768f83dd1c088b3aa85860d125de6e8d1c808bec6e8cd240172fe657898f955",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_health_report.py"
     },
     {
@@ -108,7 +108,7 @@
     },
     {
       "path": "scripts/generate_seo_onpage_phase2.py",
-      "hash": "0e705ff115093c5b37189e60931c4770d3fae9c6227201b2406f34fb849742f5",
+      "hash": "4882945e79bb76dd9cde44a62c4f41fc91360bb4e9b5055d901a86df1e47f9d1",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seo_onpage_phase2.py"
     },
     {
@@ -138,7 +138,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "43081ad2376fd0fe24ba8872ec588e1dbd867f0afed4d09d58205c6ba8864f96",
+      "hash": "2e64962f75d843426093da1a5b92356ecf21958898880c4499cf3ff3e023e1b8",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {

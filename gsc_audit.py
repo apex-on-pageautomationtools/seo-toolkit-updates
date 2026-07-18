@@ -930,6 +930,26 @@ def fetch_sitemaps(token, property_url):
     return resp.get("sitemap", [])
 
 
+def submit_sitemap(token, property_url, feedpath):
+    """Submit (or resubmit) a sitemap to a GSC property - Search Console API's
+    sitemaps.submit, a PUT with an empty body. Requires the 'webmasters' scope
+    (already requested, see SCOPES above), not the readonly variant."""
+    encoded_site = urllib.parse.quote(property_url, safe="")
+    encoded_feed = urllib.parse.quote(feedpath, safe="")
+    url = f"{GSC_API_BASE}/sites/{encoded_site}/sitemaps/{encoded_feed}"
+    req = urllib.request.Request(url, data=b"", method="PUT", headers={
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "User-Agent": "SEOToolkitPro-GSC/1.0",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            # sitemaps.submit returns 200 with an empty body on success.
+            return True
+    except urllib.error.HTTPError as e:
+        _raise_with_api_detail(e, url)
+
+
 def fetch_search_analytics(token, property_url, start_date, end_date, dimensions=None, row_limit=25):
     encoded = urllib.parse.quote(property_url, safe="")
     body = {
@@ -1466,6 +1486,20 @@ def _rect(slide, x, y, w, h, color):
         1,  # MSO_SHAPE.RECTANGLE
         Inches(x), Inches(y), Inches(w), Inches(h)
     )
+    if isinstance(color, str):
+        color = RGBColor(int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16))
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = color
+    shape.line.fill.background()
+    return shape
+
+
+def _rect_emu(slide, x_emu, y_emu, w_emu, h_emu, color):
+    """Like _rect, but takes raw EMU values (e.g. already-computed Inches()
+    results) instead of float inches - for framing a dynamically-sized image."""
+    from pptx.dml.color import RGBColor
+
+    shape = slide.shapes.add_shape(1, x_emu, y_emu, w_emu, h_emu)  # MSO_SHAPE.RECTANGLE
     if isinstance(color, str):
         color = RGBColor(int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16))
     shape.fill.solid()
@@ -2296,6 +2330,10 @@ def build_omega(data, out_path, log_fn=None):
             else: fh = th; fw = int(th * aspect)
             cx = Inches(0.8) + (tw - fw) // 2
             cy = Inches(2.25) + (th - fh) // 2
+            # Thin blue frame behind the screenshot (matches the reference report
+            # format, which borders every embedded screenshot).
+            border = Inches(0.02)
+            _rect_emu(s, cx - border, cy - border, fw + 2 * border, fh + 2 * border, "#1B6FD6")
             s.shapes.add_picture(img_path, cx, cy, fw, fh)
         else:
             _text(s, "Please check this manually", 3, 4.5, 7, 0.5, 18, "Calibri",

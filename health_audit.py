@@ -168,9 +168,32 @@ def check_canonical(target_pages, domain, driver=None):
             canon = canonicals[0].rstrip("/")
             page_url = url.rstrip("/")
             ok = canon == page_url
-            results.append({"url": url, "canonical": canonicals[0], "ok": ok,
-                            "note": "Self-referencing" if ok else "Points elsewhere"})
+            note = "Self-referencing"
+            if not ok:
+                # A canonical that only differs by scheme (http/https) or a "www."
+                # prefix from the page it's on - same host otherwise, same path -
+                # is normal, correct canonicalization to one preferred version
+                # (e.g. the non-www page pointing to the www version), not an issue.
+                canon_host_path = _strip_scheme_www(canon)
+                page_host_path = _strip_scheme_www(page_url)
+                if canon_host_path == page_host_path:
+                    ok = True
+                    note = "Self-referencing (points to preferred www/https version)"
+                else:
+                    note = "Points elsewhere"
+            results.append({"url": url, "canonical": canonicals[0], "ok": ok, "note": note})
     return results
+
+
+def _strip_scheme_www(url):
+    """Normalize a URL to host+path for comparing canonical variants that only
+    differ by scheme (http/https) or a 'www.' prefix - not real canonical issues."""
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    host = parts.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host + parts.path.rstrip("/")
 
 
 def check_double_meta(target_pages, domain, driver=None):
@@ -274,20 +297,34 @@ def check_versions_full(domain):
         f"http://{domain}/", f"http://www.{domain}/",
         f"https://{domain}/", f"https://www.{domain}/",
     ]
+    import time as _time
     results = []  # (variant, final_url, final_code, redirected)
     for url in variants:
         final_url, final_code = None, 0
-        try:
-            # urlopen follows redirects by default, so geturl() is the FINAL landing URL
-            # after the whole chain (http -> https -> www ...), not just the first hop.
-            req = _ur.Request(url, headers={"User-Agent": _UA})
-            with _ur.urlopen(req, timeout=12) as r:
-                final_url = (r.geturl() or url).rstrip("/")
-                final_code = r.status
-        except _ue.HTTPError as he:
-            final_url, final_code = url.rstrip("/"), he.code
-        except Exception:
-            final_url, final_code = None, 0
+        # A site can rate-limit (429) or hiccup (503) when we fire 4 requests back
+        # to back - retry with a short backoff before treating the variant as down,
+        # otherwise a transient rate limit gets misreported as "site unreachable".
+        for attempt in range(3):
+            try:
+                req = _ur.Request(url, headers={"User-Agent": _UA})
+                # urlopen follows redirects by default, so geturl() is the FINAL
+                # landing URL after the whole chain (http -> https -> www ...).
+                with _ur.urlopen(req, timeout=12) as r:
+                    final_url = (r.geturl() or url).rstrip("/")
+                    final_code = r.status
+                break
+            except _ue.HTTPError as he:
+                final_url, final_code = url.rstrip("/"), he.code
+                if he.code in (429, 503) and attempt < 2:
+                    _time.sleep(2 * (attempt + 1))
+                    continue
+                break
+            except Exception:
+                final_url, final_code = None, 0
+                if attempt < 2:
+                    _time.sleep(2 * (attempt + 1))
+                    continue
+                break
         redirected = bool(final_url and final_url != url.rstrip("/"))
         results.append((url, final_url, final_code, redirected))
 
@@ -1954,8 +1991,20 @@ def build_health_pptx_omega(domain, captured, computed, out_dir):
         except Exception:
             return False
 
+    BG = PRGB(0xF8, 0xF7, 0xF4)
+    ACCENT = PRGB(0xB0, 0x8D, 0x57)
+
+    def slide_bg(slide, header=False):
+        """Background fill + top/bottom accent bars so every slide carries the
+        report's design instead of the default blank-white pptx layout."""
+        rect(slide, 0, 0, 13.333, 7.5, BG)
+        if header:
+            rect(slide, 0, 0, 13.333, 0.12, ACCENT)
+        rect(slide, 0, 7.4, 13.333, 0.1, BLUE)
+
     # Title
     s = prs.slides.add_slide(blank)
+    slide_bg(s, header=True)
     text(s, domain, 1.0, 2.2, 11.33, 1.0, 36, BLUE, bold=True,
          align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
     intro_body = " ".join(b.lstrip(": ").strip() if b.startswith(":") else b.strip() for _, b in INTRO)
@@ -1964,6 +2013,7 @@ def build_health_pptx_omega(domain, captured, computed, out_dir):
     placed = missing = 0
     for n, cp in enumerate(cps, start=1):
         s = prs.slides.add_slide(blank)
+        slide_bg(s)
         body = cp["body"]
         for k, v in computed.items():
             body = body.replace("{" + k + "}", v)

@@ -151,8 +151,67 @@ def load_targets(targets_path, domain):
             grouped[page].append(row["keyword"])
             if row.get("rank") not in (None, ""):
                 ranks_by_page[page][row["keyword"]] = row["rank"]
-    return [{"page": pg, "keywords": kws, "keyword_ranks": ranks_by_page.get(pg, {})}
-            for pg, kws in grouped.items()]
+    result = [{"page": pg, "keywords": kws, "keyword_ranks": ranks_by_page.get(pg, {})}
+               for pg, kws in grouped.items()]
+
+    # The homepage should always be part of the audited target pages - checks like
+    # canonical/noindex/meta robots are meant to cover it even when the team's
+    # keyword sheet only lists inner pages, not the domain root itself.
+    home = site_root(domain) + "/"
+    if not any(r["page"].rstrip("/") + "/" == home for r in result):
+        result.insert(0, {"page": home, "keywords": [], "keyword_ranks": {}})
+    return result
+
+
+def discover_targets_gsc_or_sitemap(domain, dry_run=False, limit=4, account=None):
+    """When no keyword sheet is supplied, prefer picking target pages the SAME
+    way GSC Audit does: top pages by real search performance via the Search
+    Console API (site's actual best-performing pages, not just whatever the
+    homepage happens to link to). Falls back to the sitemap's own page list if
+    GSC isn't connected, and only falls back further to a raw homepage-link
+    crawl (discover_targets) if neither GSC nor a sitemap is available."""
+    root = site_root(domain)
+    home = root + "/"
+    if dry_run:
+        return [{"page": home, "keywords": []}]
+
+    def _finish(urls, source):
+        pages = list(dict.fromkeys([home] + [u for u in urls if u]))[:max(limit, 1)]
+        log(f"   -> auto-discovered {len(pages)} target page(s) from {source}")
+        return [{"page": p, "keywords": []} for p in pages]
+
+    # 1st option: GSC top pages by clicks, same API GSC Audit uses.
+    token, property_url = _resolve_gsc_creds(domain, account)
+    if token and property_url:
+        try:
+            import sys as _sys
+            _repo = str(ROOT.parent)
+            if _repo not in _sys.path:
+                _sys.path.insert(0, _repo)
+            import gsc_audit
+            end = datetime.date.today()
+            start = end - datetime.timedelta(days=28)
+            rows = gsc_audit.fetch_top_pages(token, property_url, start.isoformat(), end.isoformat(),
+                                             limit=limit + 1)
+            # Search Console API rows are {"keys": [<page URL>], "clicks":..., ...} -
+            # already sorted by clicks descending, which is what "top pages" means here.
+            urls = [r["keys"][0] for r in rows if r.get("keys")]
+            if urls:
+                return _finish(urls, "GSC (top pages by clicks)")
+            log("   [info] GSC connected but returned no top pages - falling back to sitemap")
+        except Exception as e:
+            log(f"   [info] GSC top-pages lookup failed ({type(e).__name__}: {e}) - falling back to sitemap")
+
+    # 2nd option: the site's own sitemap.
+    sitemap_url, sitemap_body = find_existing_sitemap(domain, dry_run=False)
+    if sitemap_body:
+        urls = sorted(_sitemap_loc_urls(sitemap_body))
+        if urls:
+            return _finish(urls, "sitemap.xml")
+        log("   [info] sitemap found but had no <loc> entries - falling back to homepage-link crawl")
+
+    # Last resort: crawl the homepage's own internal links.
+    return discover_targets(domain, dry_run=dry_run, limit=limit)
 
 
 def discover_targets(domain, dry_run=False, limit=12):
@@ -499,7 +558,7 @@ def _parse_html(html, url, status):
         "og_site_name": og_site, "canonical": canonical, "lang": lang, "viewport": viewport,
         "images": images, "headings": headings, "internal_links": list(dict.fromkeys(internal)),
         "external_links": list(dict.fromkeys(external)), "status": status, "body_text": body_text,
-        "content_word_count": content_word_count,
+        "content_word_count": content_word_count, "html": html,
     }
 
 
@@ -518,7 +577,7 @@ def _regex_parse(html, url, status):
             "h1": re.sub("<[^>]+>", "", h1), "h1s": [], "canonical": canonical, "lang": lang,
             "viewport": "viewport" in html.lower(), "images": [], "headings": [],
             "internal_links": [], "external_links": [], "status": status, "body_text": body_text,
-            "content_word_count": _paragraph_word_count(html)}
+            "content_word_count": _paragraph_word_count(html), "html": html}
 
 
 # ----------------------------------------------------------------- deliverables
@@ -1666,6 +1725,34 @@ def find_existing_sitemap(domain, dry_run=False):
     return None, None
 
 
+def _sitemap_loc_urls(body, _depth=0):
+    """All <loc> URLs from a sitemap body - if it's a <sitemapindex>, fetches and
+    recurses into each listed sub-sitemap so the target pages get checked against
+    the site's REAL page list, not just the top-level index file's own entries."""
+    if not body or _depth > 3:
+        return set()
+    locs = set(re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", body, re.I))
+    if "<sitemapindex" in body:
+        urls = set()
+        for sub_url in locs:
+            st, sub_body, _ = _http(sub_url)
+            if st == 200 and sub_body:
+                urls |= _sitemap_loc_urls(sub_body, _depth + 1)
+        return urls
+    return locs
+
+
+def verify_sitemap_coverage(sitemap_body, target_pages):
+    """Which of the report's target pages are actually listed in the sitemap
+    (following sitemap-index sub-sitemaps first) - not just whether sitemap.xml
+    exists. Returns (covered, missing) lists of target-page URLs."""
+    sitemap_urls = {u.rstrip("/") for u in _sitemap_loc_urls(sitemap_body)}
+    covered, missing = [], []
+    for page in target_pages:
+        (covered if page.rstrip("/") in sitemap_urls else missing).append(page)
+    return covered, missing
+
+
 def _xml_escape(s):
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -1695,8 +1782,15 @@ def _http(url, method="GET", timeout=20):
     import urllib.request
     import urllib.error
     try:
-        req = urllib.request.Request(url, method=method,
-                                     headers={"User-Agent": "Mozilla/5.0 SEOPhase2Bot"})
+        # A UA that self-identifies as a bot ("SEOPhase2Bot") can get different
+        # behavior from a WAF/CDN than a real visitor's browser would (e.g. the
+        # 404-page check: some setups serve a real 404 to real browsers but a
+        # soft-redirect/challenge to obvious bots) - use a realistic browser UA
+        # like the rest of this file's live browser checks already do, so this
+        # plain-HTTP path sees what an actual visitor sees.
+        req = urllib.request.Request(url, method=method, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             body = r.read().decode("utf-8", "ignore") if method == "GET" else ""
             return r.status, body, r.geturl()
@@ -1811,6 +1905,16 @@ def _detect_footer_logo(home_html):
     return False
 
 
+def _strip_scheme_www(url):
+    """Normalize to host+path so canonical comparisons don't flag a legitimate
+    scheme (http/https) or 'www.' prefix difference as a mismatch."""
+    parts = urllib.parse.urlsplit(url)
+    host = parts.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host + parts.path.rstrip("/")
+
+
 def audit_site(domain, pages_data, dry_run=False):
     """Detect the real per-site findings that drive the narrative report."""
     d = safe_domain(domain)
@@ -1820,8 +1924,13 @@ def audit_site(domain, pages_data, dry_run=False):
                 pages_data[0] if pages_data else {})
     f = {"target_pages": [pd["url"] for pd in pages_data]}
 
-    home_html = ""
-    if not dry_run:
+    # Prefer the ALREADY-RENDERED homepage HTML from the crawl (patchright/selenium,
+    # which execute JS) over a fresh raw HTTP fetch. A plain urllib GET never runs
+    # JS, so a footer logo (or anything else) injected/hydrated client-side - common
+    # on React/Vue/Next.js sites - is invisible to it and reads as "missing" even
+    # though a real browser (and the site's own visitors) clearly show it.
+    home_html = home.get("html") or ""
+    if not home_html and not dry_run:
         _, home_html, _ = _http(root + "/")
 
     # robots.txt
@@ -1917,7 +2026,20 @@ def audit_site(domain, pages_data, dry_run=False):
 
     m = re.search(r'href="([^"]+)"', home.get("canonical", "") or "")
     f["home_canonical"] = m.group(1) if m else None
-    f["canonical_issue"] = bool(f["home_canonical"] and f["home_canonical"].rstrip("/") != root)
+    if not f["home_canonical"]:
+        # No canonical tag at all is itself the issue this section warns about
+        # (duplicate-version confusion has nothing telling search engines which
+        # URL is preferred) - the old check only flagged a MISMATCHED canonical
+        # and silently treated "no canonical tag" as fine, a false "correctly
+        # set" result.
+        f["canonical_issue"] = True
+    else:
+        canon_norm = _strip_scheme_www(f["home_canonical"])
+        root_norm = _strip_scheme_www(root)
+        # A canonical that only differs from root by scheme (http/https) or a
+        # "www." prefix is still self-referencing to the one preferred version,
+        # not a real mismatch.
+        f["canonical_issue"] = canon_norm != root_norm
 
     # noindex check - look for meta robots noindex in each target page's HTML
     noindex_pages = []
@@ -2030,7 +2152,108 @@ def _render_external_links_image(domain, detail, path):
     img.save(str(path))
 
 
-def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=None):
+def _latest_wayback_snapshot_url(domain):
+    """Resolve the actual latest-archived snapshot URL via the Wayback Availability
+    API, instead of a hardcoded guessed timestamp ("web/2/..." resolves to the
+    OLDEST snapshot, not the latest, and comes out blank if that earliest capture
+    was broken or never completed). Returns None if never archived."""
+    try:
+        st, body, _ = _http(f"https://archive.org/wayback/available?url=https://{domain}/")
+        if st != 200 or not body:
+            return None
+        data = json.loads(body)
+        snap = (data.get("archived_snapshots") or {}).get("closest") or {}
+        if snap.get("available") and snap.get("url"):
+            return snap["url"]
+    except Exception as e:
+        log(f"   [warn] wayback availability lookup failed: {e}")
+    return None
+
+
+def _is_blocked_page(src):
+    src = (src or "").lower()
+    return any(m in src for m in ("unusual traffic", "not a robot", "recaptcha",
+                                  "/sorry/", "detected unusual", "before you continue"))
+
+
+def check_site_indexing(domain, target_pages, out, path_fn, log_fn=None):
+    """Per-page Google `site:URL` indexing check, WITH a screenshot for every page
+    regardless of indexed/not-indexed - the fallback used when GSC access isn't
+    configured (or didn't return usable data). CAPTCHA/block handling mirrors the
+    rank checker's: retry with backoff first; if still blocked, fall back to a
+    fresh browser profile (a brand-new temp user-data-dir - Google's block is
+    often tied to that profile/session, not just the IP) before giving up on a
+    page. Returns a list of {url, indexed, shot_key} - indexed is True/False, or
+    None if Google could not be checked at all for that page after every attempt."""
+    import base64, time as _t
+    log_fn = log_fn or log
+    results = []
+    driver = _get_op_driver()
+    if not driver:
+        return results
+
+    def _one_attempt(drv, url, shot_key):
+        drv.get(f"https://www.google.com/search?q=site:{url}")
+        _t.sleep(3)
+        src = drv.page_source or ""
+        if _is_blocked_page(src):
+            return None, src
+        indexed = (url.rstrip("/") in src) or (url.replace("https://", "").replace("http://", "").rstrip("/") in src)
+        if "did not match any documents" in src.lower():
+            indexed = False
+        try:
+            drv.execute_script("window.scrollTo(0,0);")
+            _t.sleep(0.4)
+            cdp = {"format": "png", "captureBeyondViewport": False}
+            shot = drv.execute_cdp_cmd("Page.captureScreenshot", cdp)
+            p = path_fn(shot_key)
+            with open(p, "wb") as f:
+                f.write(base64.b64decode(shot["data"]))
+            out[shot_key] = p
+        except Exception:
+            pass
+        return indexed, src
+
+    for i, url in enumerate(target_pages):
+        shot_key = f"index_check_{i}"
+        indexed = None
+        for attempt in range(3):
+            indexed, src = _one_attempt(driver, url, shot_key)
+            if indexed is not None:
+                break
+            log_fn(f"   [warn] indexing check for {url}: Google block detected "
+                   f"(attempt {attempt + 1}/3), backing off...")
+            _t.sleep(6 * (attempt + 1))
+        if indexed is None:
+            # Still blocked on this browser profile after retries - one last try
+            # on a completely fresh profile (new temp user-data-dir), since
+            # Google's block is often tied to the profile/cookies, not just the IP.
+            try:
+                import tempfile
+                from selenium.webdriver import Chrome, ChromeOptions
+                opts = ChromeOptions()
+                opts.add_argument(f"--user-data-dir={tempfile.mkdtemp(prefix='seo_op_freshprofile_')}")
+                opts.add_argument("--headless=new")
+                opts.add_argument("--no-sandbox")
+                opts.add_argument("--disable-dev-shm-usage")
+                fresh = Chrome(options=opts)
+                fresh.set_page_load_timeout(45)
+                try:
+                    indexed, _ = _one_attempt(fresh, url, shot_key)
+                finally:
+                    fresh.quit()
+            except Exception as e:
+                log_fn(f"   [warn] fresh-profile indexing retry failed for {url}: {e}")
+        if indexed is None:
+            log_fn(f"   [warn] indexing check for {url}: still blocked after all retries - "
+                   f"could not verify (no captcha screenshot kept)")
+        results.append({"url": url, "indexed": indexed,
+                        "shot_key": shot_key if shot_key in out else None})
+    return results
+
+
+def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=None,
+                               target_pages=None, gsc_indexing=None):
     """Live, HEADLESS screenshots for the report - all public pages/tools, so no
     Google login is needed. Captured with selenium + Chrome via CDP: the embedded
     python ships selenium but NOT patchright/playwright, so the old patchright
@@ -2078,7 +2301,39 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
             _t.sleep(step)
             elapsed += step
 
-    def _shot(key, url, height=900, view_source=False, sucuri=False, _attempt=1):
+    def _highlight_tag(kind):
+        """Read the REAL rendered page's canonical link or robots meta tag straight
+        from the DOM and inject a highlighted on-page banner showing it - a genuine
+        visual highlight, instead of a raw view-source: code dump (view-source: is a
+        privileged scheme some automated browsers restrict, and even when it loaded,
+        nothing in that mode was actually highlighted - just the whole page dumped)."""
+        try:
+            driver.execute_script("""(kind) => {
+                var esc = function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+                var label, value;
+                if (kind === 'canonical') {
+                    var el = document.querySelector('link[rel="canonical"]');
+                    label = 'Canonical URL';
+                    value = el ? (el.getAttribute('href') || '(empty)') : '(missing - no canonical tag found)';
+                } else {
+                    var el = document.querySelector('meta[name="robots"]');
+                    label = 'Meta Robots';
+                    value = el ? (el.getAttribute('content') || '(empty)') : '(not set - defaults to index, follow)';
+                }
+                var box = document.createElement('div');
+                box.id = '__tag_highlight_overlay';
+                box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;'
+                    + 'background:#fff59d;color:#000;padding:16px 20px;font:14px/1.5 Arial,sans-serif;'
+                    + 'border-bottom:4px solid #f9a825;box-shadow:0 2px 8px rgba(0,0,0,.3);';
+                box.innerHTML = '<b>' + esc(label) + ':</b> ' + esc(value);
+                document.body.insertBefore(box, document.body.firstChild);
+                window.scrollTo(0, 0);
+            }""", kind)
+            _t.sleep(0.5)
+        except Exception:
+            pass
+
+    def _shot(key, url, height=900, view_source=False, sucuri=False, highlight=None, _attempt=1):
         p = path(key)
         try:
             driver.get(("view-source:" + url) if view_source else url)
@@ -2086,6 +2341,8 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
                 _t.sleep(4)          # view-source: pages don't hydrate normally - keep the fixed wait
             else:
                 _wait_settled(15 if sucuri else 4)
+            if highlight:
+                _highlight_tag(highlight)
             # Google serves headless browsers a reCAPTCHA / "unusual traffic" wall
             # instead of results - a screenshot of that is useless, so skip it (the
             # indexing section falls back to a text note / GSC data).
@@ -2143,7 +2400,7 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
                 # slot empty - one retry catches most flaky failures.
                 _t.sleep(1.5)
                 return _shot(key, url, height=height, view_source=view_source,
-                             sucuri=sucuri, _attempt=_attempt + 1)
+                             sucuri=sucuri, highlight=highlight, _attempt=_attempt + 1)
             try:                                   # last resort: plain viewport shot
                 driver.save_screenshot(p)
                 out[key] = p
@@ -2153,12 +2410,31 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
 
     _shot("homepage",  root + "/", height=900)
     _shot("robots",    root + "/robots.txt", height=700)
-    _shot("canonical", root + "/", view_source=True)
+    _shot("canonical", root + "/", highlight="canonical")
+    _shot("noindex",   root + "/", highlight="robots")
     _shot("lang",      root + "/", view_source=True)
     if sitemap_url:                                # only shoot a sitemap that exists
         _shot("sitemap", sitemap_url, height=760)
     _shot("serp",      f"https://www.google.com/search?q=site:{domain}", height=900)
-    _shot("wayback",   f"https://web.archive.org/web/2/https://{domain}/", height=900)
+
+    # Indexing fallback: GSC is the 1st option (already checked in main() before
+    # this runs, results passed in via gsc_indexing); any target page GSC didn't
+    # give a usable verdict for - or every page, if no GSC access was configured
+    # at all - falls back to a per-page Google `site:URL` check as the 2nd
+    # option, WITH a screenshot either way (indexed or not), not just when
+    # indexed and not a captcha screen.
+    gsc_ok_urls = {r["url"] for r in (gsc_indexing or []) if r.get("verdict") != "ERROR"}
+    fallback_pages = [u for u in (target_pages or []) if u not in gsc_ok_urls]
+    if fallback_pages:
+        log(f"   -> checking indexing via Google site: search for {len(fallback_pages)} "
+            f"page(s) not covered by GSC...")
+        out["_site_indexing"] = check_site_indexing(domain, fallback_pages, out, path, log_fn=log)
+
+    _wayback_url = _latest_wayback_snapshot_url(domain)
+    if _wayback_url:
+        _shot("wayback", _wayback_url, height=900)
+    else:
+        log("   [warn] wayback: no archived snapshot found for this domain, skipping screenshot")
     _shot("viewport",  root + "/", height=900)
     _shot("sucuri",    f"https://sitecheck.sucuri.net/results/https/{domain}", sucuri=True)
     # Same URL the www_redirect_issue / has_custom_404 findings themselves check
@@ -2620,38 +2896,67 @@ def _sec_indexing(h, findings, captured):
               "webpages indexed by search engine is extremely important. Pages that are not indexed by "
               "Google cannot rank and attract search traffic.")
 
-    gsc_idx = findings.get("gsc_indexing")
-    if gsc_idx:
-        indexed = [r for r in gsc_idx if r["verdict"] == "PASS"]
-        not_indexed = [r for r in gsc_idx if r["verdict"] not in ("PASS", "ERROR")]
-        errors = [r for r in gsc_idx if r["verdict"] == "ERROR"]
+    gsc_idx = findings.get("gsc_indexing") or []
+    site_idx = findings.get("site_indexing") or []   # 2nd-option fallback (site: search)
+    tp_count = len(findings["target_pages"])
 
-        h["result"](f"Result: {len(indexed)} of {len(gsc_idx)} target page(s) are indexed by Google.")
-        if indexed:
-            h["green"]("Indexed Pages:")
-            for r in indexed:
-                h["para"](f"  {r['url']}  -  Indexed")
-        if not_indexed:
-            h["para_red"]("Not Indexed / Issues:")
-            for r in not_indexed:
-                state = r.get("coverageState") or r["verdict"]
-                h["para"](f"  {r['url']}  -  {state}")
-        if errors:
-            h["para"]("Could not check:")
-            for r in errors:
-                h["para"](f"  {r['url']}  -  {r.get('coverageState', 'API error')}")
+    gsc_indexed = [r for r in gsc_idx if r["verdict"] == "PASS"]
+    gsc_not_indexed = [r for r in gsc_idx if r["verdict"] not in ("PASS", "ERROR")]
+    site_indexed = [r for r in site_idx if r["indexed"] is True]
+    site_not_indexed = [r for r in site_idx if r["indexed"] is False]
+    site_unverified = [r for r in site_idx if r["indexed"] is None]
+
+    total_indexed = len(gsc_indexed) + len(site_indexed)
+    checked_count = len(gsc_idx) + len(site_idx) - len(site_unverified)
+    if gsc_idx and site_idx:
+        h["result"](f"Result: {total_indexed} of {tp_count} target page(s) are indexed by Google "
+                    f"({len(gsc_idx) - len([r for r in gsc_idx if r['verdict']=='ERROR'])} checked in GSC, "
+                    f"{len(site_idx) - len(site_unverified)} checked in Google via site: search).")
+    elif gsc_idx:
+        h["result"](f"Result: {total_indexed} of {tp_count} target page(s) are indexed by Google "
+                    f"(checked in GSC).")
+    elif site_idx:
+        h["result"](f"Result: {total_indexed} of {tp_count} target page(s) are indexed by Google "
+                    f"(checked in Google via site: search - no GSC access was configured).")
     else:
-        h["para"](f"{len(findings['target_pages'])} target page(s) found:", bold=True)
+        h["result"](f"{tp_count} target page(s) found:")
+
+    if not (gsc_idx or site_idx):
         for u in findings["target_pages"]:
             h["para"](u)
-        if findings.get("gsc_available"):
-            h["para_red"]("Indexing was checked via Google Search Console but the URL-Inspection "
-                          "API returned no usable data. Please verify the indexing status of these "
-                          "pages manually in GSC or via a site: search on Google.")
-        else:
-            h["para_red"]("Indexing could not be verified automatically (no Google Search Console "
-                          "access configured) - please verify via GSC or a site: search.")
-    h["shot"]("serp", captured)
+        h["para_red"]("Indexing could not be verified automatically (no Google Search Console "
+                      "access configured, and the Google site: search fallback could not run).")
+    else:
+        all_indexed = gsc_indexed + [r["url"] for r in site_indexed]
+        if all_indexed:
+            h["green"]("Indexed Pages:")
+            for r in gsc_indexed:
+                h["para"](f"  {r['url']}  -  Indexed (GSC)")
+            for r in site_indexed:
+                h["para"](f"  {r['url']}  -  Indexed (Google site: search)")
+        if gsc_not_indexed or site_not_indexed:
+            h["para_red"]("Not Indexed / Issues:")
+            for r in gsc_not_indexed:
+                state = r.get("coverageState") or r["verdict"]
+                h["para"](f"  {r['url']}  -  {state} (GSC)")
+            for r in site_not_indexed:
+                h["para"](f"  {r['url']}  -  Not indexed (Google site: search)")
+        errors = [r for r in gsc_idx if r["verdict"] == "ERROR"]
+        if errors or site_unverified:
+            h["para"]("Could not check:")
+            for r in errors:
+                h["para"](f"  {r['url']}  -  {r.get('coverageState', 'API error')} (GSC)")
+            for r in site_unverified:
+                h["para"](f"  {r['url']}  -  Google blocked the check after retries (site: search)")
+
+    # Screenshot of every page checked via the Google site: search fallback -
+    # both indexed and not-indexed cases get one, not only when indexed and
+    # not a captcha screen.
+    for r in site_idx:
+        if r.get("shot_key"):
+            h["shot"](r["shot_key"], captured)
+    if not site_idx:
+        h["shot"]("serp", captured)
 
 def _sec_sitemap(h, findings, captured):
     h["ribbon"]("XML Sitemap Optimization")
@@ -2659,8 +2964,15 @@ def _sec_sitemap(h, findings, captured):
               "and other search engines about the organization of your site content. Search engine web "
               "crawlers read this file to more intelligently crawl your site.")
     if findings.get("sitemap_found"):
-        h["result"]("Result: Existing sitemap.xml file found. Please review the current sitemap once and "
-                    "verify all important pages are included.")
+        missing = findings.get("sitemap_missing_pages") or []
+        covered = findings.get("sitemap_covered_pages") or []
+        if missing:
+            h["result"](f"Result: Existing sitemap.xml file found, but {len(missing)} of the "
+                        f"{len(covered) + len(missing)} target page(s) checked are NOT listed in it.")
+            h["para_red"]("Missing from sitemap:\n" + "\n".join(missing))
+        else:
+            h["result"](f"Result: Existing sitemap.xml file found. All {len(covered)} target page(s) "
+                        "checked are listed in it.")
         h["green"](f"Reference URL: {findings.get('sitemap_url')}")
         h["shot"]("sitemap", captured)
     else:
@@ -2691,7 +3003,8 @@ def _sec_404(h, findings, root, captured):
         h["para"](f"We did not find a custom 404 page. Opening a mistyped URL such as {root}/asdfg redirects "
                   "to the default page instead of a 404 page. We recommend creating a custom 404 page.")
     else:
-        h["result"]("Result: A custom 404 page is present. It is good from an SEO point of view.")
+        h["result"](f"We have found a custom 404 page. Opening a mistyped URL such as {root}/asdfg showing "
+                    "404 status. It is good from SEO point of view.")
     h["shot"]("the404", captured)
 
 def _sec_canonical(h, findings, captured):
@@ -3064,9 +3377,16 @@ def _build_docx_omega(domain, pages_data, findings, captured, brand, out_path):
     # ---- Image Alt Tag Suggestions ----
     header("Image Alt Tag Suggestions:")
     if findings.get("alt_missing", 0) > 0:
+        # Omega doesn't get a separate Image Alt Tag Suggestions sheet (it's
+        # folded into the Target-pages-and-keywords report instead) - pointing
+        # to a nonexistent "attached sheet" here was misleading, so list the
+        # missing images directly in the report body instead.
         result("Result", f": {findings['alt_missing']} image(s) without alt tags found in the website. "
-                         "It is not good from SEO point of view. Kindly find the attached Image Alt Tag "
-                         "Suggestions.")
+                         "It is not good from SEO point of view. Please check following:")
+        for pd in pages_data:
+            for im in pd.get("images", []):
+                if not im.get("alt"):
+                    body(f"  - {im.get('src', '')}  (on {pd['url']})")
     else:
         result("Result", ": Suitable image alt tags are found in the website. Which is good from Seo "
                          "point of view.")
@@ -7569,8 +7889,10 @@ def main():
     if args.targets:
         targets = load_targets(args.targets, domain)
     else:
-        log("[*] No targets file - auto-discovering target pages from the site...")
-        targets = discover_targets(domain, dry_run=args.dry_run)
+        log("[*] No targets file - auto-discovering target pages "
+            "(GSC top pages, else sitemap, else homepage-link crawl)...")
+        targets = discover_targets_gsc_or_sitemap(domain, dry_run=args.dry_run,
+                                                   account=getattr(args, "account", None))
     if not targets:
         log("[ERROR] No target pages found. Provide --targets, or make sure the site is reachable.")
         sys.exit(2)
@@ -7611,6 +7933,10 @@ def main():
     sitemap_url, sitemap_body = find_existing_sitemap(domain, dry_run=args.dry_run)
     findings["sitemap_found"] = bool(sitemap_body)
     findings["sitemap_url"] = sitemap_url
+    if sitemap_body:
+        covered, missing = verify_sitemap_coverage(sitemap_body, findings["target_pages"])
+        findings["sitemap_covered_pages"] = covered
+        findings["sitemap_missing_pages"] = missing
 
     # GSC URL Inspection - check indexing status of target pages via API.
     # Creds come from explicit --gsc-token/--property-url, or are auto-resolved
@@ -7632,7 +7958,10 @@ def main():
         try:
             captured = capture_onpage_screenshots(
                 domain, sitemap_url=sitemap_url,
-                external_links_detail=findings.get("external_links_detail"))
+                external_links_detail=findings.get("external_links_detail"),
+                target_pages=findings["target_pages"],
+                gsc_indexing=findings.get("gsc_indexing"))
+            findings["site_indexing"] = captured.get("_site_indexing", [])
         except Exception as e:
             log(f"   [warn] screenshot capture skipped: {type(e).__name__}: {e}")
 

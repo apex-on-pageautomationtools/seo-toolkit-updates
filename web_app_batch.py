@@ -1434,6 +1434,12 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
 
         # Ctrl+F search on page 1
         all_matches = find_domain_in_page(sess.driver, domain_clean, page_offset=0)
+        if len(all_matches) > 1:
+            # More than one listing on the same page - report the best (lowest)
+            # position, but log every position found so a case where the wrong
+            # one gets reported is diagnosable from the log alone.
+            add_log(f"  {domain_clean} appears {len(all_matches)}x on this page: "
+                    f"positions {[m['position'] for m in all_matches]} - using best (#{all_matches[0]['position']})")
 
         # Capture a HIGHLIGHTED screenshot of every page where the domain is found.
         # stop_on_found -> highlight just the first match; Scan All Pages -> every
@@ -1504,9 +1510,14 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                             "arguments[0].scrollIntoView({block:'center'});", nxt[0])
                     except Exception:
                         pass
-                    human_pause(1.2, 2.4)
+                    # Deeper pages are where Google's CAPTCHA triggers most - scale the
+                    # pause up with page depth instead of using the same fixed window
+                    # every time, so a long pagination run doesn't keep hammering at
+                    # the same cadence that just got it flagged.
+                    depth_mult = 1.0 + 0.35 * page_num
+                    human_pause(1.2 * depth_mult, 2.4 * depth_mult)
                     nxt[0].click()
-                    human_pause(2.8, 5.5)
+                    human_pause(2.8 * depth_mult, 5.5 * depth_mult)
                     page_num += 1
                     page_links = extract_organic(sess.driver)
                     if not page_links:
@@ -3574,6 +3585,8 @@ def _submit_wayback_url(url, max_tries=3, timeout=45):
                 if proxies_pool else [None] * max_tries)
 
     if access_key and secret_key:
+        auth_headers = {"User-Agent": "Mozilla/5.0 SEOToolkitPro",
+                         "Authorization": f"LOW {access_key}:{secret_key}"}
         for proxy in attempts:
             try:
                 kwargs = {}
@@ -3582,12 +3595,39 @@ def _submit_wayback_url(url, max_tries=3, timeout=45):
                     kwargs["proxies"] = {"http": pu, "https": pu}
                 r = http_requests.post(
                     "https://web.archive.org/save/", data={"url": url, "capture_all": "1"},
-                    headers={"User-Agent": "Mozilla/5.0 SEOToolkitPro",
-                            "Authorization": f"LOW {access_key}:{secret_key}"},
-                    timeout=timeout, **kwargs)
-                loc = r.headers.get("Content-Location", "")
-                if loc and _re.search(r"/web/\d{10,}/https?://", loc):
-                    return "https://web.archive.org" + loc
+                    headers=auth_headers, timeout=timeout, **kwargs)
+                if r.status_code == 429:
+                    time.sleep(5)
+                    continue
+                # SPN2's authenticated endpoint is ASYNC: it responds 200 with a
+                # JSON job id, not a redirect/Content-Location header (that only
+                # exists on the anonymous GET endpoint below). Poll the job status
+                # until it resolves instead of checking a header SPN2 never sets.
+                try:
+                    job = r.json()
+                except Exception:
+                    job = {}
+                job_id = job.get("job_id")
+                if not job_id:
+                    continue
+                status_url = f"https://web.archive.org/save/status/{job_id}"
+                for _ in range(15):   # ~30s max wait, matches this attempt's own timeout budget
+                    time.sleep(2)
+                    try:
+                        sr = http_requests.get(status_url, headers=auth_headers, timeout=timeout, **kwargs)
+                        sj = sr.json()
+                    except Exception:
+                        continue
+                    st = sj.get("status")
+                    if st == "success":
+                        ts = sj.get("timestamp")
+                        original = sj.get("original_url", url)
+                        if ts:
+                            return f"https://web.archive.org/web/{ts}/{original}"
+                        break
+                    if st == "error":
+                        break
+                    # st == "pending" -> keep polling
             except Exception:
                 continue
         return None
@@ -4627,6 +4667,42 @@ def api_gsc_properties():
         token = gsc_audit.get_access_token(email)
         props = gsc_audit.list_properties(token)
         return jsonify(props)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/gsc/sitemap/submit", methods=["POST"])
+def api_gsc_sitemap_submit():
+    """Submit a sitemap to Google via the Search Console API - the option the
+    old tool (Search Ops Studio) offered during Webmaster report generation."""
+    data = request.get_json(silent=True) or {}
+    domain = to_domain(data.get("domain") or "")
+    email = (data.get("email") or "").strip()
+    feedpath = (data.get("feedpath") or "").strip()
+    if not domain:
+        return jsonify({"error": "Domain is required."}), 400
+    if not feedpath:
+        feedpath = f"https://{domain}/sitemap.xml"
+    try:
+        if email:
+            token = gsc_audit.get_access_token(email)
+            property_url = gsc_audit.resolve_property(token, domain)
+        else:
+            # No account specified - auto-pick whichever locally-connected
+            # account owns this domain (same auto-selection GSC Audit uses).
+            token = property_url = None
+            for acct in [a for a in gsc_audit.list_accounts() if a.get("has_refresh")]:
+                try:
+                    t = gsc_audit.get_access_token(acct["email"])
+                    p = gsc_audit.resolve_property(t, domain)
+                    token, property_url = t, p
+                    break
+                except Exception:
+                    continue
+            if not token:
+                return jsonify({"error": f"No connected Google account has GSC access to {domain}."}), 400
+        gsc_audit.submit_sitemap(token, property_url, feedpath)
+        return jsonify({"status": "submitted", "domain": domain, "feedpath": feedpath})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

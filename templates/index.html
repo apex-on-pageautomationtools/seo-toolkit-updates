@@ -1115,6 +1115,15 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         </select>
       </div>
 
+      <div class="field">
+        <label>Submit Sitemap (optional)</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="gsc-sitemap-path" placeholder="sitemap.xml (leave blank for default)" autocomplete="off" style="flex:1">
+          <button class="btn btn-tonal" style="font-size:12px;padding:6px 14px;white-space:nowrap" onclick="gscSubmitSitemap()">Submit Sitemap</button>
+        </div>
+        <div id="gsc-sitemap-status" style="font-size:11px;color:var(--text-3);margin-top:4px"></div>
+      </div>
+
       <div id="gsc-connect-box" style="margin-bottom:14px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border)">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
           <div style="font-weight:700;font-size:13px">Google Accounts</div>
@@ -1801,7 +1810,7 @@ https://example.com/page-2"></textarea>
           <div style="margin-bottom:14px;padding:12px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border)">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
               <div style="font-weight:700;font-size:13px">Bulk Upload (CSV)</div>
-              <a href="/api/admin/sample_cities_csv" download="sample_cities.csv" style="font-size:11px;color:var(--primary);text-decoration:none;cursor:pointer">Download sample CSV</a>
+              <a href="/api/admin/sample_cities_csv" download="sample_cities.csv" style="font-size:11px;color:var(--accent);text-decoration:none;cursor:pointer">Download sample CSV</a>
             </div>
             <div style="font-size:11px;color:var(--text-3);margin-bottom:8px">Columns: City, Country, Latitude, Longitude, Canonical (optional). One city per row.</div>
             <textarea id="adm-city-csv" rows="5" placeholder="City,Country,Latitude,Longitude&#10;Perth,AU,-31.9505,115.8605&#10;Sydney,AU,-33.8688,151.2093" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px;font-family:monospace;resize:vertical;box-sizing:border-box"></textarea>
@@ -1870,7 +1879,7 @@ https://example.com/page-2"></textarea>
             <span style="font-size:11px;color:var(--text-3);font-family:monospace;margin-left:auto" id="crawl-eta"></span>
           </div>
           <div style="margin-bottom:12px;background:var(--surface-2);border-radius:6px;height:6px;overflow:hidden">
-            <div id="crawl-prog-bar" style="height:100%;background:var(--primary);width:0%;transition:width .3s"></div>
+            <div id="crawl-prog-bar" style="height:100%;background:var(--accent-grad);width:0%;transition:width .3s"></div>
           </div>
           <div style="overflow-x:auto">
             <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -3868,6 +3877,22 @@ function wbReset(){
 }
 
 let _gscEmail='';
+async function gscSubmitSitemap(){
+  const domain=$('gsc-domain').value.trim();
+  if(!domain){toast('Enter a domain first','err');return;}
+  const status=$('gsc-sitemap-status');
+  const path=$('gsc-sitemap-path').value.trim();
+  status.textContent='Submitting...';
+  try{
+    const r=await fetch('/api/gsc/sitemap/submit',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({domain:domain, feedpath:path||undefined})});
+    const d=await r.json();
+    if(d.error){status.textContent='Failed: '+d.error;status.style.color='var(--err)';return;}
+    status.style.color='var(--text-3)';
+    status.textContent='Submitted: '+d.feedpath;
+    toast('Sitemap submitted to Google');
+  }catch(e){status.textContent='Failed to submit sitemap.';status.style.color='var(--err)';}
+}
 async function gscConnect(){
   toast('Launching Google login...');
   try{
@@ -3928,8 +3953,6 @@ async function gscSessionsLoad(){
         +'<div style="flex:1"><div style="font-weight:600">'+esc(s.label||s.id)+'</div>'
         +'<div style="font-size:11px;color:var(--text-3);margin-top:2px">Accounts: '+accts+' &middot; Last login: '+last+'</div></div>'
         +'<button class="btn btn-tonal" style="font-size:10px;padding:3px 10px" onclick="gscSessionLaunch(\''+s.id+'\')">Login</button>'
-        +'<button class="btn btn-tonal" style="font-size:10px;padding:3px 10px" onclick="gscSessionRefresh(\''+s.id+'\')">Refresh</button>'
-        +'<button class="btn btn-tonal" style="font-size:10px;padding:3px 8px;color:var(--err)" onclick="gscSessionRemove(\''+s.id+'\')">Remove</button>'
         +'</div>';
     });
     box.innerHTML=html;

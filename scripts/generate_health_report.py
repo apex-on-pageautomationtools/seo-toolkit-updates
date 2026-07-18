@@ -149,9 +149,8 @@ CHECKPOINTS = [
      "label": "The website is running with multiple versions: - ",
      "body": "{versions_result}"},
 
-    {"key": "meta_source", "capture": "viewsrc:https://{domain}/",
-     "addr": "view-source:https://{domain}/",
-     "find": 'meta name="description"',   # scroll the source to this tag before capturing
+    {"key": "meta_source", "capture": "metaoverlay:https://{domain}/",
+     "addr": "https://{domain}/",
      "label": "Meta Suggestions is visible in the source code (Also on Top):- ",
      "body": "Meta suggestion are visible in the source code of the pages."},
 
@@ -278,6 +277,22 @@ def _add_bordered_image(doc, img_path):
         except Exception:
             pass
     return p
+
+
+def _dropin_counts(domain, key):
+    """If an operator dropped in a manually-corrected screenshot for `key`, they can
+    also drop a matching health_screenshots/<domain>/<key>.json with the corrected
+    counts (e.g. {"checked": 52, "broken": 2}) so the body text stays in sync with
+    the replaced screenshot instead of still reporting the tool's own (possibly
+    wrong) numbers. Returns the dict, or None if no override file exists."""
+    import json
+    override = DROPIN_DIR / domain / f"{key}.json"
+    if not override.exists():
+        return None
+    try:
+        return json.loads(override.read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
 
 def _resolve_image(domain, key, captured):
@@ -745,6 +760,10 @@ def build_health_docx(domain, captured=None, logo=None, score=68, out_path=None,
     # Broken links — run the check so we can use the result in the body text.
     # The image is already rendered during capture; here we just need the count.
     _bl_checked, _bl_broken = _check_broken_links(domain)
+    _bl_override = _dropin_counts(domain, "broken_links")
+    if _bl_override:
+        _bl_checked = _bl_override.get("checked", _bl_checked)
+        _bl_broken = [None] * _bl_override.get("broken", len(_bl_broken))
 
     def _broken_links_summary():
         if _bl_checked == 0:
@@ -880,7 +899,64 @@ def build_health_docx(domain, captured=None, logo=None, score=68, out_path=None,
     return out_path
 
 
+def _latest_wayback_snapshot_url(domain):
+    """Resolve the actual latest-archived snapshot URL via the Wayback
+    Availability API, instead of a hardcoded guessed timestamp ("web/2/...",
+    which resolves to the OLDEST snapshot, not the latest, and comes out
+    blank if that earliest capture was broken or never completed). Returns
+    None if the domain has never been archived."""
+    import json as _json
+    import urllib.request as ur
+    try:
+        req = ur.Request(
+            f"https://archive.org/wayback/available?url=https://{domain}/",
+            headers={"User-Agent": "Mozilla/5.0 (compatible; SearchOps-HealthBot/1.0)"},
+        )
+        with ur.urlopen(req, timeout=15) as resp:
+            data = _json.loads(resp.read().decode("utf-8", "replace"))
+        snap = (data.get("archived_snapshots") or {}).get("closest") or {}
+        if snap.get("available") and snap.get("url"):
+            return snap["url"]
+    except Exception as e:
+        print(f"     [warn] layout: Wayback availability lookup failed ({e})")
+    return None
+
+
 # ---------- LIVE CAPTURE (patchright, reuses generate_report) ----------
+def _capture_meta_overlay(page, url, path, height=760):
+    """Read the REAL rendered page's title/meta description straight from the DOM
+    and inject a highlighted on-page banner showing them - a genuine visual
+    highlight of the meta tags, not a raw view-source: code dump. view-source: is
+    a privileged scheme some automated browsers restrict, and even when it loaded,
+    scrolling near a line in the raw source wasn't an actual highlight."""
+    try:
+        page.goto(url, wait_until="networkidle", timeout=60000)
+        page.wait_for_timeout(gr.EXTRA_WAIT_MS)
+    except Exception as e:
+        print(f"     [warn] {type(e).__name__}, capturing anyway")
+        page.wait_for_timeout(3000)
+    try:
+        page.evaluate("""() => {
+            var title = document.title || '(missing)';
+            var descEl = document.querySelector('meta[name="description"]');
+            var desc = descEl ? (descEl.getAttribute('content') || '(empty)') : '(missing)';
+            var box = document.createElement('div');
+            box.id = '__meta_suggestion_overlay';
+            box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;'
+                + 'background:#fff59d;color:#000;padding:16px 20px;font:14px/1.5 Arial,sans-serif;'
+                + 'border-bottom:4px solid #f9a825;box-shadow:0 2px 8px rgba(0,0,0,.3);';
+            var esc = function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+            box.innerHTML = '<b>Title:</b> ' + esc(title) + '<br><b>Meta Description:</b> ' + esc(desc);
+            document.body.insertBefore(box, document.body.firstChild);
+            window.scrollTo(0, 0);
+        }""")
+        page.wait_for_timeout(500)
+    except Exception as e:
+        print(f"     [warn] meta overlay inject failed: {e}")
+    page.screenshot(path=str(path), clip={"x": 0, "y": 0, "width": gr.VIEWPORT_W, "height": height},
+                    full_page=False)
+
+
 def _capture_frame(page, url, path, height=820, view_source=False, find=None):
     """Plain HEADLESS page screenshot — NO address bar / browser chrome (the
     border is baked into the image later). For view-source, optionally scroll to
@@ -920,12 +996,26 @@ def _check_broken_links(domain, limit=60):
     import re as _re
     from urllib.parse import urljoin
 
-    home = f"https://{domain}/"
     headers = {"User-Agent": "Mozilla/5.0 (compatible; SearchOps-HealthBot/1.0)"}
-    try:
-        html = ur.urlopen(ur.Request(home, headers=headers), timeout=20).read().decode("utf-8", "ignore")
-    except Exception as e:
-        print(f"     [warn] broken-link fetch home failed: {e}")
+    html = None
+    home = f"https://{domain}/"
+    # A transient failure (rate limit, cold start) or a www/non-www mismatch on the
+    # first attempt used to make this fall straight to "Could not check for broken
+    # links" - retry once, and try the www variant, before giving up.
+    for candidate in (f"https://{domain}/", f"https://www.{domain}/"):
+        for attempt in range(2):
+            try:
+                html = ur.urlopen(ur.Request(candidate, headers=headers), timeout=20).read().decode("utf-8", "ignore")
+                home = candidate
+                break
+            except Exception as e:
+                if attempt == 0:
+                    import time as _t; _t.sleep(2)
+                    continue
+                print(f"     [warn] broken-link fetch {candidate} failed: {e}")
+        if html is not None:
+            break
+    if html is None:
         return 0, []
 
     links = []
@@ -955,8 +1045,12 @@ def _check_broken_links(domain, limit=60):
                 break
             except Exception:
                 code = 0
-        if code is None or code == 0 or code >= 400:
-            broken.append((u, code or "ERR"))
+        # Only genuinely dead links count as broken: 404 (Not Found) / 410 (Gone).
+        # 429 (rate-limited), 403/401/405 (bot-blocked), 5xx (temporary server
+        # errors) and timeouts are NOT broken links - they're the server refusing
+        # the automated request, so flagging them as "broken" is a false positive.
+        if code in (404, 410):
+            broken.append((u, code))
     return len(links), broken
 
 
@@ -1162,12 +1256,15 @@ def capture_health_screenshots(domain, account_hint=None, format_hint=None):
                     _capture_gsc_health(page, pg, url, path)
                 elif cap.startswith("frame:"):
                     _capture_frame(page, cap.split(":", 1)[1].format(domain=domain), path)
-                elif cap.startswith("viewsrc:"):
-                    _capture_frame(page, cap.split(":", 1)[1].format(domain=domain), path,
-                                   height=760, view_source=True, find=cp.get("find"))
+                elif cap.startswith("metaoverlay:"):
+                    _capture_meta_overlay(page, cap.split(":", 1)[1].format(domain=domain), path)
                 elif cap == "wayback":
-                    _capture_frame(page, f"https://web.archive.org/web/2/https://{domain}/", path,
-                                   height=900)
+                    real_url = _latest_wayback_snapshot_url(domain)
+                    if real_url:
+                        _capture_frame(page, real_url, path, height=900)
+                    else:
+                        print(f"     [warn] layout: no archived snapshot found for this domain, "
+                              f"skipping screenshot (report text stays as-is, no image placed)")
                 elif cap == "brokenlinks":
                     checked, broken = _check_broken_links(domain)
                     _render_broken_links_image(domain, checked, broken, path)
