@@ -115,7 +115,16 @@ def load_targets(targets_path, domain):
                 header_row = r
                 kw_col = next(c for c, v in enumerate(vals, 1) if "keyword" in v)
                 pg_col = next(c for c, v in enumerate(vals, 1) if "page" in v)
-                rank_col = next((c for c, v in enumerate(vals, 1) if "rank" in v), None)
+                # Different sheets label the ranking column differently -
+                # "Ranking", "Rank", but also "Position", "SERP Position",
+                # "Google Position", "Placement", etc. Match on any of these,
+                # not just "rank", so the rank data for a keyword+page row
+                # isn't silently dropped just because the sheet used a
+                # synonym instead of the literal word "rank".
+                _RANK_HEADER_MARKERS = ("rank", "position", "placement", "serp")
+                rank_col = next((c for c, v in enumerate(vals, 1)
+                                 if c not in (kw_col, pg_col)
+                                 and any(m in v for m in _RANK_HEADER_MARKERS)), None)
                 break
         if header_row:
             for r in range(header_row + 1, ws.max_row + 1):
@@ -2176,15 +2185,24 @@ def _is_blocked_page(src):
                                   "/sorry/", "detected unusual", "before you continue"))
 
 
-def check_site_indexing(domain, target_pages, out, path_fn, log_fn=None):
+def check_site_indexing(domain, target_pages, out, path_fn, log_fn=None, already_blocked=False):
     """Per-page Google `site:URL` indexing check, WITH a screenshot for every page
-    regardless of indexed/not-indexed - the fallback used when GSC access isn't
-    configured (or didn't return usable data). CAPTCHA/block handling mirrors the
-    rank checker's: retry with backoff first; if still blocked, fall back to a
-    fresh browser profile (a brand-new temp user-data-dir - Google's block is
-    often tied to that profile/session, not just the IP) before giving up on a
-    page. Returns a list of {url, indexed, shot_key} - indexed is True/False, or
-    None if Google could not be checked at all for that page after every attempt."""
+    checked (indexed or not) - the fallback used when GSC access isn't configured
+    (or didn't return usable data).
+
+    CAPTCHA/block handling has a circuit breaker: confirmed live on a real 31-page
+    run, once Google blocks this session (it usually already has, by the time this
+    runs - the domain-wide SERP shot earlier in the same run gets blocked too), a
+    per-page retry-with-backoff-plus-fresh-profile loop just repeats the SAME
+    failure ~30 more times at 1-5+ minutes each (2.5+ hours total, zero results).
+    A fresh profile didn't help either in that run - it's an IP-level block, not a
+    per-profile one. So: try briefly per page, and if a fresh-profile probe (tried
+    ONCE for the whole run, not per page) is ALSO blocked, stop making any more
+    Google requests for the rest of this run and report the remaining pages as
+    not-verified immediately instead of retrying a doomed check for hours.
+
+    Returns a list of {url, indexed, shot_key} - indexed is True/False, or None if
+    Google could not be checked (blocked, or skipped after the circuit tripped)."""
     import base64, time as _t
     log_fn = log_fn or log
     results = []
@@ -2214,20 +2232,35 @@ def check_site_indexing(domain, target_pages, out, path_fn, log_fn=None):
             pass
         return indexed, src
 
+    fresh_profile_tried = False
+    circuit_open = False
+    skipped = 0
+
     for i, url in enumerate(target_pages):
         shot_key = f"index_check_{i}"
+
+        if circuit_open:
+            results.append({"url": url, "indexed": None, "shot_key": None})
+            skipped += 1
+            continue
+
+        # If the domain-wide SERP shot earlier in this same run already hit a
+        # captcha wall, this session is already known-blocked - one quick
+        # attempt (not a full retry loop) before going straight to the
+        # fresh-profile probe, instead of repeating the same futile backoff.
+        max_attempts = 1 if (already_blocked and i == 0) else 2
         indexed = None
-        for attempt in range(3):
+        for attempt in range(max_attempts):
             indexed, src = _one_attempt(driver, url, shot_key)
             if indexed is not None:
                 break
             log_fn(f"   [warn] indexing check for {url}: Google block detected "
-                   f"(attempt {attempt + 1}/3), backing off...")
-            _t.sleep(6 * (attempt + 1))
-        if indexed is None:
-            # Still blocked on this browser profile after retries - one last try
-            # on a completely fresh profile (new temp user-data-dir), since
-            # Google's block is often tied to the profile/cookies, not just the IP.
+                   f"(attempt {attempt + 1}/{max_attempts}), backing off...")
+            if attempt + 1 < max_attempts:
+                _t.sleep(4 * (attempt + 1))
+
+        if indexed is None and not fresh_profile_tried:
+            fresh_profile_tried = True
             try:
                 import tempfile
                 from selenium.webdriver import Chrome, ChromeOptions
@@ -2243,12 +2276,23 @@ def check_site_indexing(domain, target_pages, out, path_fn, log_fn=None):
                 finally:
                     fresh.quit()
             except Exception as e:
-                log_fn(f"   [warn] fresh-profile indexing retry failed for {url}: {e}")
-        if indexed is None:
-            log_fn(f"   [warn] indexing check for {url}: still blocked after all retries - "
-                   f"could not verify (no captcha screenshot kept)")
+                log_fn(f"   [warn] fresh-profile indexing probe failed: {e}")
+            if indexed is None:
+                circuit_open = True
+                log_fn("   [warn] indexing check: still blocked even on a fresh browser "
+                       "profile - this is an IP-level block, not per-profile. Stopping "
+                       "further Google site: checks for the rest of this run instead of "
+                       "retrying every remaining page for minutes each.")
+
+        if indexed is None and not circuit_open:
+            log_fn(f"   [warn] indexing check for {url}: could not verify (Google blocked)")
+
         results.append({"url": url, "indexed": indexed,
                         "shot_key": shot_key if shot_key in out else None})
+
+    if skipped:
+        log_fn(f"   [info] skipped Google site: check for {skipped} page(s) after the "
+               f"block circuit-breaker tripped")
     return results
 
 
@@ -2351,6 +2395,7 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
                 if any(m in src for m in ("unusual traffic", "not a robot", "recaptcha",
                                           "/sorry/", "detected unusual", "before you continue")):
                     log("   [warn] Google SERP blocked (captcha) - skipping serp screenshot")
+                    out["_serp_blocked"] = True
                     return
             if sucuri:
                 # Click Sucuri's cookie-consent "Accept" so it isn't in the shot.
@@ -2428,7 +2473,9 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
     if fallback_pages:
         log(f"   -> checking indexing via Google site: search for {len(fallback_pages)} "
             f"page(s) not covered by GSC...")
-        out["_site_indexing"] = check_site_indexing(domain, fallback_pages, out, path, log_fn=log)
+        out["_site_indexing"] = check_site_indexing(
+            domain, fallback_pages, out, path, log_fn=log,
+            already_blocked=out.get("_serp_blocked", False))
 
     _wayback_url = _latest_wayback_snapshot_url(domain)
     if _wayback_url:
