@@ -1055,6 +1055,98 @@ SCREENSHOT_URLS = {
 }
 
 
+def _highlight_source_snippet(driver, patterns):
+    """Fetch the page's REAL raw HTML (same-origin fetch of its own URL - the
+    actual bytes the server sent) and render a genuine view-source-style
+    widget: a fake address bar reading "view-source:<url>", real line
+    numbers, real surrounding source lines, and every line matching one of
+    `patterns` highlighted - matching what a real, zoomed view-source:
+    screenshot looks like, instead of a plain colored banner of extracted
+    values. Contiguous/nearby matches are shown as one block; matches far
+    apart in the source get their own block with a "..." gap between them.
+    Returns the widget's on-page bounding box (for a tight screenshot crop),
+    or None if the fetch/render failed."""
+    import time
+    script = """
+        var callback = arguments[arguments.length - 1];
+        var patterns = arguments[0];
+        var old = document.getElementById('__source_highlight_widget');
+        if (old) old.remove();
+        fetch(location.href).then(function(r){ return r.text(); }).then(function(html){
+            var lines = html.split(/\\r\\n|\\r|\\n/);
+            var matchIdx = [];
+            for (var p = 0; p < patterns.length; p++) {
+                var re = new RegExp(patterns[p], 'i');
+                for (var i = 0; i < lines.length; i++) {
+                    if (re.test(lines[i])) { matchIdx.push(i); break; }
+                }
+            }
+            matchIdx.sort(function(a, b){ return a - b; });
+            var esc = function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+
+            var box = document.createElement('div');
+            box.id = '__source_highlight_widget';
+            box.style.cssText = 'position:fixed;top:20px;left:20px;z-index:2147483647;'
+                + 'background:#fff;border:1px solid #ccc;border-radius:6px;'
+                + 'box-shadow:0 4px 16px rgba(0,0,0,.25);font:15px/1.6 Consolas,Menlo,monospace;'
+                + 'overflow:hidden;max-width:900px;';
+
+            var addr = document.createElement('div');
+            addr.style.cssText = 'background:#f1f3f4;padding:8px 14px;border-bottom:1px solid #ddd;'
+                + 'font:13px Arial,sans-serif;color:#333;';
+            addr.textContent = 'view-source:' + location.href;
+            box.appendChild(addr);
+
+            var code = document.createElement('div');
+            code.style.cssText = 'padding:10px 14px;white-space:pre;';
+            var out = '';
+            if (!matchIdx.length) {
+                out = '<div>(tag not found in page source)</div>';
+            } else {
+                // Merge match lines that are close together (within 4 lines)
+                // into one contiguous block, each padded by 1 line of context.
+                var blocks = [];
+                var curStart = matchIdx[0], curEnd = matchIdx[0];
+                for (var i = 1; i < matchIdx.length; i++) {
+                    if (matchIdx[i] - curEnd <= 4) { curEnd = matchIdx[i]; }
+                    else { blocks.push([curStart, curEnd]); curStart = curEnd = matchIdx[i]; }
+                }
+                blocks.push([curStart, curEnd]);
+                var matchSet = {};
+                for (var i = 0; i < matchIdx.length; i++) { matchSet[matchIdx[i]] = true; }
+                for (var b = 0; b < blocks.length; b++) {
+                    if (b > 0) { out += '<div style="color:#999;padding:2px 6px 2px 34px;">...</div>'; }
+                    var s = Math.max(0, blocks[b][0] - 1);
+                    var e = Math.min(lines.length - 1, blocks[b][1] + 1);
+                    for (var i = s; i <= e; i++) {
+                        var bg = matchSet[i] ? 'background:#f9a825;' : '';
+                        out += '<div style="' + bg + 'padding:2px 6px;">'
+                            + '<span style="color:#999;display:inline-block;width:28px;">' + (i + 1) + '</span>'
+                            + '<span>' + esc(lines[i]) + '</span></div>';
+                    }
+                }
+            }
+            code.innerHTML = out;
+            box.appendChild(code);
+
+            document.body.insertBefore(box, document.body.firstChild);
+            window.scrollTo(0, 0);
+
+            setTimeout(function() {
+                var r = box.getBoundingClientRect();
+                callback({x: r.x, y: r.y, width: r.width, height: r.height});
+            }, 80);
+        }).catch(function(){ callback(null); });
+    """
+    try:
+        driver.set_script_timeout(15)
+        rect = driver.execute_async_script(script, patterns)
+        time.sleep(0.2)
+        return rect
+    except Exception:
+        return None
+
+
 def _latest_wayback_snapshot_url(domain, log_fn=None):
     """Resolve the actual latest-archived snapshot URL via the Wayback
     Availability API, instead of guessing a timestamp. Returns None if
@@ -1109,6 +1201,7 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
         try:
             log_fn(f"  Capturing [{key}]...")
             import time
+            highlight_rect = None
             try:
                 driver.get(url)
             except Exception as e:
@@ -1175,31 +1268,18 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
                 # problems: view-source: is a privileged scheme some
                 # automated/webdriver-controlled browsers restrict or refuse
                 # to navigate to at all (confirmed live: "meta suggestions
-                # not being found" across every format tested), and even
-                # when it did load, scrolling near a line isn't actually
-                # highlighting it. This instead reads the REAL rendered
-                # page's title/meta description straight from the DOM (no
-                # view-source: needed) and injects a clearly highlighted
-                # on-page overlay showing them - a genuine visual highlight,
-                # and immune to view-source: being blocked.
-                try:
-                    driver.execute_script("""
-                        var title = document.title || '(missing)';
-                        var descEl = document.querySelector('meta[name="description"]');
-                        var desc = descEl ? (descEl.getAttribute('content') || '(empty)') : '(missing)';
-                        var box = document.createElement('div');
-                        box.id = '__meta_suggestion_overlay';
-                        box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;'
-                            + 'background:#fff59d;color:#000;padding:16px 20px;font:14px/1.5 Arial,sans-serif;'
-                            + 'border-bottom:4px solid #f9a825;box-shadow:0 2px 8px rgba(0,0,0,.3);';
-                        var esc = function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
-                        box.innerHTML = '<b>Title:</b> ' + esc(title) + '<br><b>Meta Description:</b> ' + esc(desc);
-                        document.body.insertBefore(box, document.body.firstChild);
-                        window.scrollTo(0, 0);
-                    """)
-                    time.sleep(0.5)
-                except Exception:
-                    pass
+                # not being found" across every format tested), and a plain
+                # DOM-value banner (title/description text in a colored box)
+                # doesn't actually show the SOURCE the way a real view-source:
+                # screenshot does. This fetches the page's REAL raw HTML (a
+                # same-origin fetch of its own URL - the actual bytes the
+                # server sent) and renders a genuine view-source-style widget:
+                # a fake address bar, real line numbers, real surrounding
+                # source lines, with the <title> and meta description lines
+                # highlighted - then the screenshot crops tight to just that
+                # widget instead of a full-viewport shot.
+                highlight_rect = _highlight_source_snippet(
+                    driver, [r'<title\b[^>]*>.*?</title>', r'<meta\b[^>]*name=["\']description["\'][^>]*>'])
             else:
                 driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(0.5)
@@ -1207,8 +1287,18 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
             # Use CDP for the screenshot - a plain viewport-only capture (no
             # captureBeyondViewport/clip), so every checkpoint gets a tight
             # crop of what's actually on screen after scrolling, not an
-            # oversized capture of the full document.
-            cdp_params = {"format": "png", "captureBeyondViewport": False}
+            # oversized capture of the full document. meta_source instead
+            # crops tight to the injected source-viewer widget (see above).
+            if key == "meta_source" and highlight_rect:
+                margin = 12
+                cdp_params = {"format": "png", "captureBeyondViewport": False,
+                              "clip": {"x": max(0, highlight_rect["x"] - margin),
+                                       "y": max(0, highlight_rect["y"] - margin),
+                                       "width": highlight_rect["width"] + margin * 2,
+                                       "height": highlight_rect["height"] + margin * 2,
+                                       "scale": 1}}
+            else:
+                cdp_params = {"format": "png", "captureBeyondViewport": False}
             try:
                 result = driver.execute_cdp_cmd("Page.captureScreenshot", cdp_params)
                 import base64

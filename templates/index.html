@@ -4892,7 +4892,7 @@ async function applyToolFilter(){
     if(typeof t==='string')t=t.split(',');          // accept comma string
     const allowed=t.map(x=>String(x).trim().toLowerCase()).filter(x=>x);
     if(allowed.length===0||allowed.includes('all'))return;
-    const KEYS=['ranking','index','count','backlink','onpage','health','gsc','crawl','brief','wayback','seranking','geo','keywordvolume'];
+    const KEYS=['ranking','index','count','backlink','onpage','health','gsc','crawl','brief','wayback','seranking','geo','keywordvolume','indexing','performance'];
     KEYS.forEach(key=>{
       if(!allowed.includes(key)){const b=$('tab-'+key);if(b)b.style.display='none';}
     });

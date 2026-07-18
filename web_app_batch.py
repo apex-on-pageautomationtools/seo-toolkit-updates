@@ -2780,6 +2780,8 @@ def _parse_keywords(raw_text):
 def api_start():
     data = request.get_json(silent=True) or {}
     mode = data.get("mode", "ranking")
+    if not _require_tool(mode):
+        return jsonify({"error": f"You don't have access to the {mode.title()} tool."}), 403
     # Pin this request to the requested tool's job so all state below is per-mode.
     _set_mode(mode)
     with state_lock:
@@ -3502,6 +3504,8 @@ def _run_onpage_report(domain, targets_json, fmt, no_capture):
 
 @app.route("/api/onpage/start", methods=["POST"])
 def api_onpage_start():
+    if not _require_tool("onpage"):
+        return jsonify({"error": "You don't have access to the On-Page report tool."}), 403
     with onpage_lock:
         if onpage_state["status"] == "running":
             return jsonify({"error": "On-page report already running."}), 400
@@ -3762,6 +3766,8 @@ def _run_wayback_submit(urls):
 
 @app.route("/api/wayback/start", methods=["POST"])
 def api_wayback_start():
+    if not _require_tool("wayback"):
+        return jsonify({"error": "You don't have access to the Wayback Submitter tool."}), 403
     with wayback_lock:
         if wayback_state["status"] == "running":
             return jsonify({"error": "Wayback submission already running."}), 400
@@ -3919,6 +3925,8 @@ def _run_seranking_audit(in_path, pdf_path, brand, zip_path=None):
 
 @app.route("/api/seranking/start", methods=["POST"])
 def api_seranking_start():
+    if not _require_tool("seranking"):
+        return jsonify({"error": "You don't have access to the SEranking Audit tool."}), 403
     with sr_lock:
         if sr_state["status"] == "running":
             return jsonify({"error": "SEranking audit already running."}), 400
@@ -4086,6 +4094,8 @@ def _run_geo_report(domain, targets_path, check_visibility, keywords, pages, faq
 
 @app.route("/api/geo/start", methods=["POST"])
 def api_geo_start():
+    if not _require_tool("geo"):
+        return jsonify({"error": "You don't have access to the GEO / AI Optimization tool."}), 403
     with geo_lock:
         if geo_state["status"] == "running":
             return jsonify({"error": "GEO report already running."}), 400
@@ -4246,6 +4256,8 @@ def api_performance_ga4_properties():
 
 @app.route("/api/performance/start", methods=["POST"])
 def api_performance_start():
+    if not _require_tool("performance"):
+        return jsonify({"error": "You don't have access to the Performance Report tool."}), 403
     with perf_lock:
         if perf_state["status"] == "running":
             return jsonify({"error": "Performance Report already running."}), 400
@@ -4329,6 +4341,11 @@ def api_keywordvolume_suggest_geo():
 
 @app.route("/api/keywordvolume/search", methods=["POST"])
 def api_keywordvolume_search():
+    # 'keywordvolume' isn't in the Admin Panel's ALL_TOOLS yet (its tab is
+    # still hard-hidden in the main app pending Google Ads Developer Token
+    # access) - not a per-user-manageable permission yet, so no _require_tool
+    # gate here. Add one when the tab is un-hidden and the admin panel's
+    # ALL_TOOLS is updated to include it (see that file's comment).
     data = request.get_json(silent=True) or {}
     keywords = [k.strip() for k in (data.get("keywords") or []) if k and k.strip()]
     keywords = list(dict.fromkeys(keywords))  # dedupe, preserve order
@@ -4432,6 +4449,8 @@ def _run_health_audit(domain, fmt, target_pages, no_capture, headless, browser_n
 
 @app.route("/api/health-audit/start", methods=["POST"])
 def api_ha_start():
+    if not _require_tool("health"):
+        return jsonify({"error": "You don't have access to the Health Audit tool."}), 403
     with ha_lock:
         if ha_state["status"] == "running":
             return jsonify({"error": "Health audit already running."}), 400
@@ -4736,6 +4755,8 @@ def api_gsc_sitemap_submit():
 
 @app.route("/api/gsc/start", methods=["POST"])
 def api_gsc_start():
+    if not _require_tool("gsc"):
+        return jsonify({"error": "You don't have access to the GSC Audit tool."}), 403
     with gsc_lock:
         if gsc_state["status"] == "running":
             return jsonify({"error": "GSC audit already running."}), 400
@@ -5155,6 +5176,8 @@ def _log_indexing_results(user, tier, results):
 
 @app.route("/api/indexing/submit", methods=["POST"])
 def api_indexing_submit():
+    if not _require_tool("indexing"):
+        return jsonify({"error": "You don't have access to Submit for Indexing."}), 403
     url, key, user = _indexing_creds()
     if not user:
         return jsonify({"error": "Not logged in - log in to the app first."}), 400
@@ -5218,6 +5241,8 @@ def api_indexing_fallback_submit():
     """Submit leftover URLs via the real GSC UI's Request Indexing button,
     for whichever domain/account the caller picked (see
     /api/indexing/fallback-accounts for the available accounts)."""
+    if not _require_tool("indexing"):
+        return jsonify({"error": "You don't have access to Submit for Indexing."}), 403
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip()
     session_id = (data.get("session_id") or "").strip()
@@ -5261,6 +5286,26 @@ def api_indexing_fallback_submit():
 def _require_superadmin():
     auth_result = auth.check_saved_auth()
     return auth_result.get("role") == "superadmin"
+
+
+def _require_tool(key):
+    """Server-side enforcement of the Admin Panel's per-user Allowed Tools
+    list - mirrors templates/index.html's applyToolFilter(), which only
+    hides the sidebar tab client-side. UI hiding alone is cosmetic: a
+    restricted user could still call the route directly (devtools/curl), so
+    routes for tools that can be individually disabled per-user must also
+    check this. Superadmin always passes, same as the frontend's
+    admIsSuper() bypass."""
+    auth_result = auth.check_saved_auth()
+    if auth_result.get("role") == "superadmin":
+        return True
+    allowed = auth.get_allowed_tools()
+    if not allowed:
+        return True   # None/empty = all tools allowed
+    if isinstance(allowed, str):
+        allowed = allowed.split(",")
+    allowed = [str(x).strip().lower() for x in allowed if str(x).strip()]
+    return not allowed or "all" in allowed or key in allowed
 
 @app.route("/api/admin/bulk-add-owner-preview")
 def api_admin_bulk_add_owner_preview():
@@ -5698,6 +5743,8 @@ def _crawl_apps_script_post(webapp_url, payload, timeout=180, retries=1):
 
 @app.route("/api/crawl/validate", methods=["POST"])
 def api_crawl_validate():
+    if not _require_tool("crawl"):
+        return jsonify({"error": "You don't have access to the Crawl Tracker tool."}), 403
     webapp_url = _gsc_webapp_url()
     if not webapp_url:
         return jsonify({"error": "GSC accounts not configured. Set Apps Script URL in Admin."}), 400
@@ -5792,6 +5839,8 @@ _brief_lock = threading.Lock()
 
 @app.route("/api/brief/start", methods=["POST"])
 def api_brief_start():
+    if not _require_tool("brief"):
+        return jsonify({"error": "You don't have access to the Brief Analysis tool."}), 403
     with _brief_lock:
         if _brief_state["running"]:
             return jsonify({"error": "Brief analysis already running"}), 400

@@ -1743,13 +1743,21 @@ def find_existing_sitemap(domain, dry_run=False):
     a sitemap from just the target pages - that would miss most of the site."""
     if dry_run:
         return None, None
-    root = site_root(domain)
+    d = safe_domain(domain)
+    # site_root() always resolves to the non-www host - on a site where www IS
+    # the correct canonical version (confirmed live: tdkcorp.com.au, where
+    # https://www.tdkcorp.com.au/sitemap.xml exists but the non-www host
+    # doesn't serve it the same way, e.g. some Wix domain bindings), checking
+    # only the non-www host produced a false "not found". Check both hosts.
+    roots = [f"https://{d}", f"https://www.{d}"]
     candidates = []
-    _, rtxt, _ = _http(root + "/robots.txt")
-    for m in re.finditer(r"(?im)^\s*sitemap:\s*(\S+)", rtxt or ""):
-        candidates.append(m.group(1).strip())
-    candidates += [root + "/sitemap.xml", root + "/sitemap_index.xml",
-                   root + "/sitemap-index.xml", root + "/sitemap1.xml"]
+    for root in roots:
+        _, rtxt, _ = _http(root + "/robots.txt")
+        for m in re.finditer(r"(?im)^\s*sitemap:\s*(\S+)", rtxt or ""):
+            candidates.append(m.group(1).strip())
+    for root in roots:
+        candidates += [root + "/sitemap.xml", root + "/sitemap_index.xml",
+                       root + "/sitemap-index.xml", root + "/sitemap1.xml"]
     for u in dict.fromkeys(candidates):
         st, body, _ = _http(u)
         if st == 200 and ("<urlset" in body or "<sitemapindex" in body):
@@ -2413,37 +2421,88 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
             _t.sleep(step)
             elapsed += step
 
+    _HIGHLIGHT_PATTERNS = {
+        "lang": r'<html\b[^>]*>',
+        "canonical": r'<link\b[^>]*rel=["\']canonical["\'][^>]*>',
+        "robots": r'<meta\b[^>]*name=["\']robots["\'][^>]*>',
+    }
+
     def _highlight_tag(kind):
-        """Read the REAL rendered page's canonical link or robots meta tag straight
-        from the DOM and inject a highlighted on-page banner showing it - a genuine
-        visual highlight, instead of a raw view-source: code dump (view-source: is a
-        privileged scheme some automated browsers restrict, and even when it loaded,
-        nothing in that mode was actually highlighted - just the whole page dumped)."""
-        try:
-            driver.execute_script("""(kind) => {
-                var esc = function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
-                var label, value;
-                if (kind === 'canonical') {
-                    var el = document.querySelector('link[rel="canonical"]');
-                    label = 'Canonical URL';
-                    value = el ? (el.getAttribute('href') || '(empty)') : '(missing - no canonical tag found)';
-                } else {
-                    var el = document.querySelector('meta[name="robots"]');
-                    label = 'Meta Robots';
-                    value = el ? (el.getAttribute('content') || '(empty)') : '(not set - defaults to index, follow)';
+        """Fetch the page's REAL raw HTML source (same-origin fetch of its own
+        URL - the actual bytes the server sent, not a DOM reconstruction) and
+        render a genuine view-source-style widget: a fake address bar reading
+        "view-source:<url>", real line numbers, a couple of real lines of
+        surrounding context, and the matching line highlighted - matching what
+        a real view-source: tab looks like when zoomed to the relevant line.
+        Navigating to the actual view-source: scheme was unreliable in
+        automation (some browsers refuse it, and it never actually highlighted
+        anything - just dumped the whole page), so this fakes the same visual
+        from the real page instead.
+
+        Returns the widget's on-page bounding box (for a tight screenshot
+        crop), or None if the fetch/render failed."""
+        script = """
+            var callback = arguments[arguments.length - 1];
+            var pattern = arguments[0];
+            var old = document.getElementById('__tag_highlight_overlay');
+            if (old) old.remove();
+            fetch(location.href).then(function(r){ return r.text(); }).then(function(html){
+                var lines = html.split(/\\r\\n|\\r|\\n/);
+                var re = new RegExp(pattern, 'i');
+                var idx = -1;
+                for (var i = 0; i < lines.length; i++) {
+                    if (re.test(lines[i])) { idx = i; break; }
                 }
+                var esc = function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+                var start = idx === -1 ? 0 : Math.max(0, idx - 1);
+                var end = idx === -1 ? Math.min(lines.length, 3) : Math.min(lines.length, idx + 2);
+
                 var box = document.createElement('div');
                 box.id = '__tag_highlight_overlay';
-                box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;'
-                    + 'background:#fff59d;color:#000;padding:16px 20px;font:14px/1.5 Arial,sans-serif;'
-                    + 'border-bottom:4px solid #f9a825;box-shadow:0 2px 8px rgba(0,0,0,.3);';
-                box.innerHTML = '<b>' + esc(label) + ':</b> ' + esc(value);
+                box.style.cssText = 'position:fixed;top:20px;left:20px;z-index:2147483647;'
+                    + 'background:#fff;border:1px solid #ccc;border-radius:6px;'
+                    + 'box-shadow:0 4px 16px rgba(0,0,0,.25);font:15px/1.6 Consolas,Menlo,monospace;'
+                    + 'overflow:hidden;max-width:900px;';
+
+                var addr = document.createElement('div');
+                addr.style.cssText = 'background:#f1f3f4;padding:8px 14px;border-bottom:1px solid #ddd;'
+                    + 'font:13px Arial,sans-serif;color:#333;';
+                addr.textContent = 'view-source:' + location.href;
+                box.appendChild(addr);
+
+                var code = document.createElement('div');
+                code.style.cssText = 'padding:10px 14px;white-space:pre;';
+                var out = '';
+                if (idx === -1) {
+                    out = '<div>(tag not found in page source)</div>';
+                } else {
+                    for (var i = start; i < end; i++) {
+                        var isTarget = (i === idx);
+                        var bg = isTarget ? 'background:#f9a825;' : '';
+                        out += '<div style="' + bg + 'padding:2px 6px;">'
+                            + '<span style="color:#999;display:inline-block;width:28px;">' + (i + 1) + '</span>'
+                            + '<span>' + esc(lines[i]) + '</span></div>';
+                    }
+                }
+                code.innerHTML = out;
+                box.appendChild(code);
+
                 document.body.insertBefore(box, document.body.firstChild);
                 window.scrollTo(0, 0);
-            }""", kind)
-            _t.sleep(0.5)
+
+                setTimeout(function() {
+                    var r = box.getBoundingClientRect();
+                    callback({x: r.x, y: r.y, width: r.width, height: r.height});
+                }, 80);
+            }).catch(function(){ callback(null); });
+        """
+        try:
+            driver.set_script_timeout(15)
+            rect = driver.execute_async_script(script, _HIGHLIGHT_PATTERNS.get(kind, ""))
+            _t.sleep(0.2)
+            return rect
         except Exception:
-            pass
+            return None
 
     def _shot(key, url, height=900, view_source=False, sucuri=False, highlight=None, _attempt=1):
         p = path(key)
@@ -2453,8 +2512,9 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
                 _t.sleep(4)          # view-source: pages don't hydrate normally - keep the fixed wait
             else:
                 _wait_settled(15 if sucuri else 4)
+            highlight_rect = None
             if highlight:
-                _highlight_tag(highlight)
+                highlight_rect = _highlight_tag(highlight)
             # Google serves headless browsers a reCAPTCHA / "unusual traffic" wall
             # instead of results - a screenshot of that is useless, so skip it (the
             # indexing section falls back to a text note / GSC data).
@@ -2484,7 +2544,19 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
             except Exception:
                 pass
             _t.sleep(0.6)
-            if view_source:
+            if highlight_rect:
+                # Crop tight to the injected code-viewer widget (plus a small
+                # margin) instead of a full-viewport shot - "zoomed to that
+                # section" like a real view-source: screenshot, not a large
+                # unfocused capture of the whole page.
+                margin = 12
+                cdp = {"format": "png", "captureBeyondViewport": False,
+                       "clip": {"x": max(0, highlight_rect["x"] - margin),
+                                "y": max(0, highlight_rect["y"] - margin),
+                                "width": highlight_rect["width"] + margin * 2,
+                                "height": highlight_rect["height"] + margin * 2,
+                                "scale": 1}}
+            elif view_source:
                 cdp = {"format": "png", "captureBeyondViewport": False}
             else:
                 try:
@@ -2525,7 +2597,7 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
     _shot("robots",    root + "/robots.txt", height=700)
     _shot("canonical", root + "/", highlight="canonical")
     _shot("noindex",   root + "/", highlight="robots")
-    _shot("lang",      root + "/", view_source=True)
+    _shot("lang",      root + "/", highlight="lang")
     if sitemap_url:                                # only shoot a sitemap that exists
         _shot("sitemap", sitemap_url, height=760)
     _shot("serp",      f"https://www.google.com/search?q=site:{domain}", height=900)

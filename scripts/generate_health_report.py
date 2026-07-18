@@ -923,38 +923,100 @@ def _latest_wayback_snapshot_url(domain):
 
 
 # ---------- LIVE CAPTURE (patchright, reuses generate_report) ----------
+_META_SOURCE_PATTERNS = [r'<title\b[^>]*>.*?</title>', r'<meta\b[^>]*name=["\']description["\'][^>]*>']
+
+
 def _capture_meta_overlay(page, url, path, height=760):
-    """Read the REAL rendered page's title/meta description straight from the DOM
-    and inject a highlighted on-page banner showing them - a genuine visual
-    highlight of the meta tags, not a raw view-source: code dump. view-source: is
-    a privileged scheme some automated browsers restrict, and even when it loaded,
-    scrolling near a line in the raw source wasn't an actual highlight."""
+    """Fetch the page's REAL raw HTML (same-origin fetch of its own URL - the
+    actual bytes the server sent) and render a genuine view-source-style
+    widget: a fake address bar reading "view-source:<url>", real line
+    numbers, real surrounding source lines, with the <title> and meta
+    description lines highlighted - then the screenshot crops tight to just
+    that widget. Not a raw view-source: code dump (view-source: is a
+    privileged scheme some automated browsers restrict) and not a plain
+    colored banner of extracted values (doesn't show the actual source)."""
     try:
         page.goto(url, wait_until="networkidle", timeout=60000)
         page.wait_for_timeout(gr.EXTRA_WAIT_MS)
     except Exception as e:
         print(f"     [warn] {type(e).__name__}, capturing anyway")
         page.wait_for_timeout(3000)
+    rect = None
     try:
-        page.evaluate("""() => {
-            var title = document.title || '(missing)';
-            var descEl = document.querySelector('meta[name="description"]');
-            var desc = descEl ? (descEl.getAttribute('content') || '(empty)') : '(missing)';
-            var box = document.createElement('div');
-            box.id = '__meta_suggestion_overlay';
-            box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;'
-                + 'background:#fff59d;color:#000;padding:16px 20px;font:14px/1.5 Arial,sans-serif;'
-                + 'border-bottom:4px solid #f9a825;box-shadow:0 2px 8px rgba(0,0,0,.3);';
-            var esc = function(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
-            box.innerHTML = '<b>Title:</b> ' + esc(title) + '<br><b>Meta Description:</b> ' + esc(desc);
+        rect = page.evaluate("""async (patterns) => {
+            const res = await fetch(location.href);
+            const html = await res.text();
+            const lines = html.split(/\\r\\n|\\r|\\n/);
+            const matchIdx = [];
+            for (const p of patterns) {
+                const re = new RegExp(p, 'i');
+                for (let i = 0; i < lines.length; i++) {
+                    if (re.test(lines[i])) { matchIdx.push(i); break; }
+                }
+            }
+            matchIdx.sort((a, b) => a - b);
+            const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+            const box = document.createElement('div');
+            box.id = '__source_highlight_widget';
+            box.style.cssText = 'position:fixed;top:20px;left:20px;z-index:2147483647;'
+                + 'background:#fff;border:1px solid #ccc;border-radius:6px;'
+                + 'box-shadow:0 4px 16px rgba(0,0,0,.25);font:15px/1.6 Consolas,Menlo,monospace;'
+                + 'overflow:hidden;max-width:900px;';
+
+            const addr = document.createElement('div');
+            addr.style.cssText = 'background:#f1f3f4;padding:8px 14px;border-bottom:1px solid #ddd;'
+                + 'font:13px Arial,sans-serif;color:#333;';
+            addr.textContent = 'view-source:' + location.href;
+            box.appendChild(addr);
+
+            const code = document.createElement('div');
+            code.style.cssText = 'padding:10px 14px;white-space:pre;';
+            let out = '';
+            if (!matchIdx.length) {
+                out = '<div>(tag not found in page source)</div>';
+            } else {
+                const blocks = [];
+                let curStart = matchIdx[0], curEnd = matchIdx[0];
+                for (let i = 1; i < matchIdx.length; i++) {
+                    if (matchIdx[i] - curEnd <= 4) { curEnd = matchIdx[i]; }
+                    else { blocks.push([curStart, curEnd]); curStart = curEnd = matchIdx[i]; }
+                }
+                blocks.push([curStart, curEnd]);
+                const matchSet = new Set(matchIdx);
+                blocks.forEach(([bs, be], b) => {
+                    if (b > 0) { out += '<div style="color:#999;padding:2px 6px 2px 34px;">...</div>'; }
+                    const s = Math.max(0, bs - 1);
+                    const e = Math.min(lines.length - 1, be + 1);
+                    for (let i = s; i <= e; i++) {
+                        const bg = matchSet.has(i) ? 'background:#f9a825;' : '';
+                        out += '<div style="' + bg + 'padding:2px 6px;">'
+                            + '<span style="color:#999;display:inline-block;width:28px;">' + (i + 1) + '</span>'
+                            + '<span>' + esc(lines[i]) + '</span></div>';
+                    }
+                });
+            }
+            code.innerHTML = out;
+            box.appendChild(code);
+
             document.body.insertBefore(box, document.body.firstChild);
             window.scrollTo(0, 0);
-        }""")
-        page.wait_for_timeout(500)
+            await new Promise(r => setTimeout(r, 80));
+            const r = box.getBoundingClientRect();
+            return {x: r.x, y: r.y, width: r.width, height: r.height};
+        }""", _META_SOURCE_PATTERNS)
+        page.wait_for_timeout(200)
     except Exception as e:
-        print(f"     [warn] meta overlay inject failed: {e}")
-    page.screenshot(path=str(path), clip={"x": 0, "y": 0, "width": gr.VIEWPORT_W, "height": height},
-                    full_page=False)
+        print(f"     [warn] source highlight widget failed: {e}")
+    if rect:
+        margin = 12
+        page.screenshot(path=str(path), clip={
+            "x": max(0, rect["x"] - margin), "y": max(0, rect["y"] - margin),
+            "width": rect["width"] + margin * 2, "height": rect["height"] + margin * 2,
+        }, full_page=False)
+    else:
+        page.screenshot(path=str(path), clip={"x": 0, "y": 0, "width": gr.VIEWPORT_W, "height": height},
+                        full_page=False)
 
 
 def _capture_frame(page, url, path, height=820, view_source=False, find=None):
