@@ -3616,7 +3616,8 @@ async function idxSubmit(){
     let rows=(d.results||[]).map(x=>{
       const noOwner=!x.ok && x.message==='no_owner_access';
       const statusHtml=x.ok?'Submitted':(noOwner
-        ? 'No Owner access to this domain - <a href="#" onclick="switchTab(\'gsc\');return false;" style="color:inherit;text-decoration:underline">connect it in GSC Audit</a> to submit automatically'
+        ? 'For this domain we don\'t have Owner access to submit pages for indexing through the API - please connect GSC of that domain in the '
+          +'<a href="#" onclick="switchTab(\'gsc\');return false;" style="color:inherit;text-decoration:underline">GSC Audit</a> section if not done already, and it should have Owner access'
         : esc(x.message));
       return '<tr><td style="font-size:11px;padding:3px 6px;word-break:break-all">'+esc(x.url)+'</td>'
         +'<td style="font-size:11px;padding:3px 6px;color:'+(x.ok?'var(--ok)':'var(--err,#c00)')+'">'+statusHtml+'</td></tr>';
