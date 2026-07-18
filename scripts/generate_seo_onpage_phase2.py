@@ -804,35 +804,39 @@ def _ai_suggest_openai(prompt):
 # attempted below. None = unknown/not set, treated as "small" (paid tier
 # allowed) so a caller that never calls set_run_scale() behaves like before
 # this was added.
-BULK_AI_PAGE_LIMIT = 20
+BULK_AI_PAGE_LIMIT = 20   # default cap - SEranking Audit and GEO report use this
 _current_run_scale = None
+_current_run_limit = BULK_AI_PAGE_LIMIT
 
 
-def set_run_scale(page_count):
+def set_run_scale(page_count, limit=BULK_AI_PAGE_LIMIT):
     """Call once near the start of a report run with the real page/row count
-    it covers. Team decision: the paid OpenAI tier is only worth the real
-    money for small/targeted runs - a large bulk run instead just falls
-    through to the heuristic fallback once the free tiers (Gemini/Groq/
-    OpenRouter) are exhausted, rather than silently burning paid credits
-    across hundreds of pages."""
-    global _current_run_scale
+    it covers. `limit` is the page-count ceiling for the paid OpenAI tier for
+    THIS run - defaults to the shared BULK_AI_PAGE_LIMIT (SEranking Audit,
+    GEO report: the paid tier is only worth the real money for small/targeted
+    runs there, so a large bulk run falls through to the heuristic fallback
+    once the free tiers are exhausted). Pass limit=None for no cap - the
+    On-Page report does this: every target page the team explicitly shared
+    should get a real shot at the paid tier, not just the first 20."""
+    global _current_run_scale, _current_run_limit
     _current_run_scale = page_count
+    _current_run_limit = limit
 
 
 def _ai_suggest(prompt):
     """Suggestion copy via a fallback chain: Gemini -> Groq -> OpenRouter (all
-    free tiers, tried unconditionally) -> OpenAI (paid, only for a run of
-    BULK_AI_PAGE_LIMIT pages or fewer - see set_run_scale) -> None (caller
-    falls back to its own heuristic). Each tier is skipped instantly if its
-    API key isn't configured (CONFIG's Keys sheet / GEMINI_API_KEY,
-    GROQ_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY env vars), so a site
-    with only a Gemini key behaves exactly as before. Returns parsed JSON or
-    None."""
+    free tiers, tried unconditionally) -> OpenAI (paid, only within this run's
+    page-count limit - see set_run_scale) -> None (caller falls back to its
+    own heuristic). Each tier is skipped instantly if its API key isn't
+    configured (CONFIG's Keys sheet / GEMINI_API_KEY, GROQ_API_KEY,
+    OPENROUTER_API_KEY, OPENAI_API_KEY env vars), so a site with only a
+    Gemini key behaves exactly as before. Returns parsed JSON or None."""
     for fn in (_ai_suggest_gemini, _ai_suggest_groq, _ai_suggest_openrouter):
         result = fn(prompt)
         if result is not None:
             return result
-    if _current_run_scale is None or _current_run_scale <= BULK_AI_PAGE_LIMIT:
+    if (_current_run_scale is None or _current_run_limit is None
+            or _current_run_scale <= _current_run_limit):
         result = _ai_suggest_openai(prompt)
         if result is not None:
             return result
@@ -931,6 +935,24 @@ def suggest_meta(page_data, keywords, brand, keyword_ranks=None):
     body_text = (page_data.get("body_text") or "")[:1500]
     primary_kw = keywords[0] if keywords else ""
 
+    # A page with no keyword assigned in the sheet used to skip AI suggestion
+    # entirely and fall straight to the barest possible template ("{topic} -
+    # learn more at {brand}.") - no real content, no value proposition, and
+    # identical in shape across every keyword-less page on a site (reads as
+    # duplicate boilerplate to both readers and Google). Derive a usable
+    # topic from the page's own H1, or its URL slug as a last resort, so AI
+    # (and the heuristic fallback below) still get something concrete to
+    # write a real, content-aware description from.
+    def _slug_topic(url):
+        path = urllib.parse.urlparse(url).path.strip("/")
+        if not path:
+            return ""
+        last = path.split("/")[-1]
+        return last.replace("-", " ").replace("_", " ").strip().title()
+
+    effective_kw = primary_kw or (
+        existing_h1 if existing_h1 and existing_h1 != MISSING else _slug_topic(page_data["url"]))
+
     best_rank = _best_rank_for_page(keywords, keyword_ranks)
     ranked_well = best_rank is not None and best_rank <= 20
     title_flagged = _title_needs_suggestion(existing_title, keywords)
@@ -945,20 +967,20 @@ def suggest_meta(page_data, keywords, brand, keyword_ranks=None):
 
     if need_title or need_desc:
         ai = None
-        if primary_kw:
+        if effective_kw:
             prompt = (
                 "You are an SEO copywriter. For this webpage, write an SEO meta title "
                 "(50-60 characters) and meta description (140-160 characters).\n"
                 f"Page URL: {page_data['url']}\n"
                 f"Brand: {brand}\n"
-                f"Primary target keyword: {primary_kw}\n"
+                f"Primary target keyword/topic: {effective_kw}\n"
                 f"Other keywords for this page: {', '.join(keywords[1:5])}\n"
                 f"Existing H1: {existing_h1 if existing_h1 != MISSING else '(none)'}\n"
                 f"Page content excerpt: {body_text or '(not available)'}\n"
                 'Return ONLY JSON: {"title": "...", "description": "..."}. '
                 "The title and description must read naturally, reflect what THIS page "
                 "is actually about (use the content excerpt, not just the keyword), "
-                "include the primary keyword naturally, and end the title with the "
+                "include the primary keyword/topic naturally, and end the title with the "
                 "brand name if it fits within the length.")
             ai = _ai_suggest(prompt)
 
@@ -983,23 +1005,24 @@ def suggest_meta(page_data, keywords, brand, keyword_ranks=None):
             if need_desc:
                 suggested_desc = _trim(str(ai["description"]).strip(), 160)
         else:
-            # Heuristic fallback (no Gemini key, or the call failed) - still built from
-            # the page's own H1/content rather than a formulaic "keyword | brand".
-            topic = existing_h1 if existing_h1 and existing_h1 != MISSING else (primary_kw.title() or "Page")
+            # Heuristic fallback (every AI tier unavailable/failed) - still built from
+            # the page's own H1/content and the derived topic (effective_kw), not a
+            # bare "{topic} - learn more at {brand}." template with no real content.
+            topic = existing_h1 if existing_h1 and existing_h1 != MISSING else (effective_kw.title() or "Page")
 
             if need_title:
-                if primary_kw and primary_kw.lower() not in topic.lower():
-                    suggested_title = f"{topic} - {primary_kw.title()} | {brand}"
+                if effective_kw and effective_kw.lower() not in topic.lower():
+                    suggested_title = f"{topic} - {effective_kw.title()} | {brand}"
                 else:
                     suggested_title = f"{topic} | {brand}"
                 suggested_title = _trim(suggested_title, 60)
             if need_desc:
                 snippet = _trim(body_text.strip(), 100).rstrip(" .!?")
-                if primary_kw and snippet:
+                if effective_kw and snippet:
                     suggested_desc = _trim(f"{topic} - {snippet}.", 130) + \
-                        f" Explore {primary_kw} with {brand}."
-                elif primary_kw:
-                    suggested_desc = f"Discover {primary_kw} at {brand}. {topic}."
+                        f" Explore {effective_kw} with {brand}."
+                elif effective_kw:
+                    suggested_desc = f"Discover {effective_kw} at {brand}. {topic}."
                 else:
                     suggested_desc = f"{topic} - learn more at {brand}."
                 suggested_desc = _trim(suggested_desc, 160)
@@ -7958,7 +7981,10 @@ def main():
             homepage = pd
     _close_op_driver()          # done crawling - free the render browser
     log(f"[2/5] Crawled {total} page(s)")
-    set_run_scale(total)  # gates whether the paid OpenAI suggestion tier is used - see set_run_scale()
+    # No page-count cap for On-Page: every target page the team explicitly shared
+    # should get a real shot at the paid OpenAI tier, not just the first 20 - see
+    # set_run_scale(). SEranking Audit and GEO report keep the default 20-page cap.
+    set_run_scale(total, limit=None)
 
     brand = brand_from(domain, homepage.get("title") if homepage else None,
                        homepage.get("h1") if homepage else None,

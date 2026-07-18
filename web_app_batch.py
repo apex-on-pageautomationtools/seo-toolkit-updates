@@ -1905,13 +1905,35 @@ def _shot_index_or_count(driver, folder_domain, folder_mode, name_seed):
         return "", ""
 
 
+def _looks_like_homepage(link, netloc):
+    """True if `link`'s host matches `netloc` (www-insensitive) AND its path is
+    root - used so a homepage check's domain-wide site: query only counts the
+    HOMEPAGE ITSELF as indexed, not just any inner page of the domain showing
+    up in the same results."""
+    from urllib.parse import urlparse
+    try:
+        lp = urlparse(link if "//" in str(link) else "http://" + str(link))
+    except Exception:
+        return False
+    host = lp.netloc.replace("www.", "").lower()
+    target = netloc.replace("www.", "").lower()
+    return host == target and lp.path.rstrip("/") in ("", "/")
+
+
 def index_one(sess, raw_url, country, city=None, lang="en"):
     from urllib.parse import urlparse
     url = raw_url.strip()
     if not url.startswith("http"):
         url = "https://" + url
     p = urlparse(url)
-    q = "site:" + p.netloc.replace("www.", "") + p.path.rstrip("/")
+    path_clean = p.path.rstrip("/")
+    q = "site:" + p.netloc.replace("www.", "") + path_clean
+    # A homepage URL's path becomes "" after rstrip - the query above then
+    # naturally becomes a DOMAIN-WIDE "site:domain.com" (no path), which
+    # returns every indexed page on the site, not just the homepage. Track
+    # this so the verdict below only counts the homepage ITSELF as indexed,
+    # not any inner page that happened to show up in the same results.
+    is_homepage = path_clean in ("", "/")
 
     for _try in range(CONFIG.get("max_block_retries", 3) + 1):
         if stop_event.is_set():
@@ -1929,6 +1951,11 @@ def index_one(sess, raw_url, country, city=None, lang="en"):
             return {"status": "ok", "indexed": "No", "found_url": "", "screenshot": ss_name, "screenshot_url": ss_url}
         links = extract_organic(sess.driver)
         ss_name, ss_url = _shot_index_or_count(sess.driver, p.netloc, "index", raw_url)
+        if is_homepage:
+            match = next((l for l in links if _looks_like_homepage(l, p.netloc)), None)
+            if match:
+                return {"status": "ok", "indexed": "Yes", "found_url": match, "screenshot": ss_name, "screenshot_url": ss_url}
+            return {"status": "ok", "indexed": "No", "found_url": "", "screenshot": ss_name, "screenshot_url": ss_url}
         if links:
             return {"status": "ok", "indexed": "Yes", "found_url": links[0], "screenshot": ss_name, "screenshot_url": ss_url}
         return {"status": "ok", "indexed": "No", "found_url": "", "screenshot": ss_name, "screenshot_url": ss_url}
