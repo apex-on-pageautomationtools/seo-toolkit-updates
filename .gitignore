@@ -23,3 +23,7 @@ config.json
 *.token
 *.credentials
 profiles/
+
+# VPS tooling - lives in the separate seo-toolkit-vps-tools repo, never the
+# public ota update-feed repo. Kept here locally as a convenience copy only.
+vps_tools/
