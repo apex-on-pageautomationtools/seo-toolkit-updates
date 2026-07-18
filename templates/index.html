@@ -1301,7 +1301,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
 https://example.com/page-2"></textarea>
       </div>
       <div style="display:flex;gap:8px;margin:8px 0">
-        <button class="btn btn-primary" onclick="idxSubmit()">Submit for Indexing</button>
+        <button class="btn btn-primary" id="btn-idx-submit" onclick="idxSubmit()">Submit for Indexing</button>
       </div>
       <div id="idx-results"></div>
 
@@ -1651,6 +1651,31 @@ https://example.com/page-2"></textarea>
             </button>
             <button class="btn btn-tonal" onclick="perfReset()">New Report</button>
             <button class="btn btn-tonal" onclick="copyLogText('perf-log')">Copy Log</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- submit for indexing -->
+      <div id="tbl-indexing" style="flex:1;display:none">
+        <div class="empty" id="empty-indexing">
+          <div class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg></div>
+          <p>Paste one or more URLs and click <b>Submit for Indexing</b> to send them to Google.</p>
+        </div>
+        <div id="indexing-active" class="hidden">
+          <div style="margin-bottom:12px">
+            <span class="tag t-yes" id="idx-progress">Starting...</span>
+          </div>
+          <div class="log" id="idx-log" style="height:160px;overflow-y:auto;font-size:12px;margin-bottom:12px"></div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
+                <th style="padding:6px">URL</th><th style="padding:6px">Status</th>
+              </tr></thead>
+              <tbody id="idx-results-body"></tbody>
+            </table>
+          </div>
+          <div style="margin-top:14px">
+            <button class="btn btn-tonal" onclick="copyLogText('idx-log')">Copy Log</button>
           </div>
         </div>
       </div>
@@ -2351,6 +2376,7 @@ function switchTab(m){
   $('tbl-seranking').style.display=m==='seranking'?'':'none';
   $('tbl-geo').style.display=m==='geo'?'':'none';
   $('tbl-performance').style.display=m==='performance'?'':'none';
+  $('tbl-indexing').style.display=m==='indexing'?'':'none';
   $('tbl-keywordvolume').style.display=m==='keywordvolume'?'':'none';
   const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',wayback:'Wayback Machine Submitter',seranking:'SEranking Audit',geo:'GEO / AI Optimization',performance:'Performance Report',indexing:'Submit for Indexing',keywordvolume:'Keyword Search Volume',admin:'Admin Panel'};
   const subs={ranking:'Find where your domain ranks on Google - across regions, CAPTCHA-resistant.',
@@ -2379,6 +2405,12 @@ function switchTab(m){
   // report tool has its own dedicated one inside its own panel, so showing
   // both at once read as two progress bars for the same run.
   $('shared-status-block').style.display=BATCH.includes(m)?'':'none';
+  // Submit for Indexing has its own dedicated "Submit for Indexing" button and
+  // doesn't run through doStart()/the shared Start-Pause-Resume-Stop bar at all
+  // (no mode==='indexing' branch exists) - clicking Start there silently did
+  // nothing, so hide the bar entirely on this tab instead of showing a
+  // "Start" button with no effect.
+  document.querySelector('.actionbar').style.display=m==='indexing'?'none':'';
   if(m==='admin'){admLoadUsers();admLoadBuildings();admLoadProxies();admLoadCities();admLoadConfig();admLoadKeysStatus();fetchActivityLog();}
   if(m==='crawl'){crawlLoadUrls();}
   if(m==='performance'){perfLoadGscAccounts();}
@@ -3595,19 +3627,39 @@ async function idxInit(){
   idxLoadFallbackAccounts();
 }
 let _idxLastLeftover=[];
+function _idxLog(line){
+  const el=$('idx-log');
+  el.textContent+=(el.textContent?'\n':'')+line;
+  el.scrollTop=el.scrollHeight;
+}
 async function idxSubmit(){
   const raw=$('idx-urls').value.split('\n').map(s=>s.trim()).filter(Boolean);
   if(!raw.length){toast('Enter at least one URL','err');return;}
   const urls=[...new Set(raw)];  // dedupe client-side too, for an accurate count before the request
   const dupes=raw.length-urls.length;
   if(urls.length>10) toast('Only the first 10 URLs will be submitted (10/request limit) - the rest are listed as skipped below.');
-  const box=$('idx-results');
-  box.innerHTML='<div class="note">Submitting '+Math.min(urls.length,10)+' URL(s)'+(dupes?' ('+dupes+' duplicate(s) removed)':'')+' - each is checked for a real 200 OK before it counts against quota...</div>';
+  // Disable the button for the duration of the submission - it stayed clickable
+  // the whole time before, so a second click mid-submit fired a second,
+  // overlapping /api/indexing/submit call against the same shared daily quota.
+  const btn=$('btn-idx-submit');
+  btn.disabled=true;
+  // Full log + per-URL results go in the shared Results panel on the right
+  // (matching every other tool here), not a small box under the button.
+  $('empty-indexing').style.display='none';
+  $('indexing-active').classList.remove('hidden');
+  $('idx-progress').textContent='Submitting...';
+  $('idx-log').textContent='';
+  $('idx-results-body').innerHTML='';
+  _idxLog('Submitting '+Math.min(urls.length,10)+' URL(s)'+(dupes?' ('+dupes+' duplicate(s) removed)':'')
+    +' - each is checked for a real 200 OK before it counts against quota...');
+  $('idx-results').innerHTML='';
   try{
     const r=await fetch('/api/indexing/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls})});
     const d=await r.json();
     if(d.error && !d.results){
-      box.innerHTML='<div class="note" style="color:var(--err,#c00)">'+esc(d.error)+' - use the fallback below to submit via GSC directly.</div>';
+      $('idx-progress').textContent='Error';
+      $('idx-progress').className='tag t-no';
+      _idxLog(d.error+' - use the fallback below to submit via GSC directly.');
       _idxLastLeftover=urls;
       $('idx-fallback-wrap').classList.remove('hidden');
       return;
@@ -3619,17 +3671,23 @@ async function idxSubmit(){
         ? 'For this domain we don\'t have Owner access to submit pages for indexing through the API - please connect GSC of that domain in the '
           +'<a href="#" onclick="switchTab(\'gsc\');return false;" style="color:inherit;text-decoration:underline">GSC Audit</a> section if not done already, and it should have Owner access'
         : esc(x.message));
-      return '<tr><td style="font-size:11px;padding:3px 6px;word-break:break-all">'+esc(x.url)+'</td>'
-        +'<td style="font-size:11px;padding:3px 6px;color:'+(x.ok?'var(--ok)':'var(--err,#c00)')+'">'+statusHtml+'</td></tr>';
+      return '<tr><td style="padding:3px 6px;word-break:break-all">'+esc(x.url)+'</td>'
+        +'<td style="padding:3px 6px;color:'+(x.ok?'var(--ok)':'var(--err,#c00)')+'">'+statusHtml+'</td></tr>';
     }).join('');
-    box.innerHTML='<div class="note" style="margin-bottom:6px">Submitted '+(d.submitted||0)+'/'+urls.length
-      +(d.dropped_duplicates?' ('+d.dropped_duplicates+' duplicate(s) removed)':'')+'</div>'
-      +'<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table>';
+    $('idx-results-body').innerHTML=rows;
+    $('idx-progress').textContent='Submitted '+(d.submitted||0)+'/'+urls.length;
+    $('idx-progress').className='tag t-yes';
+    _idxLog('Submitted '+(d.submitted||0)+'/'+urls.length
+      +(d.dropped_duplicates?' ('+d.dropped_duplicates+' duplicate(s) removed)':''));
     $('idx-fallback-wrap').classList.toggle('hidden', _idxLastLeftover.length===0);
   }catch(e){
-    box.innerHTML='<div class="note" style="color:var(--err,#c00)">Could not reach the indexing service - use the fallback below to submit via GSC directly.</div>';
+    $('idx-progress').textContent='Error';
+    $('idx-progress').className='tag t-no';
+    _idxLog('Could not reach the indexing service - use the fallback below to submit via GSC directly.');
     _idxLastLeftover=urls;
     $('idx-fallback-wrap').classList.remove('hidden');
+  }finally{
+    btn.disabled=false;
   }
 }
 async function idxLoadFallbackAccounts(){
