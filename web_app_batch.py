@@ -5675,8 +5675,9 @@ def api_crawl_validate():
     if not webapp_url:
         return jsonify({"error": "GSC accounts not configured. Set Apps Script URL in Admin."}), 400
     data = request.get_json(silent=True) or {}
+    user = (auth.check_saved_auth().get("email") or "").strip().lower()
     try:
-        resp = _crawl_apps_script_post(webapp_url, {"action": "validate_batch", "urls": data.get("urls", [])})
+        resp = _crawl_apps_script_post(webapp_url, {"action": "validate_batch", "urls": data.get("urls", []), "user": user})
         result = resp.json()
         # An item marked not-ready here because the shared account's quota/
         # auth failed (not a permanent reason like "domain not in master
