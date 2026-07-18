@@ -3597,7 +3597,12 @@ async function idxSubmit(){
   try{
     const r=await fetch('/api/indexing/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls})});
     const d=await r.json();
-    if(d.error && !d.results){box.innerHTML='<div class="note" style="color:var(--err,#c00)">'+esc(d.error)+'</div>';return;}
+    if(d.error && !d.results){
+      box.innerHTML='<div class="note" style="color:var(--err,#c00)">'+esc(d.error)+' - use the fallback below to submit via GSC directly.</div>';
+      _idxLastLeftover=urls;
+      $('idx-fallback-wrap').classList.remove('hidden');
+      return;
+    }
     _idxLastLeftover=(d.results||[]).filter(x=>!x.ok && (x.message==='user_daily_cap_reached'||x.message==='pool_exhausted')).map(x=>x.url);
     let rows=(d.results||[]).map(x=>'<tr><td style="font-size:11px;padding:3px 6px;word-break:break-all">'+esc(x.url)+'</td>'
       +'<td style="font-size:11px;padding:3px 6px;color:'+(x.ok?'var(--ok)':'var(--err,#c00)')+'">'+(x.ok?'Submitted':esc(x.message))+'</td></tr>').join('');

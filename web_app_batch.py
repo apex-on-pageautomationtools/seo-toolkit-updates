@@ -5012,12 +5012,32 @@ def api_indexing_status():
     except Exception as e:
         return jsonify({"error": f"Could not reach the indexing service: {e}"}), 502
 
+def _submit_via_appscript(urls):
+    """Middle-tier fallback: submit through the team's Apps Script (a separate
+    OAuth-authorized project pool, never gsc-for-claude/gsc-tracker-2 - those
+    already back the 86 GSC accounts' logins). Google's own infrastructure,
+    not a VPS box, so it stays up even when the VPS is briefly unreachable.
+    Returns a VPS-shaped {"success", "results", "submitted"} dict, or None if
+    this tier isn't configured/reachable (caller falls through further)."""
+    webapp_url = _gsc_webapp_url()
+    appscript_key = (CONFIG.get("indexing_appscript_key") or "").strip()
+    if not webapp_url or not appscript_key:
+        return None
+    try:
+        r = http_requests.post(webapp_url, json={"action": "submit_indexing", "key": appscript_key, "urls": urls}, timeout=60)
+        r.raise_for_status()
+        data = r.json()
+        if not data.get("success"):
+            return None
+        results = data.get("results") or []
+        return {"success": True, "results": results, "submitted": sum(1 for x in results if x.get("ok"))}
+    except Exception as e:
+        logging.warning(f"Indexing Apps Script fallback failed: {e}")
+        return None
+
 @app.route("/api/indexing/submit", methods=["POST"])
 def api_indexing_submit():
     url, key, user = _indexing_creds()
-    if not url or not key:
-        return jsonify({"error": "Submit for Indexing isn't configured yet - "
-                                  "an admin needs to set the VPS URL/key in Admin Panel."}), 400
     if not user:
         return jsonify({"error": "Not logged in - log in to the app first."}), 400
     data = request.get_json(silent=True) or {}
@@ -5028,18 +5048,28 @@ def api_indexing_submit():
     if not urls:
         return jsonify({"error": "None of the submitted URLs are usable.",
                         "results": skipped, "submitted": 0, "dropped_duplicates": dropped_dupes}), 200
-    try:
-        r = http_requests.post(f"{url}/submit", json={"user": user, "urls": urls},
-                               headers={"X-Api-Key": key}, timeout=60)
-        r.raise_for_status()
-        result = r.json()
-        result["results"] = skipped + (result.get("results") or [])
-        result["dropped_duplicates"] = dropped_dupes
-        activity(f"Submitted {result.get('submitted', 0)}/{len(raw_urls)} URL(s) for indexing "
-                 f"(user: {user}, {len(skipped)} skipped, {dropped_dupes} duplicate(s) dropped)")
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": f"Could not reach the indexing service: {e}"}), 502
+
+    result = None
+    if url and key:
+        try:
+            r = http_requests.post(f"{url}/submit", json={"user": user, "urls": urls},
+                                   headers={"X-Api-Key": key}, timeout=60)
+            r.raise_for_status()
+            result = r.json()
+        except Exception as e:
+            logging.warning(f"Indexing VPS submit failed, trying Apps Script fallback: {e}")
+
+    if result is None:
+        result = _submit_via_appscript(urls)
+
+    if result is None:
+        return jsonify({"error": "Could not reach the indexing service (VPS or Apps Script fallback)."}), 502
+
+    result["results"] = skipped + (result.get("results") or [])
+    result["dropped_duplicates"] = dropped_dupes
+    activity(f"Submitted {result.get('submitted', 0)}/{len(raw_urls)} URL(s) for indexing "
+             f"(user: {user}, {len(skipped)} skipped, {dropped_dupes} duplicate(s) dropped)")
+    return jsonify(result)
 
 @app.route("/api/indexing/fallback-accounts")
 def api_indexing_fallback_accounts():
