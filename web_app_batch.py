@@ -5111,6 +5111,21 @@ def _submit_via_appscript(urls):
         logging.warning(f"Indexing Apps Script fallback failed: {e}")
         return None
 
+def _log_indexing_results(user, tier, results):
+    """Fire-and-forget audit log to the "IndexingLog" sheet tab - one row per
+    URL, across all three tiers (VPS pool, Apps Script fallback, browser
+    fallback), same pattern as the existing CrawlHistory log. Never blocks or
+    fails the actual submit response - runs in a background thread."""
+    def _send():
+        try:
+            webapp_url = _gsc_webapp_url()
+            if not webapp_url or not results:
+                return
+            http_requests.post(webapp_url, json={"action": "log_indexing", "user": user, "tier": tier, "results": results}, timeout=15)
+        except Exception as e:
+            logging.warning(f"Indexing log sync failed (non-fatal): {e}")
+    threading.Thread(target=_send, daemon=True).start()
+
 @app.route("/api/indexing/submit", methods=["POST"])
 def api_indexing_submit():
     url, key, user = _indexing_creds()
@@ -5125,18 +5140,20 @@ def api_indexing_submit():
         return jsonify({"error": "None of the submitted URLs are usable.",
                         "results": skipped, "submitted": 0, "dropped_duplicates": dropped_dupes}), 200
 
-    result = None
+    result, tier = None, None
     if url and key:
         try:
             r = http_requests.post(f"{url}/submit", json={"user": user, "urls": urls},
                                    headers={"X-Api-Key": key}, timeout=60)
             r.raise_for_status()
             result = r.json()
+            tier = "vps"
         except Exception as e:
             logging.warning(f"Indexing VPS submit failed, trying Apps Script fallback: {e}")
 
     if result is None:
         result = _submit_via_appscript(urls)
+        tier = "appscript" if result is not None else None
 
     if result is None:
         return jsonify({"error": "Could not reach the indexing service (VPS or Apps Script fallback)."}), 502
@@ -5145,6 +5162,7 @@ def api_indexing_submit():
     result["dropped_duplicates"] = dropped_dupes
     activity(f"Submitted {result.get('submitted', 0)}/{len(raw_urls)} URL(s) for indexing "
              f"(user: {user}, {len(skipped)} skipped, {dropped_dupes} duplicate(s) dropped)")
+    _log_indexing_results(user, tier, result["results"])
     return jsonify(result)
 
 @app.route("/api/indexing/fallback-accounts")
@@ -5198,6 +5216,10 @@ def api_indexing_fallback_submit():
     submitted = sum(1 for r in results if r["ok"])
     activity(f"GSC Request-Indexing fallback: {submitted}/{len(raw_urls)} submitted via {email} "
              f"({len(skipped)} skipped, {dropped_dupes} duplicate(s) dropped)")
+    # Log against the actual logged-in app user, not the GSC account email
+    # used to submit - that's what "which team member did this" means here.
+    app_user = (auth.check_saved_auth().get("email") or "").strip().lower()
+    _log_indexing_results(app_user or email, "browser", results)
     return jsonify({"results": results, "submitted": submitted, "dropped_duplicates": dropped_dupes})
 
 # --------------------------------------------------------------------------- #
