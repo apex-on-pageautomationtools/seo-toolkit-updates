@@ -1976,19 +1976,21 @@ def audit_site(domain, pages_data, dry_run=False):
 
     # sitemap_found / sitemap_url are set in main() via find_existing_sitemap()
 
-    # www vs non-www (issue if www serves 200 without redirecting to non-www)
+    # www vs non-www / http vs https - issue is whether all 4 variants
+    # actually CONVERGE on one canonical URL, not a guess about which
+    # direction (www or non-www) should be preferred. The old check only
+    # asked "does https://www.{domain}/ serve 200 while staying on www?" -
+    # true for any site where www IS the correct canonical version, which
+    # produced a false positive (and a backwards www->non-www suggestion)
+    # on exactly that kind of site (confirmed live: tdkcorp.com.au, where
+    # every variant correctly redirects to https://www.tdkcorp.com.au/).
     if dry_run:
         f["www_redirect_issue"] = True
         f["url_version_checks"] = []
+        f["preferred_version"] = None
     else:
-        wst, _, wfinal = _http(f"https://www.{d}/")
-        f["www_redirect_issue"] = wst == 200 and "www." in urllib.parse.urlparse(wfinal).netloc
-
-        # Real per-version check (http/https x www/non-www) for the
-        # Redirection Issue Check table - which version was actually
-        # requested and where it really ended up, not just a single
-        # yes/no www flag.
         f["url_version_checks"] = []
+        variants_data = []
         for scheme in ("http", "https"):
             for host_prefix in ("", "www."):
                 variant = f"{scheme}://{host_prefix}{d}/"
@@ -1996,11 +1998,16 @@ def audit_site(domain, pages_data, dry_run=False):
                     vst, _, vfinal = _http(variant)
                 except Exception:
                     vst, vfinal = 0, ""
+                variants_data.append({"status": vst, "final_url": vfinal})
                 f["url_version_checks"].append({
                     "version": variant,
                     "status": vst if vst else "No response",
                     "final_url": vfinal or "-",
                 })
+        reachable_finals = {v["final_url"].rstrip("/") for v in variants_data
+                            if v["status"] == 200 and v["final_url"]}
+        f["www_redirect_issue"] = len(reachable_finals) != 1
+        f["preferred_version"] = next(iter(reachable_finals)) if len(reachable_finals) == 1 else None
 
     # custom 404 (a clearly-missing URL should return 404, not 200/redirect)
     f["has_custom_404"] = (not dry_run) and _http(root + "/sos-404-probe-zzz")[0] == 404
@@ -2184,6 +2191,44 @@ def _render_external_links_image(domain, detail, path):
     img.save(str(path))
 
 
+def _render_redirect_check_image(domain, url_version_checks, path):
+    """Render the real per-variant redirect check (http/https x www/non-www -
+    which URL each one actually resolves to) as a clean image, matching a
+    real redirect-checker tool's table layout (Request URL / Status codes /
+    Final destination) - instead of a plain screenshot of the homepage,
+    which showed nothing about the actual redirect chain."""
+    from PIL import Image, ImageDraw, ImageFont
+    rows = url_version_checks or []
+    W = 1180
+    H = 130 + (len(rows) + 1) * 34 + 30
+    img = Image.new("RGB", (W, max(H, 190)), "#FFFFFF")
+    d = ImageDraw.Draw(img)
+    try:
+        bold = ImageFont.truetype("C:/Windows/Fonts/arialbd.ttf", 26)
+        f = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 18)
+        fs = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 15)
+    except Exception:
+        bold = f = fs = ImageFont.load_default()
+    d.text((26, 24), f"URL Redirection Check — {domain}", fill=(31, 41, 55), font=bold)
+    if not rows:
+        d.text((26, 74), "Could not check URL versions.", fill=(200, 30, 30), font=f)
+    else:
+        y = 74
+        d.text((26, y), "Request URL", fill=(120, 120, 120), font=fs)
+        d.text((int(W * 0.55), y), "Status Code", fill=(120, 120, 120), font=fs)
+        d.text((int(W * 0.72), y), "Final Destination", fill=(120, 120, 120), font=fs)
+        y += 34
+        for row in rows:
+            status = row.get("status")
+            ok = status == 200
+            color = (22, 128, 67) if ok else (40, 40, 40)
+            d.text((26, y), str(row.get("version", ""))[:60], fill=(40, 40, 40), font=fs)
+            d.text((int(W * 0.55), y), str(status), fill=color, font=fs)
+            d.text((int(W * 0.72), y), str(row.get("final_url", ""))[:60], fill=(40, 40, 40), font=fs)
+            y += 34
+    img.save(str(path))
+
+
 def _latest_wayback_snapshot_url(domain):
     """Resolve the actual latest-archived snapshot URL via the Wayback Availability
     API, instead of a hardcoded guessed timestamp ("web/2/..." resolves to the
@@ -2320,7 +2365,7 @@ def check_site_indexing(domain, target_pages, out, path_fn, log_fn=None, already
 
 
 def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=None,
-                               target_pages=None, gsc_indexing=None):
+                               target_pages=None, gsc_indexing=None, url_version_checks=None):
     """Live, HEADLESS screenshots for the report - all public pages/tools, so no
     Google login is needed. Captured with selenium + Chrome via CDP: the embedded
     python ships selenium but NOT patchright/playwright, so the old patchright
@@ -2507,11 +2552,17 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
         log("   [warn] wayback: no archived snapshot found for this domain, skipping screenshot")
     _shot("viewport",  root + "/", height=900)
     _shot("sucuri",    f"https://sitecheck.sucuri.net/results/https/{domain}", sucuri=True)
-    # Same URL the www_redirect_issue / has_custom_404 findings themselves check
-    # (audit_site()) - the alt www/non-www version, and a deliberately-nonexistent
-    # path - so the report can actually SHOW what was checked, not just claim it.
-    _alt_host = domain[4:] if domain.startswith("www.") else f"www.{domain}"
-    _shot("redirect",  f"https://{_alt_host}/", height=900)
+    # A plain screenshot of the alt www/non-www homepage showed nothing about
+    # the actual redirect chain - render the real per-variant check (the same
+    # data audit_site() already computed for the report's table) as a table
+    # image instead, so the screenshot actually shows what was checked.
+    if url_version_checks:
+        try:
+            _render_redirect_check_image(domain, url_version_checks, path("redirect"))
+            out["redirect"] = path("redirect")
+            log("   -> captured [redirect]")
+        except Exception as e:
+            log(f"   [warn] redirect check image failed: {type(e).__name__}: {e}")
     _shot("the404",    root + "/sos-404-probe-zzz", height=900)
 
     # Broken-links image - reuse health_audit's pure (non-patchright) helpers.
@@ -2936,6 +2987,11 @@ def _sec_additional_notes(h, findings, captured, year):
 
 def _sec_alt_tags(h, findings):
     h["ribbon"]("Image ALT Optimization (Main Pages)")
+    h["para"]("ALT text is a short description added to an image's HTML tag. Search engines can't "
+              "\"see\" an image directly, so ALT text tells them what the image shows - it also "
+              "displays in place of the image if it fails to load, and is read aloud by screen "
+              "readers for visually impaired visitors. Missing ALT text is a missed opportunity for "
+              "image search visibility and accessibility.")
     if findings.get("alt_missing", 0) > 0:
         h["result"](f"Result: {findings['alt_missing']} image(s) without Alt tags found on the target pages "
                     f"checked. It is not good from an SEO point of view. Kindly find the attached Image Alt "
@@ -3055,11 +3111,23 @@ def _sec_sitemap(h, findings, captured):
 
 def _sec_redirection(h, findings, captured):
     h["ribbon"]("URL Redirection Issue Optimization")
+    h["para"]("A website can often be reached through more than one URL - with or without \"www\", "
+              "over HTTP or HTTPS, with or without a trailing slash. Without a proper redirect, "
+              "search engines can treat these as separate, duplicate versions of the same site, "
+              "splitting ranking signals between them instead of consolidating authority onto one "
+              "preferred version. A 301 permanent redirect fixes this by sending all variants to a "
+              "single canonical URL.")
     if findings.get("www_redirect_issue"):
-        h["result"]("Redirection: The website runs with both www and non-www versions. We suggest redirecting "
-                    "the www version to the non-www version using a 301 permanent redirect.")
+        h["result"]("Redirection: The website is reachable at more than one URL version (www/non-www, "
+                    "HTTP/HTTPS) without all of them redirecting to a single canonical URL. We suggest "
+                    "301-redirecting every variant to one preferred version - see the table below for "
+                    "which versions currently diverge.")
     else:
-        h["result"]("No redirection issue found on the website. It is good from a search engine point of view.")
+        preferred = findings.get("preferred_version")
+        msg = "No redirection issue found on the website - every version (www/non-www, HTTP/HTTPS) " \
+              "correctly redirects to a single canonical URL"
+        h["result"](f"{msg} ({preferred}). It is good from a search engine point of view."
+                    if preferred else f"{msg}. It is good from a search engine point of view.")
     url_checks = findings.get("url_version_checks") or []
     if url_checks:
         h["simple_table"](("URL Version Checked", "Status Code", "Final Destination"),
@@ -3068,6 +3136,11 @@ def _sec_redirection(h, findings, captured):
 
 def _sec_404(h, findings, root, captured):
     h["ribbon"]("Custom 404 Page Optimization")
+    h["para"]("A custom 404 page is shown when a visitor requests a page that doesn't exist on the "
+              "site (a mistyped URL, a deleted page, an outdated link, etc.). A well-designed 404 "
+              "page keeps the visitor engaged - with navigation, a search box, or links back to "
+              "popular pages - instead of leaving them stuck, and correctly returns a 404 HTTP status "
+              "so search engines don't mistake the missing page for real, indexable content.")
     if not findings.get("has_custom_404"):
         h["label_body"]("404 Custom Page Suggestion:")
         h["para"](f"We did not find a custom 404 page. Opening a mistyped URL such as {root}/asdfg redirects "
@@ -3093,6 +3166,10 @@ def _sec_canonical(h, findings, captured):
 
 def _sec_external_links(h, findings, captured):
     h["ribbon"]("External Link Optimization")
+    h["para"]("External links are hyperlinks that point from a page on this website to a different "
+              "domain. Linking to relevant, reputable sources can add credibility and value for "
+              "readers, but linking to low-quality, unrelated, or harmful sites can hurt a site's "
+              "trust with search engines - so every external link is worth reviewing periodically.")
     detail = findings.get("external_links_detail") or []
     h["result"](f"{findings.get('ext_count', len(detail))} external links found on the target pages checked.")
     if detail:
@@ -3119,20 +3196,28 @@ def _sec_broken_links(h, findings, captured):
     else:
         h["result"](f"Result: No broken links found on the {tp_count} target page(s) checked. "
                     "It is good from an SEO point of view.")
-    h["para_red"]("Note: Only external links on the target pages were checked. Please verify broken "
-                  "links across the full website using Screaming Frog, Ahrefs, or Google Search Console.")
+    h["para_red"](f"Note: Every link (internal and external) found on the {tp_count} target page(s) "
+                  "was checked - a link is only reported as broken if it actually returned a 404 "
+                  "(Not Found) or 410 (Gone) status. Please verify links across the full website "
+                  "using Screaming Frog, Ahrefs, or Google Search Console.")
     h["shot"]("brokenlinks", captured)
 
 def _sec_internal_linking(h, home):
     h["ribbon"]("Internal Linking Optimization")
-    h["result"]("Internal Linking: Internal linking is called perfect when every live webpage is "
-                "accessed/visited from every other live and available webpage in a website.")
+    h["para"]("Internal links connect one page of a website to another page on the same site. Good "
+              "internal linking is considered ideal when every live page can be reached from at "
+              "least one other live page - it helps search engines discover and crawl every page, "
+              "and spreads ranking authority across the site.")
     int_count = len(home.get("internal_links", []))
     h["result"](f"Result: {int_count} internal links found on the target pages checked.")
     h["para_red"]("Please verify the internal linking structure across the full website as per need.")
 
 def _sec_page_speed(h, root):
     h["ribbon"]("Page Speed Optimization")
+    h["para"]("Page speed is how quickly a webpage's content loads and becomes usable. It's a "
+              "direct Google ranking factor, and it strongly affects user experience - slow-loading "
+              "pages see higher bounce rates, since visitors are likely to leave before the page "
+              "finishes loading.")
     h["label_body"]("Page Optimization Score:")
     h["para_red"](f"Need to check it once. Check manually at: "
                   f"https://pagespeed.web.dev/analysis?url={root}/")
@@ -3140,6 +3225,10 @@ def _sec_page_speed(h, root):
 def _sec_url_structure(h, findings):
     root = h["root"]
     h["ribbon"]("URL Structure Optimization")
+    h["para"]("A clean, descriptive, static URL (e.g. /perfume-shop/dior-dune) tells both users and "
+              "search engines what a page is about at a glance, and is easier to remember and share "
+              "than a long, dynamic URL full of parameters or session IDs. Search engines generally "
+              "favor static, keyword-relevant URL structures over dynamic ones.")
     h["green"]("Recommendations: Search Engines like static URLs instead of dynamic one. And presently "
                "URL structure of your website's inner pages is user and search engine friendly.")
     if findings.get("url_changes"):
@@ -3155,6 +3244,9 @@ def _sec_url_structure(h, findings):
 
 def _sec_hyperlinking(h):
     h["ribbon"]("Hyperlinking Optimization")
+    h["para"]("Hyperlinking is how a website's pages connect to each other and to outside resources. "
+              "Effective internal hyperlinking spreads page authority throughout the site and helps "
+              "both visitors and search engine crawlers discover and navigate between related pages.")
     h["green"]("Recommendations: Hyperlinks are connections established between a word/phrase/image and a "
                "website/file. Effective hyper-linking between different pages of a website helps a website "
                "to rank better.")
@@ -8033,7 +8125,8 @@ def main():
                 domain, sitemap_url=sitemap_url,
                 external_links_detail=findings.get("external_links_detail"),
                 target_pages=findings["target_pages"],
-                gsc_indexing=findings.get("gsc_indexing"))
+                gsc_indexing=findings.get("gsc_indexing"),
+                url_version_checks=findings.get("url_version_checks"))
             findings["site_indexing"] = captured.get("_site_indexing", [])
         except Exception as e:
             log(f"   [warn] screenshot capture skipped: {type(e).__name__}: {e}")
