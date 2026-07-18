@@ -3613,8 +3613,14 @@ async function idxSubmit(){
       return;
     }
     _idxLastLeftover=(d.results||[]).filter(x=>!x.ok && (x.message==='user_daily_cap_reached'||x.message==='pool_exhausted')).map(x=>x.url);
-    let rows=(d.results||[]).map(x=>'<tr><td style="font-size:11px;padding:3px 6px;word-break:break-all">'+esc(x.url)+'</td>'
-      +'<td style="font-size:11px;padding:3px 6px;color:'+(x.ok?'var(--ok)':'var(--err,#c00)')+'">'+(x.ok?'Submitted':esc(x.message))+'</td></tr>').join('');
+    let rows=(d.results||[]).map(x=>{
+      const noOwner=!x.ok && x.message==='no_owner_access';
+      const statusHtml=x.ok?'Submitted':(noOwner
+        ? 'No Owner access to this domain - <a href="#" onclick="switchTab(\'gsc\');return false;" style="color:inherit;text-decoration:underline">connect it in GSC Audit</a> to submit automatically'
+        : esc(x.message));
+      return '<tr><td style="font-size:11px;padding:3px 6px;word-break:break-all">'+esc(x.url)+'</td>'
+        +'<td style="font-size:11px;padding:3px 6px;color:'+(x.ok?'var(--ok)':'var(--err,#c00)')+'">'+statusHtml+'</td></tr>';
+    }).join('');
     box.innerHTML='<div class="note" style="margin-bottom:6px">Submitted '+(d.submitted||0)+'/'+urls.length
       +(d.dropped_duplicates?' ('+d.dropped_duplicates+' duplicate(s) removed)':'')+'</div>'
       +'<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table>';
