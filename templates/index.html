@@ -3605,7 +3605,11 @@ async function idxSubmit(){
       +(d.dropped_duplicates?' ('+d.dropped_duplicates+' duplicate(s) removed)':'')+'</div>'
       +'<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table>';
     $('idx-fallback-wrap').classList.toggle('hidden', _idxLastLeftover.length===0);
-  }catch(e){box.innerHTML='<div class="note" style="color:var(--err,#c00)">Could not reach the indexing service.</div>';}
+  }catch(e){
+    box.innerHTML='<div class="note" style="color:var(--err,#c00)">Could not reach the indexing service - use the fallback below to submit via GSC directly.</div>';
+    _idxLastLeftover=urls;
+    $('idx-fallback-wrap').classList.remove('hidden');
+  }
 }
 async function idxLoadFallbackAccounts(){
   const sel=$('idx-fb-account');
