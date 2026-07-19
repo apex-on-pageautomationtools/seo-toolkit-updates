@@ -5465,9 +5465,28 @@ def api_admin_save_building():
         building=(data.get("building") or "").strip(),
         building_sheet_id=(data.get("building_sheet_id") or "").strip(),
         gsc_script_url=(data.get("gsc_script_url") or "").strip(),
+        allowed_ips=(data.get("allowed_ips") or "").strip(),
     )
     if result.get("success"):
         activity(f"Admin saved building: {data.get('building')}")
+    return jsonify(result)
+
+@app.route("/api/admin/office_ips")
+def api_admin_office_ips():
+    """Read the allowed office IPs for the logged-in admin's building (a superadmin
+    may pass ?building= to target any). A login from one of these IPs skips the
+    device-ID check for that building (the account must still be Approved)."""
+    return jsonify(_admin_call("building_ips_get",
+                               building=(request.args.get("building") or "").strip()))
+
+@app.route("/api/admin/save_office_ips", methods=["POST"])
+def api_admin_save_office_ips():
+    data = request.get_json(silent=True) or {}
+    result = _admin_call("building_ips_set",
+                         allowed_ips=(data.get("allowed_ips") or "").strip(),
+                         building=(data.get("building") or "").strip())
+    if result.get("success"):
+        activity(f"Admin saved office IPs for building: {result.get('building', '')}")
     return jsonify(result)
 
 @app.route("/api/admin/bulk_add_users", methods=["POST"])
