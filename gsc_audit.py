@@ -511,13 +511,14 @@ def capture_gsc_with_session(session_id, property_url, email, out_dir,
 # Submit for Indexing - browser-based fallback for once a user's shared-pool
 # daily cap (see the VPS indexing_service) is used up. Google's real Search
 # Console UI has its own unofficial ~10-15/day "Request Indexing" limit per
-# property, tracked here per GSC account and reset daily. Uses the exact
-# same GSC Browser Session mechanism as Manual Actions/Security Issues
-# capture above - a real, visible, Selenium-launched browser where the user
-# does their own Google login; no automation of Google's login/credential
-# entry, only navigating pages after the human is already signed in.
+# property, so this is tracked here PER DOMAIN (matching how Google actually
+# throttles it) and reset daily. Uses the exact same GSC Browser Session
+# mechanism as Manual Actions/Security Issues capture above - a real, visible,
+# Selenium-launched browser where the user does their own Google login; no
+# automation of Google's login/credential entry, only navigating pages after
+# the human is already signed in.
 # ---------------------------------------------------------------------------
-FALLBACK_DAILY_CAP_PER_ACCOUNT = 10
+FALLBACK_DAILY_CAP_PER_DOMAIN = 10
 
 
 def _indexing_fallback_state_path():
@@ -545,17 +546,19 @@ def _save_indexing_fallback_state(state):
         json.dump(state, f, indent=2)
 
 
-def indexing_fallback_remaining(email):
-    """How many more Request-Indexing clicks this GSC account has left today."""
+def indexing_fallback_remaining(domain):
+    """How many more Request-Indexing clicks this DOMAIN has left today
+    (Google throttles the URL Inspection 'Request Indexing' per property)."""
     state = _load_indexing_fallback_state()
-    used = state["accounts"].get(email.lower(), 0)
-    return max(0, FALLBACK_DAILY_CAP_PER_ACCOUNT - used)
+    used = state.get("accounts", {}).get((domain or "").lower(), 0)
+    return max(0, FALLBACK_DAILY_CAP_PER_DOMAIN - used)
 
 
-def _record_indexing_fallback_use(email, n=1):
+def _record_indexing_fallback_use(domain, n=1):
     state = _load_indexing_fallback_state()
-    key = email.lower()
-    state["accounts"][key] = state["accounts"].get(key, 0) + n
+    key = (domain or "").lower()
+    accounts = state.setdefault("accounts", {})
+    accounts[key] = accounts.get(key, 0) + n
     _save_indexing_fallback_state(state)
 
 
@@ -570,20 +573,23 @@ _INDEXING_SUCCESS_MARKERS = (
 
 
 def request_indexing_via_session(session_id, property_url, email, urls,
-                                  browser_pref="edge", log_fn=None):
+                                  domain=None, browser_pref="edge", log_fn=None):
     """Click "Request Indexing" in the real GSC URL Inspection UI for each
     URL, via an already-logged-in GSC Browser Session. Stops early (without
-    burning the rest of the day's clicks) if either this account's own
+    burning the rest of the day's clicks) if either this domain's own
     local 10/day tracker or Google's own quota message is hit. Returns a
     list of {"url", "ok", "message"} dicts, one per URL passed in (URLs
     beyond whichever cap is hit first are marked, not silently dropped)."""
     if log_fn is None:
         log_fn = print
+    # Cap is per DOMAIN (how Google throttles it); fall back to the account
+    # email as the key only if no domain was supplied, to stay backward safe.
+    track_key = (domain or email or "")
     results = []
-    remaining = indexing_fallback_remaining(email)
+    remaining = indexing_fallback_remaining(track_key)
     if remaining <= 0:
-        log_fn(f"  {email}: today's Request Indexing allowance (10/day) is already used.")
-        return [{"url": u, "ok": False, "message": "account_daily_cap_reached"} for u in urls]
+        log_fn(f"  {domain or email}: today's Request Indexing allowance (10/day per domain) is already used.")
+        return [{"url": u, "ok": False, "message": "domain_daily_cap_reached"} for u in urls]
 
     to_attempt = urls[:remaining]
     skipped = urls[remaining:]
@@ -635,7 +641,7 @@ def request_indexing_via_session(session_id, property_url, email, urls,
                     results.append({"url": url, "ok": False, "message": "request_indexing_button_not_found"})
                     continue
                 btn.click()
-                _record_indexing_fallback_use(email)
+                _record_indexing_fallback_use(track_key)
                 time.sleep(5)
                 confirm_text = driver.find_element(By.TAG_NAME, "body").text.lower()
                 if any(m in confirm_text for m in _INDEXING_QUOTA_MARKERS):

@@ -235,7 +235,7 @@ DEFAULT_CONFIG = {
     "use_buster": True,
     "manual_fallback": True,
     "max_block_retries": 3,
-    "min_keyword_delay": 2,
+    "min_keyword_delay": 5,
     "default_country": "us",
     "default_pages": 5,
 }
@@ -1810,7 +1810,10 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
                     # Quick neutral visit in a background tab (opens, loads, closes ~2s)
                     human_visit_neutral_bg(sess.driver, domain, add_log)
                     elapsed = time.time() - t0
-                    wait = max(0, max(CONFIG.get("min_keyword_delay", 2), delay) + random.uniform(0.5, 1.5) - elapsed)
+                    # Hard 5s floor so the gap holds even on installs whose saved
+                    # config.json still carries an older (lower) min_keyword_delay;
+                    # a higher admin-configured value or UI delay still wins.
+                    wait = max(0, max(CONFIG.get("min_keyword_delay", 5), delay, 5) + random.uniform(0.5, 2.5) - elapsed)
                     if wait > 0:
                         add_log(f"Waiting {wait:.0f}s before next keyword...")
                         t = 0
@@ -5217,8 +5220,9 @@ def api_indexing_submit():
 
 @app.route("/api/indexing/fallback-accounts")
 def api_indexing_fallback_accounts():
-    """Connected GSC accounts that also have a browser session, with today's
-    remaining Request-Indexing allowance (~10/day/account, tracked locally)."""
+    """Connected GSC accounts that also have a browser session. If a ?domain=
+    is supplied, also returns that domain's remaining Request-Indexing
+    allowance for today (~10/day PER DOMAIN, tracked locally)."""
     try:
         accounts = [a for a in gsc_audit.list_accounts() if a.get("has_refresh")]
         sessions = gsc_audit.list_sessions()
@@ -5228,11 +5232,13 @@ def api_indexing_fallback_accounts():
             sess = next((s for s in sessions if email.lower() in [x.lower() for x in s.get("accounts", [])]), None)
             if not sess:
                 continue
-            out.append({
-                "email": email, "session_id": sess["id"],
-                "remaining_today": gsc_audit.indexing_fallback_remaining(email),
-            })
-        return jsonify({"accounts": out})
+            out.append({"email": email, "session_id": sess["id"]})
+        resp = {"accounts": out}
+        domain = to_domain(request.args.get("domain") or "")
+        if domain:
+            resp["domain"] = domain
+            resp["domain_remaining"] = gsc_audit.indexing_fallback_remaining(domain)
+        return jsonify(resp)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -5263,7 +5269,7 @@ def api_indexing_fallback_submit():
         activity(f"[indexing fallback] {msg}")
 
     results = gsc_audit.request_indexing_via_session(
-        session_id, property_url, email, urls, log_fn=_log)
+        session_id, property_url, email, urls, domain=domain, log_fn=_log)
     results = skipped + results
     submitted = sum(1 for r in results if r["ok"])
     activity(f"GSC Request-Indexing fallback: {submitted}/{len(raw_urls)} submitted via {email} "

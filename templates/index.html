@@ -1294,7 +1294,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         Submit for Indexing <span class="testing-badge">(testing)</span>
       </div>
-      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Submits URLs to Google's Indexing API via a shared pool of service-account keys hosted on our VPS (not this machine). If today's shared allowance is used up, a second option below lets you continue through the real Search Console "Request Indexing" button (~10/day per connected GSC account) using a GSC Browser Session.</p>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Submits URLs to Google's Indexing API via a shared pool of service-account keys hosted on our VPS (not this machine). If today's shared allowance is used up, a second option below lets you continue through the real Search Console "Request Indexing" button (~10/day per domain) using a GSC Browser Session.</p>
       <div class="field">
         <label>URLs to submit <span class="hint">(one per line, max 10 per submit - duplicates removed automatically, each checked for a real 200 OK before it counts against quota)</span></label>
         <textarea id="idx-urls" rows="8" placeholder="https://example.com/page-1
@@ -1310,7 +1310,8 @@ https://example.com/page-2"></textarea>
         <p style="color:var(--text-3);font-size:12px;margin:0 0 10px;line-height:1.4">For the URLs above that didn't get submitted because your daily pool cap was reached. Uses a GSC Browser Session (GSC Audit tab) - pick which connected account/domain to use below.</p>
         <div class="field">
           <label>Domain <span class="hint">(must match a property the chosen account has access to)</span></label>
-          <input type="text" id="idx-fb-domain" placeholder="example.com" autocomplete="off">
+          <input type="text" id="idx-fb-domain" placeholder="example.com" autocomplete="off" oninput="idxFbDomainChanged()">
+          <div id="idx-fb-remaining" class="hint" style="margin:4px 0 0"></div>
         </div>
         <div class="field">
           <label>GSC account (with a Browser Session)</label>
@@ -3690,14 +3691,22 @@ async function idxSubmit(){
     btn.disabled=false;
   }
 }
-async function idxLoadFallbackAccounts(){
+let _idxFbDomTimer=null;
+function idxFbDomainChanged(){
+  clearTimeout(_idxFbDomTimer);
+  _idxFbDomTimer=setTimeout(()=>idxLoadFallbackAccounts($('idx-fb-domain').value.trim()),400);
+}
+async function idxLoadFallbackAccounts(domain){
   const sel=$('idx-fb-account');
   try{
-    const r=await fetch('/api/indexing/fallback-accounts');
+    const q=domain?('?domain='+encodeURIComponent(domain)):'';
+    const r=await fetch('/api/indexing/fallback-accounts'+q);
     const d=await r.json();
     const accs=d.accounts||[];
-    if(!accs.length){sel.innerHTML='<option value="">No GSC Browser Session found - create one in GSC Audit tab</option>';return;}
-    sel.innerHTML=accs.map(a=>'<option value="'+esc(a.email)+'|'+esc(a.session_id)+'">'+esc(a.email)+' ('+a.remaining_today+'/10 left today)</option>').join('');
+    if(!accs.length){sel.innerHTML='<option value="">No GSC Browser Session found - create one in GSC Audit tab</option>';}
+    else{sel.innerHTML=accs.map(a=>'<option value="'+esc(a.email)+'|'+esc(a.session_id)+'">'+esc(a.email)+'</option>').join('');}
+    const note=$('idx-fb-remaining');
+    if(note){note.textContent=(d.domain_remaining!==undefined)?(d.domain_remaining+'/10 Request-Indexing submissions left today for '+d.domain):'';}
   }catch(e){sel.innerHTML='<option value="">Could not load accounts</option>';}
 }
 async function idxFallbackSubmit(){
@@ -3718,7 +3727,7 @@ async function idxFallbackSubmit(){
       +'<td style="font-size:11px;padding:3px 6px;color:'+(x.ok?'var(--ok)':'var(--err,#c00)')+'">'+(x.ok?'Submitted':esc(x.message))+'</td></tr>').join('');
     box.innerHTML='<div class="note" style="margin-bottom:6px">Submitted '+d.submitted+'/'+urls.length+' via '+esc(email)+'.</div>'
       +'<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table>';
-    idxLoadFallbackAccounts();
+    idxLoadFallbackAccounts($('idx-fb-domain').value.trim());
   }catch(e){box.innerHTML='<div class="note" style="color:var(--err,#c00)">Fallback submission failed.</div>';}
 }
 
