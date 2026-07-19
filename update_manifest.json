@@ -1,5 +1,5 @@
 {
-  "version": "4.1",
+  "version": "4.2",
   "files": [
     {
       "path": "da_checker.py",
@@ -8,7 +8,7 @@
     },
     {
       "path": "auth.py",
-      "hash": "0e5af53e96c7d77c94ceb0c9146ebc310f53dad95f02f5144f785ef50b2baeaa",
+      "hash": "b75ee0b09044f98a71848a485e3837f38e41ea7e23e05ecda4b5b920b77ca2c5",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/auth.py"
     },
     {
