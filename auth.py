@@ -169,6 +169,32 @@ def _get_public_ip(timeout=6):
     return ip
 
 
+_LOCAL_IP_CACHE = None
+
+
+def _get_local_ip():
+    """This machine's primary LAN IP (e.g. 192.168.11.5), sent alongside the public
+    IP so an admin can allowlist a local subnet prefix (e.g. 192.168.11) as a
+    convenience match. Note: local subnets are NOT unique across networks, so this
+    is weak - a public-IP match is the stronger control. Returns '' on failure."""
+    global _LOCAL_IP_CACHE
+    if _LOCAL_IP_CACHE is not None:
+        return _LOCAL_IP_CACHE
+    ip = ""
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))   # no packets sent; just picks the outbound iface
+            ip = s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        ip = ""
+    _LOCAL_IP_CACHE = ip
+    return ip
+
+
 def check_version():
     """Check if this app version is allowed."""
     if not _get_api_url():
@@ -188,6 +214,7 @@ def login(email, password):
         "mac": mac,
         "version": APP_VERSION,
         "client_ip": _get_public_ip(),
+        "client_local_ip": _get_local_ip(),
     })
     if result.get("status") == "approved":
         _save_account(email, password, mac, is_admin=result.get("is_admin", False),
