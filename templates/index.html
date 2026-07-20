@@ -1294,7 +1294,7 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
         Submit for Indexing <span class="testing-badge">(testing)</span>
       </div>
-      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Submits URLs to Google's Indexing API via a shared pool of service-account keys hosted on our VPS (not this machine). If today's shared allowance is used up, a second option below lets you continue through the real Search Console "Request Indexing" button (~10/day per connected GSC account) using a GSC Browser Session.</p>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Submits URLs to Google's Indexing API via a shared pool of service-account keys hosted on our VPS (not this machine). If today's shared allowance is used up, a second option below lets you continue through the real Search Console "Request Indexing" button (~10/day per domain) using a GSC Browser Session.</p>
       <div class="field">
         <label>URLs to submit <span class="hint">(one per line, max 10 per submit - duplicates removed automatically, each checked for a real 200 OK before it counts against quota)</span></label>
         <textarea id="idx-urls" rows="8" placeholder="https://example.com/page-1
@@ -1310,7 +1310,8 @@ https://example.com/page-2"></textarea>
         <p style="color:var(--text-3);font-size:12px;margin:0 0 10px;line-height:1.4">For the URLs above that didn't get submitted because your daily pool cap was reached. Uses a GSC Browser Session (GSC Audit tab) - pick which connected account/domain to use below.</p>
         <div class="field">
           <label>Domain <span class="hint">(must match a property the chosen account has access to)</span></label>
-          <input type="text" id="idx-fb-domain" placeholder="example.com" autocomplete="off">
+          <input type="text" id="idx-fb-domain" placeholder="example.com" autocomplete="off" oninput="idxFbDomainChanged()">
+          <div id="idx-fb-remaining" class="hint" style="margin:4px 0 0"></div>
         </div>
         <div class="field">
           <label>GSC account (with a Browser Session)</label>
@@ -1787,6 +1788,15 @@ https://example.com/page-2"></textarea>
           <div id="adm-buildings-list" style="font-size:13px">Loading buildings...</div>
         </div>
 
+        <!-- Office IPs (building admin - their own building only) -->
+        <div class="card" style="margin-bottom:16px;display:none" id="adm-officeips-card">
+          <div class="card-t" style="margin-bottom:12px">Office IPs <span id="adm-oip-building" style="color:var(--text-3);font-weight:400"></span></div>
+          <p class="note" style="margin:-4px 0 10px">A login from one of these IPs skips the device-ID approval for your building (the account must still be Approved). Comma-separated. Public office IP = secure (open <b>api.ipify.org</b> on an office PC); local subnet like 192.168.11 = convenience only, weaker. Blank = normal device approval.</p>
+          <input type="text" id="adm-oip-ips" placeholder="203.0.113.5, 192.168.11" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+          <div style="display:flex;gap:8px;margin-top:10px"><button class="btn btn-primary" id="adm-oip-save" onclick="admSaveOfficeIps()">Save IPs</button></div>
+          <div id="adm-oip-msg" class="note" style="margin-top:8px"></div>
+        </div>
+
         <!-- Bulk Add Owner (superadmin only) - adds a new user (e.g. an
              Indexing API pool service account) as Owner across every domain
              an existing agency account already owns. Separate from the
@@ -2121,6 +2131,8 @@ https://example.com/page-2"></textarea>
       <input type="text" id="bm-sheet-id" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
     <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">GSC script URL <span style="font-weight:400;color:var(--text-3)">(that building's GSC /exec URL)</span></label>
       <input type="text" id="bm-gsc-url" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
+    <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Allowed office IPs <span style="font-weight:400;color:var(--text-3)">(comma-separated; a login from one skips device-ID approval, approval still required. Public IP = secure (api.ipify.org); local subnet e.g. 192.168.11 = convenience only)</span></label>
+      <input type="text" id="bm-ips" autocomplete="off" placeholder="203.0.113.5, 192.168.11" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
   </div>
   <div class="sheet-foot">
     <button class="btn btn-tonal" style="flex:1" onclick="admCloseBuildingModal()">Cancel</button>
@@ -3690,14 +3702,22 @@ async function idxSubmit(){
     btn.disabled=false;
   }
 }
-async function idxLoadFallbackAccounts(){
+let _idxFbDomTimer=null;
+function idxFbDomainChanged(){
+  clearTimeout(_idxFbDomTimer);
+  _idxFbDomTimer=setTimeout(()=>idxLoadFallbackAccounts($('idx-fb-domain').value.trim()),400);
+}
+async function idxLoadFallbackAccounts(domain){
   const sel=$('idx-fb-account');
   try{
-    const r=await fetch('/api/indexing/fallback-accounts');
+    const q=domain?('?domain='+encodeURIComponent(domain)):'';
+    const r=await fetch('/api/indexing/fallback-accounts'+q);
     const d=await r.json();
     const accs=d.accounts||[];
-    if(!accs.length){sel.innerHTML='<option value="">No GSC Browser Session found - create one in GSC Audit tab</option>';return;}
-    sel.innerHTML=accs.map(a=>'<option value="'+esc(a.email)+'|'+esc(a.session_id)+'">'+esc(a.email)+' ('+a.remaining_today+'/10 left today)</option>').join('');
+    if(!accs.length){sel.innerHTML='<option value="">No GSC Browser Session found - create one in GSC Audit tab</option>';}
+    else{sel.innerHTML=accs.map(a=>'<option value="'+esc(a.email)+'|'+esc(a.session_id)+'">'+esc(a.email)+'</option>').join('');}
+    const note=$('idx-fb-remaining');
+    if(note){note.textContent=(d.domain_remaining!==undefined)?(d.domain_remaining+'/10 Request-Indexing submissions left today for '+d.domain):'';}
   }catch(e){sel.innerHTML='<option value="">Could not load accounts</option>';}
 }
 async function idxFallbackSubmit(){
@@ -3718,7 +3738,7 @@ async function idxFallbackSubmit(){
       +'<td style="font-size:11px;padding:3px 6px;color:'+(x.ok?'var(--ok)':'var(--err,#c00)')+'">'+(x.ok?'Submitted':esc(x.message))+'</td></tr>').join('');
     box.innerHTML='<div class="note" style="margin-bottom:6px">Submitted '+d.submitted+'/'+urls.length+' via '+esc(email)+'.</div>'
       +'<table style="width:100%;border-collapse:collapse"><tbody>'+rows+'</tbody></table>';
-    idxLoadFallbackAccounts();
+    idxLoadFallbackAccounts($('idx-fb-domain').value.trim());
   }catch(e){box.innerHTML='<div class="note" style="color:var(--err,#c00)">Fallback submission failed.</div>';}
 }
 
@@ -4259,6 +4279,10 @@ async function admCheckAdmin(){
       MY_ADMIN_ROLE=r.role||'admin';MY_ADMIN_BUILDING=r.building||'';
       $('adm-buildings-card').style.display=admIsSuper()?'':'none';
       $('adm-bulkowner-card').style.display=admIsSuper()?'':'none';
+      // Building admins (not super) get a self-service Office IPs card for their
+      // own building. Super admin sets IPs per building in the building modal.
+      $('adm-officeips-card').style.display=(MY_ADMIN_ROLE==='admin')?'':'none';
+      if(MY_ADMIN_ROLE==='admin')admLoadOfficeIps();
     }
   }catch(e){}
 }
@@ -4408,8 +4432,8 @@ async function admLoadBuildings(){
     if(r.error){$('adm-buildings-list').textContent=r.error;return;}
     ADM_BUILDINGS=r.buildings||[];
     if(!ADM_BUILDINGS.length){$('adm-buildings-list').textContent='No buildings configured yet.';return;}
-    $('adm-buildings-list').innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Building</th><th style="padding:6px">Sheet ID</th><th style="padding:6px">GSC Script URL</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
-      ADM_BUILDINGS.map(b=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px;white-space:nowrap">'+esc(b.building)+'</td><td style="padding:6px;font-family:monospace;font-size:11px;white-space:nowrap">'+esc((b.building_sheet_id||'').slice(0,18))+'...</td><td style="padding:6px;font-family:monospace;font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(b.gsc_script_url||'')+'</td>'+
+    $('adm-buildings-list').innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Building</th><th style="padding:6px">Sheet ID</th><th style="padding:6px">GSC Script URL</th><th style="padding:6px">Office IPs</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
+      ADM_BUILDINGS.map(b=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px;white-space:nowrap">'+esc(b.building)+'</td><td style="padding:6px;font-family:monospace;font-size:11px;white-space:nowrap">'+esc((b.building_sheet_id||'').slice(0,18))+'...</td><td style="padding:6px;font-family:monospace;font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(b.gsc_script_url||'')+'</td><td style="padding:6px;font-size:11px">'+esc(b.allowed_ips||'')+'</td>'+
         '<td style="padding:6px;white-space:nowrap"><button class="btn btn-tonal" style="font-size:10px;padding:2px 8px" onclick="admOpenBuildingModal(\''+esc(b.building)+'\')">Edit</button></td></tr>').join('')+'</tbody></table></div>';
   }catch(e){$('adm-buildings-list').textContent='Failed to load buildings.';}
 }
@@ -4420,6 +4444,7 @@ function admOpenBuildingModal(name){
   $('bm-name').readOnly=!!existing;
   $('bm-sheet-id').value=existing?(existing.building_sheet_id||''):'';
   $('bm-gsc-url').value=existing?(existing.gsc_script_url||''):'';
+  $('bm-ips').value=existing?(existing.allowed_ips||''):'';
   $('building-modal-overlay').classList.add('open');$('building-modal').classList.add('open');
   document.body.style.overflow='hidden';
 }
@@ -4430,7 +4455,7 @@ function admCloseBuildingModal(){
 async function admSaveBuilding(){
   const building=$('bm-name').value.trim();
   if(!building){toast('Enter a building name');return;}
-  const body={building,building_sheet_id:$('bm-sheet-id').value.trim(),gsc_script_url:$('bm-gsc-url').value.trim()};
+  const body={building,building_sheet_id:$('bm-sheet-id').value.trim(),gsc_script_url:$('bm-gsc-url').value.trim(),allowed_ips:$('bm-ips').value.trim()};
   const btn=$('bm-save-btn');const orig=btn.textContent;
   btn.disabled=true;btn.innerHTML='<span class="auth-spin"></span>Saving...';
   try{
@@ -4440,6 +4465,28 @@ async function admSaveBuilding(){
     admCloseBuildingModal();
     admLoadBuildings();
   }catch(e){toast('Failed to save building');}
+  finally{btn.disabled=false;btn.textContent=orig;}
+}
+
+/* ----- office IPs (building admin - own building) ----- */
+async function admLoadOfficeIps(){
+  try{
+    const r=await(await fetch('/api/admin/office_ips')).json();
+    if(r.error){$('adm-oip-msg').textContent=r.error;return;}
+    $('adm-oip-building').textContent=r.building?('— '+r.building):'';
+    $('adm-oip-ips').value=r.allowed_ips||'';
+    $('adm-oip-msg').textContent='';
+  }catch(e){$('adm-oip-msg').textContent='Failed to load office IPs.';}
+}
+async function admSaveOfficeIps(){
+  const btn=$('adm-oip-save');const orig=btn.textContent;
+  btn.disabled=true;btn.innerHTML='<span class="auth-spin"></span>Saving...';
+  try{
+    const r=await(await fetch('/api/admin/save_office_ips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({allowed_ips:$('adm-oip-ips').value.trim()})})).json();
+    if(r.error){toast(r.error);$('adm-oip-msg').textContent=r.error;return;}
+    toast('Office IPs saved');
+    $('adm-oip-msg').textContent='Saved.';
+  }catch(e){toast('Failed to save office IPs');}
   finally{btn.disabled=false;btn.textContent=orig;}
 }
 
