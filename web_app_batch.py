@@ -5193,8 +5193,17 @@ def api_indexing_submit():
     result, tier = None, None
     if url and key:
         try:
+            # 120s, not 60s - the VPS's no-owner-access retry loop can cycle
+            # through several pool accounts per URL before finding one with
+            # access, and a 10-URL batch can legitimately take longer than
+            # 60s. A spurious client-side timeout here (while the VPS is
+            # actually still working, or already finished) falls through to
+            # the Apps Script tier and re-submits the SAME URLs a second
+            # time, wasting real Indexing API quota on both pools for
+            # nothing - confirmed live in IndexingLog (a 10-URL batch that
+            # succeeded via VPS was resubmitted via Apps Script ~30s later).
             r = http_requests.post(f"{url}/submit", json={"user": user, "urls": urls},
-                                   headers={"X-Api-Key": key}, timeout=60)
+                                   headers={"X-Api-Key": key}, timeout=120)
             r.raise_for_status()
             result = r.json()
             tier = "vps"
