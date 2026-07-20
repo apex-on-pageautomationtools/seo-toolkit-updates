@@ -1431,6 +1431,21 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
             add_log(f"Page 1: 0 links - URL={dbg.get('url','?')[:80]} "
                     f"h3={dbg.get('h3count','?')} jsname={dbg.get('jsname_count','?')} "
                     f"zReHs={dbg.get('zReHs_count','?')} rso={dbg.get('rso','?')}")
+            if (dbg.get("h3count") or 0) > 0:
+                # Real content rendered (headings present) but every extraction
+                # strategy still came up empty - a genuine parsing gap (e.g. a
+                # Sitelinks-enriched branded-query layout), not a block or a
+                # truly empty page. Save the raw HTML so a report like this one
+                # is diagnosable from real evidence next time, not just a log line.
+                try:
+                    safe_kw = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in keyword)[:50]
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    debug_path = os.path.join(_domain_folder(domain, "ranking"), f"{safe_kw}_{ts}_debug.html")
+                    with open(debug_path, "w", encoding="utf-8") as f:
+                        f.write(page_source(sess.driver))
+                    add_log(f"Saved raw page source for debugging: {os.path.basename(debug_path)}")
+                except Exception as e:
+                    add_log(f"Could not save debug HTML: {e}")
 
         # Ctrl+F search on page 1
         all_matches = find_domain_in_page(sess.driver, domain_clean, page_offset=0)
