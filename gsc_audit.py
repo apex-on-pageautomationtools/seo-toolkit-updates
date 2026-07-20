@@ -113,21 +113,28 @@ def get_oauth_url(client_id, redirect_uri="urn:ietf:wg:oauth:2.0:oob"):
     return f"{OAUTH_AUTH_URL}?{params}"
 
 
-def oauth_login_selenium(driver, client_id, client_secret, log_fn=None):
+def oauth_login_selenium(driver, client_id, client_secret, log_fn=None, login_hint=None):
     """Open Google OAuth in the Selenium browser and wait for the user to authorize.
     Returns the email of the connected account."""
     if log_fn is None:
         log_fn = print
 
     redirect_uri = "http://localhost:19876/oauth_callback"
-    params = urllib.parse.urlencode({
+    param_dict = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": SCOPES,
         "access_type": "offline",
         "prompt": "consent",
-    })
+    }
+    if login_hint:
+        # Prefills the account picker with this email - used when the caller
+        # already knows which specific account a domain needs (e.g. its Owner
+        # per GSC_Config), so the user doesn't have to hunt for the right one
+        # among however many Google accounts they're signed into.
+        param_dict["login_hint"] = login_hint
+    params = urllib.parse.urlencode(param_dict)
     auth_url = f"{OAUTH_AUTH_URL}?{params}"
 
     # Navigate the SAME window directly rather than opening a popup via

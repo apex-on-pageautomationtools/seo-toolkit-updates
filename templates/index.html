@@ -427,6 +427,10 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <span class="sb-label">Brief Analysis</span>
     </button>
     <div class="sb-sep"></div>
+    <button class="sb-item" id="tab-gscaccounts" data-tip="Google Accounts" onclick="switchTab('gscaccounts')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>
+      <span class="sb-label">Google Accounts</span>
+    </button>
     <button class="sb-item" id="tab-admin" data-tip="Admin" onclick="switchTab('admin')" style="display:none">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 15v2m-6 4h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2zm10-10V7a4 4 0 0 0-8 0v4h8z"/></svg>
       <span class="sb-label">Admin</span>
@@ -444,10 +448,6 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
     <button class="sb-item" data-tip="Settings" onclick="openSettings()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       <span class="sb-label">Settings</span>
-    </button>
-    <button class="sb-item" data-tip="Theme" onclick="cycleTheme()">
-      <svg id="theme-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-      <span class="sb-label">Theme</span>
     </button>
     <button class="sb-item" data-tip="Logout" onclick="logoutUser()">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -1124,22 +1124,33 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <div id="gsc-sitemap-status" style="font-size:11px;color:var(--text-3);margin-top:4px"></div>
       </div>
 
+      <div class="note">Google account connections and Browser Sessions are managed in the <a href="#" onclick="switchTab('gscaccounts');return false;">Google Accounts</a> tab - the account that owns a domain is selected automatically once it's connected there, no need to pick one here.</div>
+    </section>
+
+    <!-- GOOGLE ACCOUNTS (shared across GSC Audit, Submit for Indexing fallback, and any other tool that needs a connected account) -->
+    <section class="card panel" id="panel-gscaccounts" style="display:none">
+      <div class="card-t">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a8 8 0 0 1 16 0v1"/></svg>
+        Google Accounts
+      </div>
+      <p style="color:var(--text-3);font-size:12px;margin:-4px 0 14px;line-height:1.4">Connect Google accounts and manage browser sessions here once - used across GSC Audit, Submit for Indexing's fallback, and other tools that need one.</p>
+
       <div id="gsc-connect-box" style="margin-bottom:14px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border)">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
           <div style="font-weight:700;font-size:13px">Google Accounts</div>
           <button class="btn btn-primary" style="font-size:12px;padding:6px 14px" onclick="gscConnect()">+ Connect account</button>
         </div>
-        <div id="gsc-none" style="font-size:11px;color:var(--text-3);margin-top:6px">No Google account connected. Click "Connect account" to add one - you can connect several; the one that owns the domain is picked automatically.</div>
+        <div id="gsc-none" style="font-size:11px;color:var(--text-3);margin-top:6px">No Google account connected. Click "Connect account" to add one - you can connect several; the one that owns the domain is picked automatically in GSC Audit.</div>
         <div id="gsc-accounts-list" style="margin-top:4px"></div>
       </div>
-      <div class="note">The account that owns the domain is selected automatically when you enter it - you don't have to pick one. If it isn't connected yet, click "+ Connect account" above. (OAuth credentials are set in Settings.)</div>
+      <div class="note">API access (this list) is long-lived once connected via OAuth. It's separate from Browser Sessions below - those use real browser cookies, which expire faster and need an occasional "Login" refresh even for an already-connected account.</div>
 
       <!-- GSC Browser Sessions -->
       <div style="margin-top:18px;padding:14px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border)">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <div>
             <div style="font-weight:700;font-size:13px">Browser Sessions</div>
-            <div style="font-size:11px;color:var(--text-3)">Saved browser sessions with Google login cookies for capturing Manual Action &amp; Security Issues screenshots.</div>
+            <div style="font-size:11px;color:var(--text-3)">Saved browser sessions with Google login cookies - used for Manual Action &amp; Security Issues screenshots, and the Submit for Indexing fallback. "Login" refreshes the session even if it's already working.</div>
           </div>
           <button class="btn btn-tonal" style="font-size:11px;padding:4px 14px;white-space:nowrap" onclick="gscSessionCreate()">+ New Session</button>
         </div>
@@ -1460,7 +1471,7 @@ https://example.com/page-2"></textarea>
   </div><!-- /left -->
 
   <!-- RIGHT COLUMN -->
-  <div class="col">
+  <div class="col" id="right-col">
     <section class="card" style="min-height:520px;display:flex;flex-direction:column">
 
       <!-- progress - only relevant to the 4 batch checkers (ranking/index/
@@ -2005,6 +2016,14 @@ https://example.com/page-2"></textarea>
     </button>
   </div>
   <div class="sheet-body">
+    <div class="sec-t">Theme</div>
+    <div class="field" style="margin-bottom:8px">
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="s-theme-system" style="flex:1" onclick="setTheme('system')">System</button>
+        <button class="btn" id="s-theme-light" style="flex:1" onclick="setTheme('light')">Light</button>
+        <button class="btn" id="s-theme-dark" style="flex:1" onclick="setTheme('dark')">Dark</button>
+      </div>
+    </div>
     <div class="sec-t">Your Account</div>
     <div class="field" style="margin-bottom:8px">
       <label>Name</label>
@@ -2305,11 +2324,16 @@ function updateCityDropdown(prefix, countryCode){
 const THEMES=['system','light','dark'];
 function applyThemeIcon(t){
   const ic=document.getElementById('theme-ic');
+  if(!ic)return;
   if(t==='dark') ic.innerHTML='<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
   else if(t==='light') ic.innerHTML='<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
   else ic.innerHTML='<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>';
 }
-function setTheme(t){document.documentElement.setAttribute('data-theme',t);localStorage.setItem('grc-theme',t);applyThemeIcon(t);}
+function refreshThemeButtons(){
+  const cur=localStorage.getItem('grc-theme')||'system';
+  THEMES.forEach(t=>{const b=document.getElementById('s-theme-'+t);if(b)b.classList.toggle('btn-primary',t===cur);if(b)b.classList.toggle('btn-tonal',t!==cur);});
+}
+function setTheme(t){document.documentElement.setAttribute('data-theme',t);localStorage.setItem('grc-theme',t);applyThemeIcon(t);refreshThemeButtons();}
 function cycleTheme(){const cur=localStorage.getItem('grc-theme')||'system';setTheme(THEMES[(THEMES.indexOf(cur)+1)%THEMES.length]);}
 setTheme(localStorage.getItem('grc-theme')||'system');
 
@@ -2368,6 +2392,7 @@ function switchTab(m){
   $('panel-onpage').style.display=m==='onpage'?'':'none';
   $('panel-health').style.display=m==='health'?'':'none';
   $('panel-gsc').style.display=m==='gsc'?'':'none';
+  $('panel-gscaccounts').style.display=m==='gscaccounts'?'':'none';
   $('panel-crawl').style.display=m==='crawl'?'':'none';
   $('panel-admin').style.display=m==='admin'?'':'none';
   $('panel-brief').style.display=m==='brief'?'':'none';
@@ -2393,7 +2418,7 @@ function switchTab(m){
   $('tbl-performance').style.display=m==='performance'?'':'none';
   $('tbl-indexing').style.display=m==='indexing'?'':'none';
   $('tbl-keywordvolume').style.display=m==='keywordvolume'?'':'none';
-  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',wayback:'Wayback Machine Submitter',seranking:'SEranking Audit',geo:'GEO / AI Optimization',performance:'Performance Report',indexing:'Submit for Indexing',keywordvolume:'Keyword Search Volume',admin:'Admin Panel'};
+  const titles={ranking:'Keyword Ranking',index:'Google Indexing Checker',count:'Search Results Count',backlink:'Backlink Index/Noindex Status',onpage:'SEO On-Page Report',health:'Website Health Audit',gsc:'GSC Audit Studio',crawl:'Crawl Date Tracker',brief:'Brief Website Analysis',wayback:'Wayback Machine Submitter',seranking:'SEranking Audit',geo:'GEO / AI Optimization',performance:'Performance Report',indexing:'Submit for Indexing',keywordvolume:'Keyword Search Volume',gscaccounts:'Google Accounts',admin:'Admin Panel'};
   const subs={ranking:'Find where your domain ranks on Google - across regions, CAPTCHA-resistant.',
     index:'Check if your URLs are indexed in Google - searches site:url to verify.',
     count:'Get Google\'s total "About N results" number for each keyword - regional, CAPTCHA-resistant.',
@@ -2409,6 +2434,7 @@ function switchTab(m){
     performance:'Monthly performance deck built from real Google Search Console + Google Analytics 4 data - real charts, not screenshots. Testing phase.',
     indexing:'Submit URLs to Google for indexing via a shared team quota, with a real-Search-Console fallback once your daily share is used. Testing phase.',
     keywordvolume:'Real Keyword Planner search volume data from the Google Ads API - avg monthly searches, competition, CPC, filtered by location/language. Testing phase.',
+    gscaccounts:'Connect Google accounts and manage browser sessions - shared across GSC Audit, Submit for Indexing\'s fallback, and other tools that need one.',
     admin:'Manage users, cities, and app configuration.'};
   $('page-title').textContent=titles[m];
   $('page-sub').textContent=subs[m];
@@ -2425,11 +2451,17 @@ function switchTab(m){
   // (no mode==='indexing' branch exists) - clicking Start there silently did
   // nothing, so hide the bar entirely on this tab instead of showing a
   // "Start" button with no effect.
-  document.querySelector('.actionbar').style.display=m==='indexing'?'none':'';
+  // Google Accounts is pure account/session management, no batch job or
+  // report to show - the right-hand Results column has nothing to display
+  // for it, so hide the whole column instead of showing an empty "Results"
+  // header with nothing under it.
+  document.querySelector('.actionbar').style.display=(m==='indexing'||m==='gscaccounts')?'none':'';
+  $('right-col').style.display=m==='gscaccounts'?'none':'';
   if(m==='admin'){admLoadUsers();admLoadBuildings();admLoadProxies();admLoadCities();admLoadConfig();admLoadKeysStatus();fetchActivityLog();}
   if(m==='crawl'){crawlLoadUrls();}
   if(m==='performance'){perfLoadGscAccounts();}
   if(m==='indexing'){idxInit();}
+  if(m==='gscaccounts'){gscLoadAccounts();gscSessionsLoad();}
   // Refresh buttons and shared status bar for the newly selected tab
   setButtons(_modeState[m], m);
   const st=_modeState[m];
@@ -3985,7 +4017,7 @@ async function gscSubmitSitemap(){
 async function gscConnect(){
   toast('Launching Google login...');
   try{
-    const r=await fetch('/api/gsc/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({browser:$('s-browser')?$('s-browser').value:'edge'})});
+    const r=await fetch('/api/gsc/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({browser:$('s-browser')?$('s-browser').value:'edge',email_hint:window._gscConnectHint||''})});
     const d=await r.json();
     if(d.error){toast(d.error,'err');return;}
     toast('Connected: '+d.email);
@@ -4098,6 +4130,7 @@ async function gscSessionRemove(sid){
 /* ===================== settings sheet ===================== */
 let proxyPool=[];
 async function openSettings(){
+  refreshThemeButtons();
   try{const c=await(await fetch('/api/config')).json();proxyPool=Array.isArray(c.proxies)?c.proxies.filter(p=>p&&p.host&&p.port):[];$('s-downloads-folder').value=c.downloads_folder||'';}
   catch(e){proxyPool=[];}
   renderProxies();
@@ -4952,14 +4985,20 @@ async function gscCheckDomain(){
       info.style.color='var(--md-on-surface, #1b5e20)';
       info.innerHTML='<b>'+esc(domain)+'</b><br>Account: <b>'+esc(r.email)+'</b><br>Access: <b>'+esc(r.accessLevel)+'</b>'
         + (connected ? '<br><span style="opacity:.85">✓ selected automatically for this domain</span>'
-                     : '<br><span style="color:#b71c1c">Not connected yet - click “+ Connect account” below and sign in with this account.</span>');
+                     : '<br><span style="color:#b71c1c">Not connected yet - go to the <a href="#" onclick="switchTab(\'gscaccounts\');return false;" style="color:inherit;text-decoration:underline">Google Accounts</a> tab and click "+ Connect account" (it\'ll prefill this email) to sign in.</span>');
       // Auto-use the account that owns this domain (no manual pick needed)
       if(connected && _gscEmail!==r.email){ gscSelectAccount(r.email); }
+      // Remember which specific email still needs connecting, so "+ Connect
+      // account" can prefill the Google login screen with it instead of
+      // leaving the user to pick the right one out of however many accounts
+      // they're signed into.
+      window._gscConnectHint = connected ? '' : (r.email || '');
     }else{
       info.style.display='block';
       info.style.background='var(--md-error-container, #fce4ec)';
       info.style.color='var(--md-on-error-container, #b71c1c)';
       info.innerHTML='<b>'+esc(domain)+'</b> not found in GSC config.<br>'+(r.reason||'Add it to the Google Sheet first.');
+      window._gscConnectHint = '';
     }
   }catch(e){info.style.display='none';}
 }

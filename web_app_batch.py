@@ -4675,6 +4675,7 @@ def api_gsc_connect():
     data = request.get_json(silent=True) or {}
     headless = data.get("headless", False)
     browser_name = data.get("browser", "edge")
+    email_hint = (data.get("email_hint") or "").strip()
 
     config = gsc_audit._load_gsc_config()
     client_id = config.get("gsc_client_id", "").strip()
@@ -4694,7 +4695,7 @@ def api_gsc_connect():
             country="us", extra_extensions=[],
             browser_pref=browser_name,
         )
-        email = gsc_audit.oauth_login_selenium(driver, client_id, client_secret)
+        email = gsc_audit.oauth_login_selenium(driver, client_id, client_secret, login_hint=email_hint or None)
         # Tag this session with the account, and drop any older session for the
         # same email so sessions don't pile up on reconnect.
         for s in gsc_audit.list_sessions():
