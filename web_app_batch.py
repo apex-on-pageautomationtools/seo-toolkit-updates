@@ -5490,6 +5490,7 @@ def api_admin_save_building():
         building_sheet_id=(data.get("building_sheet_id") or "").strip(),
         gsc_script_url=(data.get("gsc_script_url") or "").strip(),
         allowed_ips=(data.get("allowed_ips") or "").strip(),
+        admin_emails=(data.get("admin_emails") or "").strip(),
     )
     if result.get("success"):
         activity(f"Admin saved building: {data.get('building')}")

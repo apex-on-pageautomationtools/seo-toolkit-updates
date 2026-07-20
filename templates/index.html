@@ -2134,6 +2134,8 @@ https://example.com/page-2"></textarea>
       <input type="text" id="bm-gsc-url" autocomplete="off" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
     <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Allowed office IPs <span style="font-weight:400;color:var(--text-3)">(comma-separated; a login from one skips device-ID approval, approval still required. Public IP = secure (api.ipify.org); local subnet e.g. 192.168.11 = convenience only)</span></label>
       <input type="text" id="bm-ips" autocomplete="off" placeholder="203.0.113.5, 192.168.11" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
+    <div style="margin-bottom:8px"><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Admin emails <span style="font-weight:400;color:var(--text-3)">(comma-separated; each can manage this building - users, IP allowlist, etc. One admin can be listed on more than one building)</span></label>
+      <input type="text" id="bm-admins" autocomplete="off" placeholder="admin1@example.com, admin2@example.com" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px"></div>
   </div>
   <div class="sheet-foot">
     <button class="btn btn-tonal" style="flex:1" onclick="admCloseBuildingModal()">Cancel</button>
@@ -4434,8 +4436,8 @@ async function admLoadBuildings(){
     if(r.error){$('adm-buildings-list').textContent=r.error;return;}
     ADM_BUILDINGS=r.buildings||[];
     if(!ADM_BUILDINGS.length){$('adm-buildings-list').textContent='No buildings configured yet.';return;}
-    $('adm-buildings-list').innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Building</th><th style="padding:6px">Sheet ID</th><th style="padding:6px">GSC Script URL</th><th style="padding:6px">Office IPs</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
-      ADM_BUILDINGS.map(b=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px;white-space:nowrap">'+esc(b.building)+'</td><td style="padding:6px;font-family:monospace;font-size:11px;white-space:nowrap">'+esc((b.building_sheet_id||'').slice(0,18))+'...</td><td style="padding:6px;font-family:monospace;font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(b.gsc_script_url||'')+'</td><td style="padding:6px;font-size:11px">'+esc(b.allowed_ips||'')+'</td>'+
+    $('adm-buildings-list').innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:700px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Building</th><th style="padding:6px">Sheet ID</th><th style="padding:6px">GSC Script URL</th><th style="padding:6px">Office IPs</th><th style="padding:6px">Admins</th><th style="padding:6px">Actions</th></tr></thead><tbody>'+
+      ADM_BUILDINGS.map(b=>'<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px;white-space:nowrap">'+esc(b.building)+'</td><td style="padding:6px;font-family:monospace;font-size:11px;white-space:nowrap">'+esc((b.building_sheet_id||'').slice(0,18))+'...</td><td style="padding:6px;font-family:monospace;font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(b.gsc_script_url||'')+'</td><td style="padding:6px;font-size:11px">'+esc(b.allowed_ips||'')+'</td><td style="padding:6px;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(b.admin_emails||'')+'</td>'+
         '<td style="padding:6px;white-space:nowrap"><button class="btn btn-tonal" style="font-size:10px;padding:2px 8px" onclick="admOpenBuildingModal(\''+esc(b.building)+'\')">Edit</button></td></tr>').join('')+'</tbody></table></div>';
   }catch(e){$('adm-buildings-list').textContent='Failed to load buildings.';}
 }
@@ -4447,6 +4449,7 @@ function admOpenBuildingModal(name){
   $('bm-sheet-id').value=existing?(existing.building_sheet_id||''):'';
   $('bm-gsc-url').value=existing?(existing.gsc_script_url||''):'';
   $('bm-ips').value=existing?(existing.allowed_ips||''):'';
+  $('bm-admins').value=existing?(existing.admin_emails||''):'';
   $('building-modal-overlay').classList.add('open');$('building-modal').classList.add('open');
   document.body.style.overflow='hidden';
 }
@@ -4457,7 +4460,7 @@ function admCloseBuildingModal(){
 async function admSaveBuilding(){
   const building=$('bm-name').value.trim();
   if(!building){toast('Enter a building name');return;}
-  const body={building,building_sheet_id:$('bm-sheet-id').value.trim(),gsc_script_url:$('bm-gsc-url').value.trim(),allowed_ips:$('bm-ips').value.trim()};
+  const body={building,building_sheet_id:$('bm-sheet-id').value.trim(),gsc_script_url:$('bm-gsc-url').value.trim(),allowed_ips:$('bm-ips').value.trim(),admin_emails:$('bm-admins').value.trim()};
   const btn=$('bm-save-btn');const orig=btn.textContent;
   btn.disabled=true;btn.innerHTML='<span class="auth-spin"></span>Saving...';
   try{
