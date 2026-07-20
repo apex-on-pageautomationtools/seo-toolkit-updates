@@ -1668,7 +1668,8 @@ https://example.com/page-2"></textarea>
           </div>
           <div class="log" id="idx-log" style="height:160px;overflow-y:auto;font-size:12px;margin-bottom:12px"></div>
           <div style="overflow-x:auto">
-            <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed">
+              <colgroup><col style="width:40%"><col style="width:60%"></colgroup>
               <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
                 <th style="padding:6px">URL</th><th style="padding:6px">Status</th>
               </tr></thead>
@@ -3680,11 +3681,12 @@ async function idxSubmit(){
     let rows=(d.results||[]).map(x=>{
       const noOwner=!x.ok && x.message==='no_owner_access';
       const statusHtml=x.ok?'Submitted':(noOwner
-        ? 'For this domain we don\'t have Owner access to submit pages for indexing through the API - please connect GSC of that domain in the '
-          +'<a href="#" onclick="switchTab(\'gsc\');return false;" style="color:inherit;text-decoration:underline">GSC Audit</a> section if not done already, and it should have Owner access'
-        : esc(x.message));
-      return '<tr><td style="padding:3px 6px;word-break:break-all">'+esc(x.url)+'</td>'
-        +'<td style="padding:3px 6px;color:'+(x.ok?'var(--ok)':'var(--err,#c00)')+'">'+statusHtml+'</td></tr>';
+        ? '<div style="background:rgba(240,69,58,.14);color:var(--err,#c00);border-radius:6px;padding:5px 7px;line-height:1.4">'
+          +'No Owner access to this domain - please connect GSC of that domain in the '
+          +'<a href="#" onclick="switchTab(\'gsc\');return false;" style="color:inherit;text-decoration:underline">GSC Audit</a> section if not done already, and it should have Owner access</div>'
+        : '<span style="color:var(--err,#c00)">'+esc(x.message)+'</span>');
+      return '<tr><td style="padding:3px 6px;word-break:break-word;overflow-wrap:break-word">'+esc(x.url)+'</td>'
+        +'<td style="padding:3px 6px;word-break:break-word;overflow-wrap:break-word;'+(x.ok?'color:var(--ok)':'')+'">'+statusHtml+'</td></tr>';
     }).join('');
     $('idx-results-body').innerHTML=rows;
     $('idx-progress').textContent='Submitted '+(d.submitted||0)+'/'+urls.length;
