@@ -1143,7 +1143,6 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
         <div id="gsc-none" style="font-size:11px;color:var(--text-3);margin-top:6px">No Google account connected. Click "Connect account" to add one - you can connect several; the one that owns the domain is picked automatically in GSC Audit.</div>
         <div id="gsc-accounts-list" style="margin-top:4px"></div>
       </div>
-      <div class="note">API access (this list) is long-lived once connected via OAuth. It's separate from Browser Sessions below - those use real browser cookies, which expire faster and need an occasional "Login" refresh even for an already-connected account.</div>
 
       <!-- GSC Browser Sessions -->
       <div style="margin-top:18px;padding:14px;background:var(--surface-2);border-radius:var(--r-sm);border:1px solid var(--border)">
@@ -4070,10 +4069,21 @@ async function gscSessionsLoad(){
     sessions.forEach(s=>{
       const accts=s.accounts&&s.accounts.length?s.accounts.map(a=>'<b>'+esc(a)+'</b>').join(', '):'<i>No accounts detected</i>';
       const last=s.last_login?new Date(s.last_login).toLocaleDateString():'Never';
+      // A cookie session's freshness can't be verified without actually trying
+      // it, so this is a rough estimate from age alone: recently logged in ->
+      // treat as still working (secondary "Refresh" action); otherwise flag it
+      // as likely needing a real login before it's relied on.
+      const daysSince=s.last_login?(Date.now()-new Date(s.last_login).getTime())/86400000:Infinity;
+      const fresh=daysSince<=14;
+      const statusHtml=!s.last_login
+        ? '<span style="color:var(--err,#c00)">&#9679; Needs login</span>'
+        : (fresh
+            ? '<span style="color:var(--ok)">&#9679; Active</span>'
+            : '<span style="color:var(--warn,#c78a00)">&#9679; May be stale - refresh recommended</span>');
       html+='<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--surface-1)">'
         +'<div style="flex:1"><div style="font-weight:600">'+esc(s.label||s.id)+'</div>'
-        +'<div style="font-size:11px;color:var(--text-3);margin-top:2px">Accounts: '+accts+' &middot; Last login: '+last+'</div></div>'
-        +'<button class="btn btn-tonal" style="font-size:10px;padding:3px 10px" onclick="gscSessionLaunch(\''+s.id+'\')">Login</button>'
+        +'<div style="font-size:11px;color:var(--text-3);margin-top:2px">Accounts: '+accts+' &middot; Last login: '+last+' &middot; '+statusHtml+'</div></div>'
+        +'<button class="btn btn-tonal" style="font-size:10px;padding:3px 10px" onclick="gscSessionLaunch(\''+s.id+'\')">'+(fresh&&s.last_login?'Refresh':'Login')+'</button>'
         +'</div>';
     });
     box.innerHTML=html;
