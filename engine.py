@@ -2030,6 +2030,24 @@ def _get_organic_links(src):
 
     links, seen = [], set()
 
+    # Google appends click-tracking params (srsltid for Merchant-linked
+    # organic results, gclid/utm_* etc from ad-network tagging) to the real
+    # href even though the visible SERP snippet shows the clean URL - strip
+    # them so the reported URL matches what a user actually sees/visits.
+    _TRACKING_PARAMS = {
+        "srsltid", "gclid", "gclsrc", "fbclid", "msclkid", "mc_cid", "mc_eid",
+        "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+    }
+
+    def _strip_tracking(url):
+        from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+        parts = urlsplit(url)
+        if not parts.query:
+            return url
+        kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                if k.lower() not in _TRACKING_PARAMS]
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
+
     def add(href):
         if not href:
             return
@@ -2052,6 +2070,7 @@ def _get_organic_links(src):
         low = href.lower()
         if "google." in low or "/search?" in low or "webcache" in low:
             return
+        href = _strip_tracking(href)
         if href in seen:
             return
         seen.add(href)
