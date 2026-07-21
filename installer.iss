@@ -2,7 +2,7 @@
 ; Download Inno Setup from: https://jrsoftware.org/isdl.php
 
 #define MyAppName "SEO Toolkit Pro"
-#define MyAppVersion "3.9"
+#define MyAppVersion "4.4.11"
 #define MyAppPublisher "Vishal Chhipa"
 #define MyAppExeName "Start Tool.vbs"
 
@@ -44,6 +44,7 @@ Source: "auth.py";          DestDir: "{app}"; Flags: ignoreversion
 Source: "updater.py";       DestDir: "{app}"; Flags: ignoreversion
 Source: "gsc_audit.py";      DestDir: "{app}"; Flags: ignoreversion
 Source: "brief_analysis.py"; DestDir: "{app}"; Flags: ignoreversion
+Source: "google_ads_keywords.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "config.json";       DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist
 Source: "Start Tool.vbs";   DestDir: "{app}"; Flags: ignoreversion
 Source: "app_launch.ps1";   DestDir: "{app}"; Flags: ignoreversion

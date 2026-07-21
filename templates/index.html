@@ -2753,7 +2753,7 @@
             performance deck (pptx) built from real Google Search Console + Google Analytics 4 data. Connect a GSC
             account below (the same accounts as GSC Audit); if it was connected before this feature existed, reconnect
             it once to grant the extra Analytics permission. GA4 requires the connected Google account to have Viewer
-            access in that GA4 property. If that account also has a browser session (GSC Audit tab -> GSC Browser
+            access in that GA4 property. If that account also has a browser session (Google Accounts tab -> GSC Browser
             Sessions -> "+ New Session", logged in as the same account), the report includes real dashboard screenshots
             for whichever metrics (clicks/impressions/position, users/sessions) actually improved vs. the previous
             period - otherwise it falls back to native charts built from the same data.</p>
@@ -2826,9 +2826,9 @@ https://example.com/page-2"></textarea>
             style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
             <div style="font-weight:700;font-size:13px;margin-bottom:6px">Continue via GSC "Request Indexing" (fallback)
             </div>
-            <p style="color:var(--text-3);font-size:12px;margin:0 0 10px;line-height:1.4">For the URLs above that didn't
-              get submitted because your daily pool cap was reached. Uses a GSC Browser Session (GSC Audit tab) - pick
-              which connected account/domain to use below.</p>
+            <p style="color:var(--text-3);font-size:12px;margin:0 0 10px;line-height:1.4">For the URLs above the shared
+              pool couldn't submit (daily cap reached, or the pool has no Owner access to the domain). Uses a GSC Browser
+              Session (Google Accounts tab) - pick which connected account/domain to use below.</p>
             <div class="field">
               <label>Domain <span class="hint">(must match a property the chosen account has access to)</span></label>
               <input type="text" id="idx-fb-domain" placeholder="example.com" autocomplete="off"
@@ -5651,7 +5651,7 @@ https://example.com/page-2"></textarea>
             box.innerHTML = '<b>GSC Connected</b> - ' + r.email + '<br>Property: ' + r.property + ' (' + r.permission + ')<br>GSC screenshots (manual actions, security issues) will be captured automatically.';
           } else if (r.available) {
             box.style.background = '#fff3e0'; box.style.color = '#e65100';
-            box.innerHTML = '<b>GSC Not Connected</b> - found in mapping<br>Account: <b>' + r.email + '</b> | Access: <b>' + (r.accessLevel || 'N/A') + '</b><br>Connect this account in GSC Audit tab to include GSC screenshots in the report.';
+            box.innerHTML = '<b>GSC Not Connected</b> - found in mapping<br>Account: <b>' + r.email + '</b> | Access: <b>' + (r.accessLevel || 'N/A') + '</b><br>Connect this account in the Google Accounts tab to include GSC screenshots in the report.';
           } else {
             box.style.background = '#fce4ec'; box.style.color = '#c62828';
             box.innerHTML = '<b>GSC Not Found</b> - domain not in any connected account or mapping.<br>Ask your admin to add this domain to the GSC mapping sheet, or connect a Google account with access.';
@@ -5890,7 +5890,7 @@ https://example.com/page-2"></textarea>
           if (accs && accs.length) {
             sel.innerHTML = '<option value="">None</option>' + accs.map(a => '<option value="' + esc(a.email) + '">' + esc(a.email) + '</option>').join('');
           } else {
-            sel.innerHTML = '<option value="">No connected accounts - connect one in GSC Audit tab first</option>';
+            sel.innerHTML = '<option value="">No connected accounts - connect one in the Google Accounts tab first</option>';
           }
         } catch (e) {
           sel.innerHTML = '<option value="">Could not load accounts</option>';
@@ -5996,14 +5996,14 @@ https://example.com/page-2"></textarea>
             $('idx-fallback-wrap').classList.remove('hidden');
             return;
           }
-          _idxLastLeftover = (d.results || []).filter(x => !x.ok && (x.message === 'user_daily_cap_reached' || x.message === 'pool_exhausted')).map(x => x.url);
+          _idxLastLeftover = (d.results || []).filter(x => !x.ok && (x.message === 'user_daily_cap_reached' || x.message === 'pool_exhausted' || x.message === 'no_owner_access')).map(x => x.url);
           let rows = (d.results || []).map(x => {
             const noOwner = !x.ok && x.message === 'no_owner_access';
             const statusHtml = x.ok ? 'Submitted' : (noOwner
-              ? '<div style="background:rgba(240,69,58,.14);color:var(--err,#c00);border-radius:6px;padding:5px 7px;line-height:1.4">'
-              + 'No Owner access to this domain - please connect GSC of that domain in the '
-              + '<a href="#" onclick="switchTab(\'gsc\');return false;" style="color:inherit;text-decoration:underline">GSC Audit</a> section if not done already, and it should have Owner access</div>'
-              : '<span style="color:var(--err,#c00)">' + esc(x.message) + '</span>');
+              ? '<div style="background:rgba(240,69,58,.12);color:var(--err,#c00);border-radius:8px;padding:7px 10px;line-height:1.45;white-space:normal;overflow-wrap:anywhere;word-break:break-word">'
+              + '<b>No Owner access.</b> The shared indexing service account is not an Owner of this domain in Search Console (the Indexing API requires that; connecting a Google account does not grant it).<br>'
+              + '<b>Fix:</b> use the <b>Request Indexing</b> fallback below with an owning account, or ask an admin to run <b>Bulk Add Owner</b>.</div>'
+              : '<span style="color:var(--err,#c00);white-space:normal;overflow-wrap:anywhere;word-break:break-word">' + esc(x.message) + '</span>');
             return '<tr><td style="padding:3px 6px;word-break:break-word;overflow-wrap:break-word">' + esc(x.url) + '</td>'
               + '<td style="padding:3px 6px;word-break:break-word;overflow-wrap:break-word;' + (x.ok ? 'color:var(--ok)' : '') + '">' + statusHtml + '</td></tr>';
           }).join('');
@@ -6035,7 +6035,7 @@ https://example.com/page-2"></textarea>
           const r = await fetch('/api/indexing/fallback-accounts' + q);
           const d = await r.json();
           const accs = d.accounts || [];
-          if (!accs.length) { sel.innerHTML = '<option value="">No GSC Browser Session found - create one in GSC Audit tab</option>'; }
+          if (!accs.length) { sel.innerHTML = '<option value="">No GSC Browser Session found - create one in the Google Accounts tab</option>'; }
           else { sel.innerHTML = accs.map(a => '<option value="' + esc(a.email) + '|' + esc(a.session_id) + '">' + esc(a.email) + '</option>').join(''); }
           const note = $('idx-fb-remaining');
           if (note) { note.textContent = (d.domain_remaining !== undefined) ? (d.domain_remaining + '/10 Request-Indexing submissions left today for ' + d.domain) : ''; }

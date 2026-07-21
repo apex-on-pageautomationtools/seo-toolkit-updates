@@ -9,6 +9,7 @@ chrome_profile*/
 *.zip
 .env
 python/
+installer_output/
 .auth_token
 .grc_port
 .update_log
