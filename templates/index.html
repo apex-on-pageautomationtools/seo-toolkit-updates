@@ -317,6 +317,19 @@ td,th{white-space:nowrap}.cell-kw{white-space:normal;word-break:break-word;min-w
 .sheet-body{overflow-y:auto;padding:0 24px 20px}
 .sheet-foot{padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:10px}
 
+/* ===================== styled picker (search + list) ===================== */
+.picker-search-wrap{position:relative;margin-bottom:10px}
+.picker-search-wrap input{width:100%;padding:12px 40px 12px 14px;border-radius:12px;border:1px solid var(--border);
+  background:var(--surface-2);color:var(--text);font-size:15px;box-sizing:border-box;transition:border-color .15s}
+.picker-search-wrap input:focus{outline:none;border-color:var(--accent);background:var(--surface)}
+.picker-search-ic{position:absolute;right:13px;top:50%;transform:translateY(-50%);color:var(--text-3);pointer-events:none}
+.picker-list{max-height:min(50vh,360px);overflow-y:auto}
+.picker-row{display:flex;align-items:center;gap:12px;padding:11px 6px;border-radius:10px;cursor:pointer;font-size:14px}
+.picker-row:hover{background:var(--surface-2)}
+.picker-row.sel{color:var(--accent);font-weight:600}
+.picker-check{width:18px;flex:none;text-align:center;color:var(--accent);font-weight:700}
+.picker-empty{padding:18px 6px;color:var(--text-3);font-size:13px;text-align:center}
+
 .sec-t{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;
   color:var(--text-3);margin:6px 0 12px}
 .proxy-row{display:flex;align-items:center;gap:12px;padding:13px 15px;background:var(--surface-2);
@@ -498,11 +511,11 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       <div class="row2 field">
         <div>
           <label>Target country</label>
-          <input type="text" id="r-country" list="country-list" placeholder="Type or pick a country" value="United States" autocomplete="off">
+          <input type="text" id="r-country" placeholder="Search countries..." value="United States" autocomplete="off" readonly style="cursor:pointer" onclick="openCountryPicker('r')">
         </div>
         <div>
           <label>City <span class="hint">(geolocation)</span></label>
-          <input type="text" id="r-city" list="r-city-list" placeholder="Type or pick a city" autocomplete="off">
+          <input type="text" id="r-city" placeholder="Search cities..." autocomplete="off" readonly style="cursor:pointer" onclick="openCityPicker('r')">
           <datalist id="r-city-list"></datalist>
         </div>
       </div>
@@ -1279,9 +1292,9 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       </div>
       <div class="field">
         <label>GA4 Property <span class="hint">(for Analytics data - pick an account above first; optional if you only want GSC)</span></label>
-        <input type="text" id="perf-ga4-search" placeholder="Search properties..." autocomplete="off"
-               style="margin-bottom:6px" oninput="perfFilterGa4Properties(this.value)">
-        <select id="perf-ga4-property">
+        <input type="text" id="perf-ga4-search" placeholder="Select a GSC account first" autocomplete="off"
+               readonly style="cursor:pointer" onclick="openGa4Picker()">
+        <select id="perf-ga4-property" class="hidden">
           <option value="">Select a GSC account first</option>
         </select>
         <div id="perf-ga4-reauth" class="hidden" style="margin-top:6px">
@@ -2232,6 +2245,28 @@ https://example.com/page-2"></textarea>
   </div>
 </div>
 
+<div class="sheet-overlay" id="picker-overlay" onclick="closePicker()"></div>
+<div class="sheet" id="picker-modal" role="dialog" aria-modal="true" aria-label="Select">
+  <div class="sheet-grip"></div>
+  <div class="sheet-hd">
+    <h2 id="picker-title">Select</h2>
+    <button class="icon-btn" onclick="closePicker()" title="Close">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="sheet-body">
+    <div class="picker-search-wrap">
+      <input type="text" id="picker-search" placeholder="Search..." autocomplete="off" oninput="pickerFilter(this.value)">
+      <svg class="picker-search-ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    </div>
+    <div id="picker-list" class="picker-list"></div>
+  </div>
+  <div class="sheet-foot">
+    <button class="btn btn-tonal" style="flex:1" onclick="closePicker()">Cancel</button>
+    <button class="btn btn-primary" style="flex:1" onclick="confirmPicker()">Confirm</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 <div id="update-banner" style="display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:22px;z-index:99999;background:#1a73e8;color:#fff;padding:11px 16px;border-radius:12px;font-size:13px;box-shadow:0 6px 22px rgba(0,0,0,.28);max-width:92vw">
   <span id="update-banner-text">Update installed - please relaunch to apply.</span>
@@ -2540,6 +2575,55 @@ function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show')
   // Init cities once loaded
   const _wait=setInterval(()=>{if(_cities.length){clearInterval(_wait);updateCityDropdown('r',countryCode(rc?rc.value:'us'));updateCityDropdown('i','us');updateCityDropdown('c',countryCode(cc?cc.value:'us'));}},200);
 })();
+
+/* ===================== styled picker (search box + list, click a field to open) ===================== */
+let _pickerOpts=[], _pickerSelected='', _pickerOnConfirm=null;
+function openPicker(title, options, currentValue, onConfirm){
+  _pickerOpts=options; _pickerSelected=currentValue||''; _pickerOnConfirm=onConfirm;
+  $('picker-title').textContent=title;
+  $('picker-search').value='';
+  renderPickerList(options);
+  $('picker-overlay').classList.add('open');$('picker-modal').classList.add('open');
+  document.body.style.overflow='hidden';
+  setTimeout(()=>$('picker-search').focus(),300);
+}
+function renderPickerList(list){
+  const box=$('picker-list');
+  if(!list.length){box.innerHTML='<div class="picker-empty">No matches</div>';return;}
+  box.innerHTML=list.map(o=>
+    '<div class="picker-row'+(o.value===_pickerSelected?' sel':'')+'" onclick="pickerChoose(\''+esc(o.value).replace(/'/g,"\\'")+'\')">'
+    +'<span class="picker-check">'+(o.value===_pickerSelected?'✓':'')+'</span>'
+    +'<span>'+esc(o.label)+'</span></div>'
+  ).join('');
+}
+function _pickerVisible(){
+  const q=($('picker-search').value||'').trim().toLowerCase();
+  return q?_pickerOpts.filter(o=>o.label.toLowerCase().includes(q)):_pickerOpts;
+}
+function pickerFilter(){ renderPickerList(_pickerVisible()); }
+function pickerChoose(value){ _pickerSelected=value; renderPickerList(_pickerVisible()); }
+function closePicker(){
+  $('picker-overlay').classList.remove('open');$('picker-modal').classList.remove('open');
+  document.body.style.overflow='';
+}
+function confirmPicker(){
+  const opt=_pickerOpts.find(o=>o.value===_pickerSelected);
+  if(_pickerOnConfirm)_pickerOnConfirm(_pickerSelected,opt?opt.label:'');
+  closePicker();
+}
+function openCountryPicker(prefix){
+  const el=$(prefix+'-country'); if(!el)return;
+  const opts=Array.from(document.querySelectorAll('#country-list option')).map(o=>({value:o.value,label:o.value}));
+  openPicker('Target country', opts, el.value, (val)=>{
+    el.value=val; el.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+}
+function openCityPicker(prefix){
+  const el=$(prefix+'-city'); const dl=document.getElementById(prefix+'-city-list');
+  if(!el||!dl)return;
+  const opts=Array.from(dl.options).map(o=>({value:o.value,label:o.value}));
+  openPicker('City', opts, el.value, (val)=>{ el.value=val; });
+}
 
 /* ===================== API ===================== */
 async function saveEngineOpts(){
@@ -3637,18 +3721,14 @@ async function perfLoadGscAccounts(){
     sel.innerHTML='<option value="">Could not load accounts</option>';
   }
 }
-function perfFilterGa4Properties(query){
+function openGa4Picker(){
+  if(!$('perf-gsc-account').value){toast('Pick a GSC account first');return;}
   const sel=$('perf-ga4-property');
-  const q=(query||'').trim().toLowerCase();
-  let firstMatch=null;
-  Array.from(sel.options).forEach(opt=>{
-    const match=!q||!opt.value||opt.textContent.toLowerCase().includes(q);
-    opt.hidden=!match;
-    if(match&&opt.value&&!firstMatch)firstMatch=opt;
+  const opts=Array.from(sel.options).filter(o=>o.value||o.textContent==='None').map(o=>({value:o.value,label:o.value?o.textContent:'None'}));
+  if(!opts.length){toast(sel.options[0]?sel.options[0].textContent:'No properties available');return;}
+  openPicker('GA4 Property', opts, sel.value, (val,label)=>{
+    sel.value=val; $('perf-ga4-search').value=label||'';
   });
-  // If the currently selected option got filtered out, jump to the first visible match
-  // instead of leaving a hidden option silently selected.
-  if(sel.selectedOptions[0]&&sel.selectedOptions[0].hidden)sel.value=firstMatch?firstMatch.value:'';
 }
 async function perfLoadGa4Properties(){
   const email=$('perf-gsc-account').value;
@@ -3656,7 +3736,7 @@ async function perfLoadGa4Properties(){
   const reauth=$('perf-ga4-reauth');
   const search=$('perf-ga4-search');
   reauth.classList.add('hidden');
-  if(search)search.value='';
+  if(search){search.value='';search.placeholder=email?'Loading GA4 properties...':'Select a GSC account first';}
   if(!email){sel.innerHTML='<option value="">Select a GSC account first</option>';return;}
   sel.innerHTML='<option value="">Loading GA4 properties...</option>';
   try{
@@ -3664,14 +3744,21 @@ async function perfLoadGa4Properties(){
     const d=await r.json();
     if(d.error){
       sel.innerHTML='<option value="">'+esc(d.error)+'</option>';
+      if(search)search.placeholder=d.error;
       if(d.needs_reauth)reauth.classList.remove('hidden');
       return;
     }
-    if(!d.properties||!d.properties.length){sel.innerHTML='<option value="">No GA4 properties visible to this account</option>';return;}
+    if(!d.properties||!d.properties.length){
+      sel.innerHTML='<option value="">No GA4 properties visible to this account</option>';
+      if(search)search.placeholder='No GA4 properties visible to this account';
+      return;
+    }
     sel.innerHTML='<option value="">None</option>'+d.properties.map(p=>
       '<option value="'+esc(p.property)+'">'+esc(p.displayName)+' ('+esc(p.accountName)+')</option>').join('');
+    if(search)search.placeholder='Search properties...';
   }catch(e){
     sel.innerHTML='<option value="">Could not load GA4 properties</option>';
+    if(search)search.placeholder='Could not load GA4 properties';
   }
 }
 async function perfReconnectForGa4(){
@@ -4212,6 +4299,7 @@ async function saveSettings(){
   }catch(e){toast('Save failed');}
 }
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('sheet').classList.contains('open'))closeSettings();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('picker-modal').classList.contains('open'))closePicker();});
 
 /* ===================== software updates ===================== */
 async function checkUpdates(){
