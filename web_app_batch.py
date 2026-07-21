@@ -981,7 +981,22 @@ class Session:
             add_log("Cleared cache & cookies - fetching fresh results")
         except Exception:
             pass
-        warm_up(self.driver, self.country, add_log, lang=self.lang)
+        try:
+            warm_up(self.driver, self.country, add_log, lang=self.lang)
+        except Exception as e:
+            # The browser hanging on its very first navigation is the exact symptom of
+            # an unanswered proxy login prompt (a native browser dialog, not a web page
+            # - there's nothing in the DOM for Selenium to click or fill, and no
+            # credentials for a regular user to type even if they could see it). Give a
+            # concrete, actionable message here instead of a generic timeout, since this
+            # specific failure otherwise leaves someone staring at a login box they
+            # have no way to complete.
+            if proxy and proxy.get("user") and proxy.get("pass"):
+                add_log(f"First page load failed ({e}) - if the browser window shows a "
+                        f"proxy login prompt, the auto-fill didn't work this time. Don't "
+                        f"enter anything there (you don't have the password) - stop this "
+                        f"run and let your admin check the proxy setup instead.")
+            raise
         return self.driver
 
     def quit(self):
