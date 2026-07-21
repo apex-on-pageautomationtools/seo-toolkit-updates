@@ -6013,6 +6013,11 @@ https://example.com/page-2"></textarea>
           _idxLog('Submitted ' + (d.submitted || 0) + '/' + urls.length
             + (d.dropped_duplicates ? ' (' + d.dropped_duplicates + ' duplicate(s) removed)' : ''));
           $('idx-fallback-wrap').classList.toggle('hidden', _idxLastLeftover.length === 0);
+          // Pre-fill the fallback domain from the leftover URLs so the user submits
+          // against the right property (typing it by hand was an easy way to miss).
+          if (_idxLastLeftover.length && !$('idx-fb-domain').value.trim()) {
+            try { $('idx-fb-domain').value = new URL(_idxLastLeftover[0]).hostname.replace(/^www\./, ''); idxFbDomainChanged(); } catch (e) { }
+          }
         } catch (e) {
           $('idx-progress').textContent = 'Error';
           $('idx-progress').className = 'tag t-no';

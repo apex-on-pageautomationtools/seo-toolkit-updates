@@ -633,32 +633,99 @@ def request_indexing_via_session(session_id, property_url, email, urls,
             try:
                 inspect_url = build_gsc_url("inspect", property_url) + "&id=" + urllib.parse.quote(url, safe="")
                 driver.get(inspect_url)
-                time.sleep(6)
-                body_text = driver.find_element(By.TAG_NAME, "body").text.lower()
-                if any(m in body_text for m in _INDEXING_QUOTA_MARKERS):
-                    log_fn(f"  {email}: Google's own daily Request Indexing quota is exhausted.")
-                    results.append({"url": url, "ok": False, "message": "google_quota_exceeded"})
-                    quota_hit = True
-                    continue
+                # URL Inspection pulls live data from the Google index (routinely
+                # 10-30s); the "Request indexing" control only renders once that
+                # finishes. Poll up to ~48s instead of a fixed 6s sleep, bailing early
+                # on quota / no-access / URL-not-on-property. The old fixed sleep +
+                # exact-text-node XPath was why the button read as "not found" even
+                # when the account genuinely had access to the property.
+                _FIND_BTN_JS = ("var els=document.querySelectorAll("
+                                "'span[role=\"button\"],div[role=\"button\"],button,a');"
+                                "for(var i=0;i<els.length;i++){var t=(els[i].innerText||'')"
+                                ".trim().toLowerCase();"
+                                "if(t.indexOf('request indexing')>-1 && t.length<=30){return els[i];}}"
+                                "return null;")
                 btn = None
-                for el in driver.find_elements(By.XPATH, "//*[normalize-space(text())='REQUEST INDEXING' or normalize-space(text())='Request indexing']"):
-                    btn = el
-                    break
-                if not btn:
-                    results.append({"url": url, "ok": False, "message": "request_indexing_button_not_found"})
-                    continue
-                btn.click()
-                _record_indexing_fallback_use(track_key)
-                time.sleep(5)
-                confirm_text = driver.find_element(By.TAG_NAME, "body").text.lower()
-                if any(m in confirm_text for m in _INDEXING_QUOTA_MARKERS):
+                state = None   # quota | no_access | not_on_property
+                body_text = ""
+                waited = 0
+                while waited < 48:
+                    time.sleep(3); waited += 3
+                    try:
+                        body_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+                    except Exception:
+                        body_text = ""
+                    if any(m in body_text for m in _INDEXING_QUOTA_MARKERS):
+                        state = "quota"; break
+                    if ("not on property" in body_text or "not on the property" in body_text
+                            or "url is not part of" in body_text or "isn't on this property" in body_text):
+                        state = "not_on_property"; break
+                    if ("verify ownership" in body_text or "you don't have access" in body_text
+                            or "you do not have access" in body_text
+                            or "choose a property" in body_text
+                            or "select a property to continue" in body_text):
+                        state = "no_access"; break
+                    try:
+                        btn = driver.execute_script(_FIND_BTN_JS)
+                    except Exception:
+                        btn = None
+                    if btn:
+                        break
+                if state == "quota":
                     log_fn(f"  {email}: Google's own daily Request Indexing quota is exhausted.")
                     results.append({"url": url, "ok": False, "message": "google_quota_exceeded"})
                     quota_hit = True
-                elif any(m in confirm_text for m in _INDEXING_SUCCESS_MARKERS):
-                    results.append({"url": url, "ok": True, "message": "requested"})
-                else:
-                    results.append({"url": url, "ok": True, "message": "requested (unconfirmed - check manually)"})
+                    continue
+                if state == "not_on_property":
+                    results.append({"url": url, "ok": False, "message":
+                        "URL is not on the chosen property - the account's property is a different "
+                        "variant (non-www vs www, http vs https, or sc-domain vs URL-prefix). Pick or "
+                        "verify the exact property that covers this URL."})
+                    continue
+                if state == "no_access":
+                    results.append({"url": url, "ok": False, "message":
+                        "This account is not a verified user of this property in Search Console - "
+                        "Request Indexing only works for properties the account has access to."})
+                    continue
+                if not btn:
+                    results.append({"url": url, "ok": False, "message":
+                        "Request Indexing control did not appear within 48s - URL Inspection may still "
+                        "have been loading, the session may need re-login (Google Accounts tab), or "
+                        "Google changed the button layout."})
+                    continue
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                except Exception:
+                    pass
+                try:
+                    btn.click()
+                except Exception:
+                    try:
+                        driver.execute_script("arguments[0].click();", btn)
+                    except Exception:
+                        pass
+                _record_indexing_fallback_use(track_key)
+                # The request runs a live indexability test (~30-90s) before confirming;
+                # poll for the confirmation / quota text rather than a fixed 5s sleep
+                # that reported "unconfirmed" for requests that did go through.
+                done = False
+                cwaited = 0
+                while cwaited < 90:
+                    time.sleep(5); cwaited += 5
+                    try:
+                        confirm_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+                    except Exception:
+                        confirm_text = ""
+                    if any(m in confirm_text for m in _INDEXING_QUOTA_MARKERS):
+                        log_fn(f"  {email}: Google's own daily Request Indexing quota is exhausted.")
+                        results.append({"url": url, "ok": False, "message": "google_quota_exceeded"})
+                        quota_hit = True; done = True; break
+                    if any(m in confirm_text for m in _INDEXING_SUCCESS_MARKERS):
+                        results.append({"url": url, "ok": True, "message": "requested"})
+                        done = True; break
+                if not done:
+                    results.append({"url": url, "ok": True, "message":
+                        "requested (submitted - confirmation not detected, verify manually)"})
             except Exception as e:
                 results.append({"url": url, "ok": False, "message": str(e)[:200]})
         _trim_session_cache(profile_dir)
