@@ -1768,7 +1768,7 @@ def warm_up(driver, country, logger=print, lang="en"):
 # Block detection
 # --------------------------------------------------------------------------- #
 def classify_page(src: str) -> str:
-    """Return one of: ok | consent | captcha | soft_block | http_403 | empty."""
+    """Return one of: ok | consent | captcha | soft_block | http_403 | network_error | empty."""
     s = (src or "").lower()
     if not s:
         return "empty"
@@ -1787,6 +1787,20 @@ def classify_page(src: str) -> str:
     if ("unusual traffic" in s or "automated queries" in s
             or "our systems have detected" in s):
         return "soft_block"
+    # Chromium's own network-error page ("Hmmm... can't reach this page",
+    # ERR_TIMED_OUT/ERR_PROXY_CONNECTION_FAILED/ERR_CONNECTION_* etc.) - this is NOT
+    # a Selenium-level TimeoutException (safe_get's retry never sees it), it's a real
+    # page the browser rendered well within the page-load timeout. Confirmed live: a
+    # transient proxy timeout on the Indexing Checker's URL-fallback path was
+    # silently treated as "ok" with zero real content, reporting a genuine "Yes,
+    # indexed" page as "Not indexed" and saving a screenshot of this error page as
+    # if it were real evidence. id="main-frame-error" is Chromium's stable DOM
+    # marker for this state across versions; the err_/can't-reach-this-page text
+    # checks are a backup for any renderer that omits it.
+    if ('id="main-frame-error"' in s or "err_timed_out" in s or "err_proxy_connection_failed" in s
+            or "err_connection_" in s or "err_name_not_resolved" in s or "err_internet_disconnected"
+            in s or "can't reach this page" in s or "this site can't be reached" in s):
+        return "network_error"
     return "empty"
 
 

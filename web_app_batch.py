@@ -54,7 +54,7 @@ import google_ads_keywords
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.4.7"
+APP_VERSION = "4.4.8"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -1144,7 +1144,7 @@ def _recover_page(sess, page_num):
                 raise
             except Exception:
                 pass
-        elif kind in ("soft_block", "http_403"):
+        elif kind in ("soft_block", "http_403", "network_error"):
             reason = "blocked"
             add_log(f"Block ({kind}) on page {page_num} - cooling down and reloading "
                     f"(attempt {attempt}/{retries})...")
@@ -1417,7 +1417,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
             src = page_source(sess.driver)
             kind = classify_page(src)
 
-        if kind in ("captcha", "soft_block", "http_403"):
+        if kind in ("captcha", "soft_block", "http_403", "network_error"):
             add_log(f"Block detected ({kind}). Starting recovery...")
             if not _recover(sess, kind):
                 return {"status": "captcha", "matches": match_domain([], domain_clean)}
@@ -1977,7 +1977,7 @@ def index_one(sess, raw_url, country, city=None, lang="en"):
         human_search(sess.driver, q, country, add_log, city=city, lang=lang)
         src = page_source(sess.driver)
         kind = classify_page(src)
-        if kind in ("captcha", "soft_block", "http_403"):
+        if kind in ("captcha", "soft_block", "http_403", "network_error"):
             if not _recover(sess, kind):
                 return {"status": "captcha", "indexed": "Unknown", "found_url": ""}
             _reanchor_locale(sess, country, lang)
@@ -2139,7 +2139,7 @@ def count_one(sess, keyword, country, city=None, lang="en"):
             human_search(sess.driver, keyword, country, add_log, city=city, lang=lang)
             src = page_source(sess.driver)
             kind = classify_page(src)
-        if kind in ("captcha", "soft_block", "http_403"):
+        if kind in ("captcha", "soft_block", "http_403", "network_error"):
             add_log(f"Block detected ({kind}). Starting recovery...")
             if not _recover(sess, kind):
                 return {"status": "captcha", "results_count": ""}
