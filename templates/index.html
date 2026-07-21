@@ -1279,6 +1279,8 @@ body.auth-pending .sidebar,body.auth-pending .app-body{visibility:hidden}
       </div>
       <div class="field">
         <label>GA4 Property <span class="hint">(for Analytics data - pick an account above first; optional if you only want GSC)</span></label>
+        <input type="text" id="perf-ga4-search" placeholder="Search properties..." autocomplete="off"
+               style="margin-bottom:6px" oninput="perfFilterGa4Properties(this.value)">
         <select id="perf-ga4-property">
           <option value="">Select a GSC account first</option>
         </select>
@@ -1490,7 +1492,7 @@ https://example.com/page-2"></textarea>
         </div>
         <div class="cur-kw" id="cur-kw"></div>
         <div class="prog"><div class="prog-bar" id="prog"></div></div>
-        <div class="prog-lbl" id="prog-lbl">0 / 0</div>
+        <div class="prog-lbl" id="prog-lbl">0 / 0<span id="prog-elapsed" style="opacity:.65;margin-left:8px"></span></div>
       </div>
 
       <div class="results-head" style="margin-top:18px">
@@ -2476,7 +2478,7 @@ function switchTab(m){
   }else{
     $('badge').className='badge b-idle';$('dot').className='dot d-idle';
     $('status-txt').textContent='Idle';
-    $('prog').style.width='0%';$('prog-lbl').textContent='';
+    $('prog').style.width='0%';$('prog-lbl').innerHTML='0 / 0<span id="prog-elapsed" style="opacity:.65;margin-left:8px"></span>';
   }
   // The shared #log box is written into directly by several tools (Crawl Tracker,
   // the 4 batch checkers) - clear it on every switch, not just for batch tools, or
@@ -2989,7 +2991,7 @@ function apply(d,m){
   m=m||d.mode||mode;
   const isActive=(m===mode);   // only the active tab drives the shared status bar / log
   if(isActive){
-    setStatus(d.status);updateProgress(d.current_index,d.total,d.current_keyword);
+    setStatus(d.status);updateProgress(d.current_index,d.total,d.current_keyword,d.elapsed_seconds);
     if(d.captcha_msg) showAlert(true,d.captcha_msg); else if(d.status!=='paused') showAlert(false);
     if(d.log&&d.log.length){const el=$('log');el.textContent=d.log.join('\n');el.scrollTop=el.scrollHeight;}
   }
@@ -3027,10 +3029,17 @@ function setStatus(s){
   b.className='badge b-'+s;dot.className='dot d-'+s;
   t.textContent=s.charAt(0).toUpperCase()+s.slice(1);
 }
-function updateProgress(cur,tot,kw){
+function _fmtElapsed(sec){
+  sec=Math.max(0,Math.round(sec||0));
+  const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=sec%60;
+  const pad=n=>String(n).padStart(2,'0');
+  return h>0?(h+':'+pad(m)+':'+pad(s)):(m+':'+pad(s));
+}
+function updateProgress(cur,tot,kw,elapsed){
   const pct=tot>0?Math.min(100,Math.round(cur/tot*100)):0;
   $('prog').style.width=pct+'%';
-  $('prog-lbl').textContent=cur+' / '+tot;
+  $('prog-lbl').firstChild.textContent=cur+' / '+tot;
+  $('prog-elapsed').textContent=elapsed?('· '+_fmtElapsed(elapsed)):'';
   $('cur-kw').textContent=(kw&&cur>0&&cur<=tot)?'Checking: "'+kw+'"':'';
 }
 const _modeState={ranking:'idle',index:'idle',count:'idle',backlink:'idle',onpage:'idle',health:'idle',gsc:'idle',crawl:'idle',brief:'idle',wayback:'idle',seranking:'idle',geo:'idle',performance:'idle',keywordvolume:'idle',admin:'idle'};
@@ -3628,11 +3637,26 @@ async function perfLoadGscAccounts(){
     sel.innerHTML='<option value="">Could not load accounts</option>';
   }
 }
+function perfFilterGa4Properties(query){
+  const sel=$('perf-ga4-property');
+  const q=(query||'').trim().toLowerCase();
+  let firstMatch=null;
+  Array.from(sel.options).forEach(opt=>{
+    const match=!q||!opt.value||opt.textContent.toLowerCase().includes(q);
+    opt.hidden=!match;
+    if(match&&opt.value&&!firstMatch)firstMatch=opt;
+  });
+  // If the currently selected option got filtered out, jump to the first visible match
+  // instead of leaving a hidden option silently selected.
+  if(sel.selectedOptions[0]&&sel.selectedOptions[0].hidden)sel.value=firstMatch?firstMatch.value:'';
+}
 async function perfLoadGa4Properties(){
   const email=$('perf-gsc-account').value;
   const sel=$('perf-ga4-property');
   const reauth=$('perf-ga4-reauth');
+  const search=$('perf-ga4-search');
   reauth.classList.add('hidden');
+  if(search)search.value='';
   if(!email){sel.innerHTML='<option value="">Select a GSC account first</option>';return;}
   sel.innerHTML='<option value="">Loading GA4 properties...</option>';
   try{

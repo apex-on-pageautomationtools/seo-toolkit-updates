@@ -407,7 +407,7 @@ BATCH_MODES = ("ranking", "index", "count", "backlink")
 def _fresh_state(mode):
     return {"status": "idle", "current_keyword": "", "current_index": 0, "total": 0,
             "results": [], "captcha_msg": "", "error_msg": "", "log": [],
-            "driver": None, "mode": mode, "domain": ""}
+            "driver": None, "mode": mode, "domain": "", "start_time": None, "elapsed_at_end": None}
 
 class _Job:
     def __init__(self, mode):
@@ -1896,6 +1896,9 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
         with state_lock:
             state["status"] = "error"; state["error_msg"] = str(e)
     finally:
+        with state_lock:
+            if state.get("start_time"):
+                state["elapsed_at_end"] = time.time() - state["start_time"]
         sess.quit()
 
 # --------------------------------------------------------------------------- #
@@ -2057,6 +2060,9 @@ def run_index_analysis(urls, delay, headless, country, proxies,
         with state_lock:
             state["status"] = "error"; state["error_msg"] = str(e)
     finally:
+        with state_lock:
+            if state.get("start_time"):
+                state["elapsed_at_end"] = time.time() - state["start_time"]
         sess.quit()
 
 # --------------------------------------------------------------------------- #
@@ -2217,6 +2223,9 @@ def run_count_analysis(keywords, delay, headless, country, proxies,
         with state_lock:
             state["status"] = "error"; state["error_msg"] = str(e)
     finally:
+        with state_lock:
+            if state.get("start_time"):
+                state["elapsed_at_end"] = time.time() - state["start_time"]
         sess.quit()
 
 # --------------------------------------------------------------------------- #
@@ -2449,6 +2458,9 @@ def run_backlink_analysis(urls, domain, delay, headless, country, proxies,
         with state_lock:
             state["status"] = "error"; state["error_msg"] = str(e)
     finally:
+        with state_lock:
+            if state.get("start_time"):
+                state["elapsed_at_end"] = time.time() - state["start_time"]
         sess.quit()
 
 # --------------------------------------------------------------------------- #
@@ -2847,7 +2859,8 @@ def api_start():
     with state_lock:
         state.update({"status": "starting", "current_keyword": "", "current_index": 0,
                       "total": len(keywords), "results": [], "captcha_msg": "",
-                      "error_msg": "", "mode": mode, "log": [], "domain": domain})
+                      "error_msg": "", "mode": mode, "log": [], "domain": domain,
+                      "start_time": time.time()})
     pause_event.set(); stop_event.clear(); clear_autosave()
 
     if city and latitude is not None:
@@ -3081,6 +3094,11 @@ def api_status():
     with state_lock:
         snap = dict(state)
     snap.pop("driver", None)
+    st = snap.get("start_time")
+    if snap.get("status") in ("starting", "running", "paused") and st:
+        snap["elapsed_seconds"] = time.time() - st
+    else:
+        snap["elapsed_seconds"] = snap.get("elapsed_at_end") or 0
     return jsonify(snap)
 
 @app.route("/api/load-autosave")
@@ -6027,18 +6045,13 @@ def _kill_previous():
         pass
 
 def main():
-    # Skip the update check when launched by a start script (Start Tool.vbs / run.bat
-    # already run the updater BEFORE the server). Re-checking here just adds a network
-    # round-trip to startup, which on a slow connection pushes the port-file write past
-    # the launcher's timeout -> "SEO Toolkit Pro could not start". GRC_NO_BROWSER is set
-    # by the launcher, so it doubles as the "already updated" signal.
-    if not os.environ.get("GRC_NO_BROWSER") and not os.environ.get("GRC_SKIP_UPDATE"):
-        try:
-            update_result = updater.check_and_update()
-            if update_result.get("updated"):
-                print(f"[GRC] Updated {len(update_result.get('updated_files', []))} file(s)")
-        except Exception as e:
-            print(f"[GRC] Update check skipped: {e}")
+    # No update check here, ever - it used to run synchronously before the server
+    # started/browser opened for any launch path that didn't set GRC_NO_BROWSER (i.e.
+    # anything other than Start Tool.vbs), and a slow/blocked network call there could
+    # delay or outright prevent the app from loading. Start Tool.vbs now starts the
+    # server first regardless, and the in-page auto-check (setTimeout(autoCheckUpdates,
+    # 3500) in index.html) runs the real update check AFTER the page has already
+    # loaded, for every launch path - a blocking check here is fully redundant.
 
     port = int(os.environ.get("GRC_PORT", "5070"))
     url = f"http://127.0.0.1:{port}"
