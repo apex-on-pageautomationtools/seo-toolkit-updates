@@ -49,6 +49,19 @@ ROOT = Path(__file__).parent.resolve()
 # ModuleNotFoundError and no on-page report is ever produced on user machines.
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+# Used by every section's shot()/_add_bordered_image() screenshot helper below.
+# Was previously imported LOCALLY inside only one of the many section-building
+# functions (as `_hr`, not `hr`) - every OTHER section referenced the plain
+# name `hr`, which was never defined in their scope at all. Some of those call
+# sites are wrapped in a bare `except Exception: pass` (silently dropping the
+# screenshot with no visible error), others aren't wrapped at all (would crash
+# report generation outright the first time that section had a real
+# screenshot to embed). A single module-level import fixes every call site at
+# once instead of patching each one individually.
+try:
+    import generate_health_report as hr
+except Exception:
+    hr = None
 OUTPUT_DIR = ROOT / "output"
 TPL_META = ROOT / "template_meta_suggestions.xlsx"
 TPL_ALT = ROOT / "template_alt_suggestions.xlsx"
@@ -2900,7 +2913,10 @@ def _setup_docx(domain, use_cover=True):
         src = (captured or {}).get(key)
         if src and Path(src).exists():
             green("Screenshot:")
-            hr._add_bordered_image(doc, src)
+            try:
+                hr._add_bordered_image(doc, src)
+            except Exception:
+                pass
 
     def summary_table(findings):
         from docx.oxml.ns import qn

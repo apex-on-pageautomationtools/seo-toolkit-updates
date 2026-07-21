@@ -416,7 +416,7 @@ def check_da_pa(driver, url_or_domain, log_fn=None):
                     result["dr"] = check_domain_rating(domain, log_fn=log_fn)
                 _da_cache[domain] = result
                 if log_fn:
-                    log_fn(f"  DA={result['da']}, DR={dr_val}, PA={result.get('pa','N/A')} (from {result['source']})")
+                    log_fn(f"  DA={result['da']}, DR={result.get('dr','N/A')}, PA={result.get('pa','N/A')} (from {result['source']})")
                 # Navigate back to avoid interference
                 if original_url and original_url.startswith("http"):
                     try:
