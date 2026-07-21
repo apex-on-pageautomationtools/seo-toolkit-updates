@@ -2078,14 +2078,36 @@ def _get_organic_links(src):
 
     rso = soup.select_one("#rso") or soup.select_one("#search") or soup
 
+    # jsname="UWckNb" and the zReHs class are NOT organic-exclusive - Google
+    # reuses them on inline shopping/product-card carousels that render
+    # inside #rso for commercial queries, which were being counted as if
+    # they were real organic results (confirmed live: a passport-photo
+    # search had 2 such cards inflate a result from Google's own #9 to a
+    # reported #11). Genuine organic title links always sit on/near an <h3>;
+    # carousel cards don't, so require that same association strategies 3-5
+    # already use before strategies 1-2 will accept a link.
+    def _near_h3(a):
+        if a.find("h3"):
+            return True
+        node = a
+        for _ in range(3):
+            node = node.parent
+            if not node:
+                break
+            if node.find("h3"):
+                return True
+        return False
+
     # 1. jsname="UWckNb" - Google's primary title anchor attribute
     for a in rso.select('a[jsname="UWckNb"]'):
-        add(a.get("href", ""))
+        if _near_h3(a):
+            add(a.get("href", ""))
 
     # 2. zReHs class - alternative Google title anchor class
     if not links:
         for a in rso.select("a.zReHs"):
-            add(a.get("href", ""))
+            if _near_h3(a):
+                add(a.get("href", ""))
 
     # 3. h3-parent: walk up from heading to parent <a> (works across all Google layouts)
     if not links:
