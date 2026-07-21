@@ -1,5 +1,5 @@
 {
-  "version": "4.4.4",
+  "version": "4.4.5",
   "files": [
     {
       "path": "da_checker.py",
@@ -13,7 +13,7 @@
     },
     {
       "path": "engine.py",
-      "hash": "b8effd3452425576d8b0da0c8f05c2a6becee763f29c0d1e7ca11d5015b2a27a",
+      "hash": "d86ed0b957d79d196beeca0186dc7e998b4eb3db88a6c5ac6e4595544c0f746b",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/engine.py"
     },
     {

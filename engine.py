@@ -1162,10 +1162,18 @@ class ProxyPool:
 # --------------------------------------------------------------------------- #
 # Proxy-auth extension (Chrome can't take user:pass on the CLI)
 # --------------------------------------------------------------------------- #
-def _build_proxy_auth_extension(proxy) -> str | None:
+def _build_proxy_auth_extension(proxy, logger=print) -> str | None:
     """Create a tiny MV2 extension that answers the proxy auth challenge.
     Returns the extension dir path, or None if no auth needed."""
     if not (proxy and proxy.get("user") and proxy.get("pass")):
+        if proxy and proxy.get("host"):
+            # A proxy is configured but has no user/pass - if it actually needs auth,
+            # the browser will show its native login prompt with no way to answer it
+            # automatically, since this is the ONLY mechanism that can. Logged so a
+            # future "proxy keeps asking to log in" report can be diagnosed from this
+            # line alone instead of re-investigated from scratch.
+            logger(f"[proxy-auth] Proxy {proxy.get('host')}:{proxy.get('port')} has no "
+                   f"user/pass configured - skipping auto-auth extension")
         return None
     scheme = proxy.get("type", "http")
     host = proxy["host"]
@@ -1196,12 +1204,16 @@ chrome.webRequest.onAuthRequired.addListener(
 );
 """ % (scheme, host, port, user, pwd)
 
-    d = tempfile.mkdtemp(prefix="grc_proxy_")
-    path = os.path.join(d, "proxy_auth.zip")
-    with zipfile.ZipFile(path, "w") as zf:
-        zf.writestr("manifest.json", json.dumps(manifest))
-        zf.writestr("background.js", background)
-    return path
+    try:
+        d = tempfile.mkdtemp(prefix="grc_proxy_")
+        path = os.path.join(d, "proxy_auth.zip")
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("manifest.json", json.dumps(manifest))
+            zf.writestr("background.js", background)
+        return path
+    except Exception as e:
+        logger(f"[proxy-auth] Could not build the auto-auth extension: {e}")
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -1396,7 +1408,7 @@ def fetch_free_proxy(country_code="us", logger=print):
 # --------------------------------------------------------------------------- #
 # Driver factory (Edge via native Selenium, Chrome via undetected-chromedriver)
 # --------------------------------------------------------------------------- #
-def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en"):
+def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logger=print):
     """Arguments shared by Edge and Chrome. Returns list of CLI args."""
     vw, vh = random.choice(_VIEWPORTS)
     args = [
@@ -1432,19 +1444,23 @@ def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en"):
     # Extensions (Buster, VPN) + proxy-auth helper need a visible browser.
     ext_dirs = []
     if not headless:
-        auth_ext = _build_proxy_auth_extension(proxy)
+        auth_ext = _build_proxy_auth_extension(proxy, logger)
         if auth_ext:
             outdir = auth_ext[:-4] + "_unpacked"
             try:
                 with zipfile.ZipFile(auth_ext) as zf:
                     zf.extractall(outdir)
                 ext_dirs.append(outdir)
-            except Exception:
-                pass
+            except Exception as e:
+                logger(f"[proxy-auth] Could not unpack the auto-auth extension: {e}")
+        elif proxy and proxy.get("user") and proxy.get("pass"):
+            logger("[proxy-auth] Auto-auth extension build failed - proxy login prompt may appear")
         for e in (extra_extensions or []):
             if e and os.path.isdir(e):
                 ext_dirs.append(e)
     if ext_dirs:
+        if proxy and proxy.get("user") and proxy.get("pass"):
+            logger(f"[proxy-auth] Loading {len(ext_dirs)} extension(s) incl. auto-auth helper")
         args.append("--load-extension=" + ",".join(ext_dirs))
 
     if headless:
@@ -1587,7 +1603,7 @@ def build_driver(profile_dir, proxy=None, headless=False, country="us",
     else:
         btype = "chrome"
 
-    args = _common_args(profile_dir, headless, proxy, extra_extensions, lang)
+    args = _common_args(profile_dir, headless, proxy, extra_extensions, lang, logger)
 
     if btype == "edge":
         try:
