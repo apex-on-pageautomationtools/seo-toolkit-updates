@@ -200,6 +200,19 @@ def _get_page(url):
         return _PAGE_CACHE[url]
     status = _http_status(url)
     html = "" if status in (404, 410) else _render_html(url)
+    # status == 0 (host unreachable) with no rendered content either is what a
+    # transient DNS/connection blip looks like - both the raw HTTP check AND the
+    # browser fail near-instantly (well under a second combined), not a real
+    # timeout. Confirmed live: a whole brief report came back with Title/Meta/
+    # Header/Alt all "Could not check" and Sitemap "Not found" from exactly
+    # this - a real page, reachable seconds later via other checks in the same
+    # run, was cached as permanently broken from one bad moment with zero
+    # retry. One retry after a short pause is cheap insurance against exactly
+    # that, since this result gets cached and reused for the rest of the run.
+    if status == 0 and not html:
+        time.sleep(4)
+        status = _http_status(url)
+        html = "" if status in (404, 410) else _render_html(url)
     exists = status not in (404, 410) and not _looks_not_found(html)
 
     path = re.sub(r'^https?://[^/]+', '', url).split('#')[0].split('?')[0]

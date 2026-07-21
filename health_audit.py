@@ -9,6 +9,7 @@ Adapted from james-seo-tools generate_health_report.py
 import os
 import re
 import tempfile
+import time
 import urllib.request as _ur
 import urllib.error as _ue
 from pathlib import Path
@@ -662,17 +663,28 @@ def check_sitemap(domain, robots_data=None):
     last = {"ok": False, "status": 0, "summary": "No sitemap found."}
     for url in candidates:
         name = url.rsplit("/", 1)[-1] or "sitemap.xml"
-        try:
-            req = _ur.Request(url, headers={"User-Agent": _UA})
-            with _ur.urlopen(req, timeout=15) as r:
-                code = r.status
-                content = r.read().decode("utf-8", "ignore")
-        except _ue.HTTPError as e:
-            last = {"ok": False, "status": e.code,
-                    "summary": f"{name} returned HTTP {e.code} - file is missing or inaccessible."}
-            continue
-        except Exception as e:
-            last = {"ok": False, "status": 0, "summary": f"Could not fetch {name}: {e}"}
+        # A raw connection/timeout failure (NOT a real HTTP 404/etc.) gets one retry
+        # after a short pause before giving up on this candidate - a transient
+        # network blip shouldn't permanently report "sitemap not found" for a site
+        # whose sitemap is actually fine, and this result isn't checked again later
+        # in the same run.
+        content = None
+        for attempt in (1, 2):
+            try:
+                req = _ur.Request(url, headers={"User-Agent": _UA})
+                with _ur.urlopen(req, timeout=15) as r:
+                    code = r.status
+                    content = r.read().decode("utf-8", "ignore")
+                break
+            except _ue.HTTPError as e:
+                last = {"ok": False, "status": e.code,
+                        "summary": f"{name} returned HTTP {e.code} - file is missing or inaccessible."}
+                break
+            except Exception as e:
+                last = {"ok": False, "status": 0, "summary": f"Could not fetch {name}: {e}"}
+                if attempt == 1:
+                    time.sleep(3)
+        if content is None:
             continue
         if not content.strip():
             last = {"ok": False, "status": code, "summary": f"{name} exists but is empty."}
