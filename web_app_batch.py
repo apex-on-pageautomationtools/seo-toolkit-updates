@@ -51,6 +51,12 @@ import requests as http_requests
 import brief_analysis
 import google_ads_keywords
 import site_audit
+# site_audit's own import above already puts SCRIPTS_DIR on sys.path, so this
+# resolves fine despite living in scripts/ - imported as a module (not run via
+# subprocess like the SEranking Audit tool's own upload-driven flow) since the
+# Site Audit report is built in-process straight from sa_state["results"],
+# with no intermediate file to hand a subprocess.
+import generate_seranking_audit
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -4659,6 +4665,77 @@ def api_sa_status():
 def api_sa_stop():
     sa_stop.set()
     return jsonify({"status": "stopping"})
+
+
+# --------------------------------------------------------------------------- #
+# Site Audit downloadable report - the same polished, suggestion-filled .xlsx
+# the SEranking Audit tool produces, built straight from the completed run's
+# sa_state["results"] (generate_seranking_audit.build_report_from_site_audit),
+# not a re-run of the crawl. Own state dict + start/status/download routes,
+# same background-thread pattern as every other report-generating tool here -
+# generating suggestions calls out to AI/heuristic logic per flagged page, so
+# it's not always fast enough for a single synchronous request/response.
+# --------------------------------------------------------------------------- #
+sar_state = {"status": "idle", "output_file": "", "error_msg": "", "domain": ""}
+sar_lock = threading.Lock()
+
+
+def _run_sa_report(domain, results, brand):
+    with sar_lock:
+        sar_state.update({"status": "running", "output_file": "", "error_msg": "", "domain": domain})
+    try:
+        out_dir = _domain_folder(domain, "site_audit")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        out_path = os.path.join(out_dir, f"Site Audit Report - {domain} - {ts}.xlsx")
+        generate_seranking_audit.build_report_from_site_audit(results, out_path, brand=brand)
+        with sar_lock:
+            sar_state["status"] = "completed"
+            sar_state["output_file"] = out_path
+        activity(f"Site audit report generated - {domain}")
+    except Exception as e:
+        with sar_lock:
+            sar_state["status"] = "error"
+            sar_state["error_msg"] = str(e)
+
+
+@app.route("/api/site-audit/report/start", methods=["POST"])
+def api_sa_report_start():
+    if not _require_tool("siteaudit"):
+        return jsonify({"error": "You don't have access to the Site Audit tool."}), 403
+    with sa_lock:
+        if sa_state["status"] != "completed" or not sa_state["results"]:
+            return jsonify({"error": "Run a site audit to completion first."}), 400
+        results = sa_state["results"]
+        domain = sa_state["domain"]
+    with sar_lock:
+        if sar_state["status"] == "running":
+            return jsonify({"error": "Report generation already running."}), 400
+    data = request.get_json(silent=True) or {}
+    brand = (data.get("brand") or domain or "").strip()
+    t = threading.Thread(target=_run_sa_report, args=(domain, results, brand), daemon=True)
+    t.start()
+    return jsonify({"status": "started"})
+
+
+@app.route("/api/site-audit/report/status")
+def api_sa_report_status():
+    with sar_lock:
+        return jsonify({
+            "status": sar_state["status"],
+            "error_msg": sar_state["error_msg"],
+            "has_file": bool(sar_state["output_file"]),
+        })
+
+
+@app.route("/api/site-audit/report/download")
+def api_sa_report_download():
+    with sar_lock:
+        out_path = sar_state.get("output_file", "")
+    if not out_path or not os.path.exists(out_path):
+        return jsonify({"error": "No report available for download."}), 404
+    resp = send_file(out_path, as_attachment=True, download_name=os.path.basename(out_path))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 # --------------------------------------------------------------------------- #

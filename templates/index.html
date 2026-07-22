@@ -3287,6 +3287,14 @@ https://example.com/page-2"></textarea>
               <div class="log" id="sa-log" style="height:220px;overflow-y:auto;font-size:12px"></div>
               <div id="sa-results" class="hidden" style="margin-top:16px"></div>
               <div style="margin-top:14px;display:flex;gap:10px">
+                <button class="btn btn-primary" id="btn-sa-download" onclick="saDownloadReport()" disabled>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Download Report
+                </button>
                 <button class="btn btn-tonal" onclick="saReset()">New Audit</button>
                 <button class="btn btn-tonal" onclick="copyLogText('sa-log')">Copy Log</button>
               </div>
@@ -5764,6 +5772,7 @@ https://example.com/page-2"></textarea>
             $('sa-progress').className = 'tag t-yes';
             finishToolProgress('sa', true);
             setButtons('completed', 'siteaudit'); stopSaPoll(); stopReportTimer('sa');
+            $('btn-sa-download').disabled = false;
             if (d.results) saRenderResults(d.results);
             toast('Site audit complete');
           } else if (d.status === 'error') {
@@ -5787,7 +5796,37 @@ https://example.com/page-2"></textarea>
         $('siteaudit-active').classList.add('hidden');
         $('sa-log').textContent = '';
         $('sa-results').classList.add('hidden'); $('sa-results').innerHTML = '';
+        $('btn-sa-download').disabled = true;
         setButtons('idle', 'siteaudit'); stopSaPoll(); resetReportTimer('sa'); resetToolProgress('sa');
+      }
+      let saReportTimer = null;
+      async function saDownloadReport() {
+        const btn = $('btn-sa-download');
+        const label = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = 'Generating report...';
+        try {
+          const r = await fetch('/api/site-audit/report/start', { method: 'POST' });
+          const d = await r.json();
+          if (d.error) { toast(d.error); btn.disabled = false; btn.innerHTML = label; return; }
+        } catch (e) { toast('Could not start report generation.'); btn.disabled = false; btn.innerHTML = label; return; }
+        if (saReportTimer) clearInterval(saReportTimer);
+        saReportTimer = setInterval(async () => {
+          try {
+            const r = await fetch('/api/site-audit/report/status');
+            const d = await r.json();
+            if (d.status === 'completed') {
+              clearInterval(saReportTimer); saReportTimer = null;
+              btn.disabled = false; btn.innerHTML = label;
+              window.location.href = '/api/site-audit/report/download';
+              toast('Site audit report ready');
+            } else if (d.status === 'error') {
+              clearInterval(saReportTimer); saReportTimer = null;
+              btn.disabled = false; btn.innerHTML = label;
+              toast('Report generation failed: ' + (d.error_msg || 'unknown error'));
+            }
+          } catch (e) { }
+        }, 2000);
       }
       function saRenderResults(results) {
         const s = results.summary || {};

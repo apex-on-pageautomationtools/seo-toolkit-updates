@@ -831,6 +831,264 @@ def process_workbook(in_path, out_path, brand, pdf_path=None, zip_path=None):
     log(f"[DONE] {out_path}")
 
 
+# --------------------------------------------------------------------------- #
+# Site Audit report - the SAME polished output (styling via _write_sheet(),
+# suggestions via onpage2.suggest_meta() / _suggest_alt_text()) as
+# process_workbook() above, but sourced from site_audit.py's already-computed
+# results dict instead of a parsed SE Ranking .xlsx export. No xlsx-parsing
+# step in between - that would just be a synthetic intermediate to throw away.
+# --------------------------------------------------------------------------- #
+def _sa_page_lookup(results):
+    return {p.get("url"): p for p in (results.get("pages") or []) if p.get("url")}
+
+
+def _sa_page_data_for(url, page_lookup):
+    """A minimal onpage2-shaped page_data dict (title/description/h1/url) for
+    suggest_meta() - built from Site Audit's own already-fetched per-page data
+    (site_audit._extract_page_data), never a second live fetch of the same
+    page. "body_text" isn't collected by Site Audit's lightweight extractor
+    (it only tracks a word count, not the text itself), so it's left blank -
+    suggest_meta() already treats that as "(not available)" and falls back to
+    the page's H1/URL-slug for its heuristic and AI-prompt topic, exactly like
+    a page with no visible body text would in the existing tool."""
+    p = page_lookup.get(url) or {}
+    title = p.get("title") or onpage2.MISSING
+    desc = p.get("description") or onpage2.MISSING
+    h1s = p.get("h1s") or []
+    h1 = h1s[0] if h1s else onpage2.MISSING
+    return {"url": url, "title": title, "description": desc, "h1": h1, "body_text": ""}
+
+
+def _sa_suggest(url, brand, page_lookup, cache):
+    if url in cache:
+        return cache[url]
+    result = onpage2.suggest_meta(_sa_page_data_for(url, page_lookup), [], brand)
+    cache[url] = result
+    return result
+
+
+def _sa_broken_link_suggestion(item):
+    """Reuses health_audit.check_broken_links' own suggested_redirect (already
+    computed during the audit's crawl - never regenerated here) and mirrors
+    _suggest_broken_link_fix()'s exact wording above for the no-redirect cases,
+    so the phrasing is identical whether it came from a live HEAD check
+    (SEranking-export path) or Site Audit's own crawl (this path)."""
+    redirect = item.get("suggested_redirect")
+    if redirect:
+        return f"Redirects to {redirect} - update the link to point there directly."
+    code = item.get("code")
+    if code in (404, 410):
+        return "Remove This URL"
+    if code:
+        return f"HTTP {code} - please verify manually."
+    return "Could not verify automatically - please check manually."
+
+
+def _sa_broken_links_sheet(items, page_lookup, brand, cache):
+    headers = ["Page URL", "Status Code", "Found On", "Broken link Suggestion"]
+    rows = [[it.get("url", ""), it.get("code", ""), "; ".join(it.get("found_on") or []),
+             _sa_broken_link_suggestion(it)] for it in items]
+    return headers, rows
+
+
+def _sa_missing_titles_sheet(items, page_lookup, brand, cache):
+    headers = ["Page URL", "Existing Title", "Suggested Title"]
+    rows = []
+    for it in items:
+        url = it.get("url", "")
+        s = _sa_suggest(url, brand, page_lookup, cache)
+        rows.append([url, "Missing", s["suggested_title"]])
+    return headers, rows
+
+
+def _sa_duplicate_titles_sheet(items, page_lookup, brand, cache):
+    headers = ["Title", "Page URL", "Suggested Title"]
+    rows = []
+    for it in items:
+        title = it.get("title", "")
+        for url in it.get("urls") or []:
+            s = _sa_suggest(url, brand, page_lookup, cache)
+            rows.append([title, url, s["suggested_title"]])
+    return headers, rows
+
+
+def _sa_missing_meta_sheet(items, page_lookup, brand, cache):
+    headers = ["Page URL", "Existing Description", "Suggested Description"]
+    rows = []
+    for it in items:
+        url = it.get("url", "")
+        s = _sa_suggest(url, brand, page_lookup, cache)
+        rows.append([url, "Missing", s["suggested_description"]])
+    return headers, rows
+
+
+def _sa_duplicate_meta_sheet(items, page_lookup, brand, cache):
+    headers = ["Description", "Page URL", "Suggested Description"]
+    rows = []
+    for it in items:
+        desc = it.get("description", "")
+        for url in it.get("urls") or []:
+            s = _sa_suggest(url, brand, page_lookup, cache)
+            rows.append([desc, url, s["suggested_description"]])
+    return headers, rows
+
+
+def _sa_missing_h1_sheet(items, page_lookup, brand, cache):
+    headers = ["Page URL", "Existing H1", "Suggested H1"]
+    rows = []
+    for it in items:
+        url = it.get("url", "")
+        s = _sa_suggest(url, brand, page_lookup, cache)
+        rows.append([url, "Missing", s["suggested_h1"]])
+    return headers, rows
+
+
+def _sa_multiple_h1_sheet(items, page_lookup, brand, cache):
+    headers = ["Page URL", "H1 Count", "Suggested H1"]
+    rows = []
+    for it in items:
+        url = it.get("url", "")
+        s = _sa_suggest(url, brand, page_lookup, cache)
+        rows.append([url, it.get("count", ""), s["suggested_h1"]])
+    return headers, rows
+
+
+def _sa_missing_alt_sheet(items, page_lookup, brand, cache):
+    headers = ["Page URL", "Image URL", "Suggested Alt Text"]
+    rows = []
+    for it in items:
+        url = it.get("url", "")
+        page = page_lookup.get(url) or {}
+        srcs = page.get("missing_alt_srcs") or []
+        if srcs:
+            for src in srcs:
+                rows.append([url, src, _suggest_alt_text(url, src, brand)])
+        else:
+            # Older cached results (from before Site Audit tracked per-image
+            # srcs) or a page whose "pages" entry didn't survive - fall back to
+            # the page-level count rather than guessing at an image URL.
+            rows.append([url, "", f"{it.get('count', 0)} image(s) missing alt text on this page - "
+                                   "add descriptive alt text for each manually."])
+    return headers, rows
+
+
+def _sa_thin_content_sheet(items, page_lookup, brand, cache):
+    headers = ["Page URL", "Word Count", "Suggestion"]
+    rows = [[it.get("url", ""), it.get("word_count", ""),
+             "Below the recommended minimum word count for this page type - expand it with more "
+             "unique, useful content that covers the topic in depth."] for it in items]
+    return headers, rows
+
+
+def _sa_redirect_chains_sheet(items, page_lookup, brand, cache):
+    headers = ["Page URL", "Hops", "Final URL", "Suggestion"]
+    rows = [[it.get("url", ""), it.get("hops", ""), it.get("final_url", ""),
+             "Update the original link(s) to point directly to the final destination URL, removing "
+             "the intermediate redirect hop(s)."] for it in items]
+    return headers, rows
+
+
+def _sa_noindex_sheet(items, page_lookup, brand, cache):
+    headers = ["Page URL", "Robots Meta", "Suggestion"]
+    rows = [[it.get("url", ""), it.get("robots", ""),
+             "This page is set to noindex - confirm that's intentional; if not, remove the noindex "
+             "directive so the page can be indexed."] for it in items]
+    return headers, rows
+
+
+def _sa_summary_only_sheet(items, page_lookup, brand, cache):
+    headers = ["Summary"]
+    return headers, [[it.get("summary", "")] for it in items]
+
+
+# (sheet display name, issues-dict key, row-builder). Order controls sheet
+# order in the output workbook. Only issue types Site Audit actually reports
+# something equivalent to an SE Ranking Audit sheet for are included here -
+# see build_report_from_site_audit()'s docstring for the ones that aren't.
+_SA_SHEET_SPECS = [
+    ("Broken Links", "broken_links", _sa_broken_links_sheet),
+    ("Missing Titles", "missing_titles", _sa_missing_titles_sheet),
+    ("Duplicate Titles", "duplicate_titles", _sa_duplicate_titles_sheet),
+    ("Missing Meta Descriptions", "missing_meta", _sa_missing_meta_sheet),
+    ("Duplicate Meta Descriptions", "duplicate_meta", _sa_duplicate_meta_sheet),
+    ("Missing H1", "missing_h1", _sa_missing_h1_sheet),
+    ("Multiple H1 Tags", "multiple_h1", _sa_multiple_h1_sheet),
+    ("Missing Alt Text", "missing_alt_images", _sa_missing_alt_sheet),
+    ("Thin Content Pages", "thin_content_pages", _sa_thin_content_sheet),
+    ("Redirect Chains", "redirect_chains", _sa_redirect_chains_sheet),
+    ("Noindex Pages", "noindex_pages", _sa_noindex_sheet),
+    ("Sitemap Issues", "sitemap_issues", _sa_summary_only_sheet),
+    ("Robots.txt Issues", "robots_issues", _sa_summary_only_sheet),
+]
+
+
+def build_report_from_site_audit(results, out_path, brand=None):
+    """Site Audit's results dict (site_audit.run_site_audit()'s return value) ->
+    the same polished, suggestion-filled workbook process_workbook() builds
+    from a real SE Ranking export - one sheet per issue type actually present
+    (not a fixed list), navy header row, "All issue" index sheet, suggestions
+    generated by the exact same onpage2.suggest_meta()/_suggest_alt_text()
+    logic that path uses.
+
+    Limitations (flagged rather than guessed around):
+      - Suggested H1 is always the same canned "Check manually as per ranking
+        and traffic" note - that's onpage2.suggest_meta()'s own real behavior
+        (it never generates a specific H1 replacement), not something
+        simplified here.
+      - "Missing Alt Text" gets a real per-image AI/heuristic ALT suggestion
+        only when the page's "pages" entry has "missing_alt_srcs" (added to
+        site_audit.py alongside this feature); a results dict produced by an
+        older Site Audit run without that field falls back to a page-level
+        note instead of guessing an image URL.
+      - Sitemap/robots.txt issues are passed through as their own summary
+        text, unchanged - same "never invent new claims about this" rule
+        process_workbook() already follows for raw crawl-fact sheets.
+      - No SE Ranking Audit sheet exists for JS/CSS issues, slow-loading
+        pages, orphaned pages, crawl depth, canonical tags, or nofollow
+        links - Site Audit doesn't currently check any of those, so there's
+        nothing to map for them either way.
+    """
+    brand = (brand or results.get("domain") or "").strip()
+    issues = results.get("issues") or {}
+    page_lookup = _sa_page_lookup(results)
+    cache = {}
+
+    # Same pre-scan-then-set_run_scale() pattern process_workbook() uses, so
+    # the AI paid-tier gate reflects this run's real scale before any
+    # suggestion generation starts.
+    total_rows = 0
+    for _name, key, _builder in _SA_SHEET_SPECS:
+        for it in issues.get(key) or []:
+            total_rows += max(1, len(it.get("urls") or []))
+    onpage2.set_run_scale(total_rows)
+
+    wb_out = openpyxl.Workbook()
+    wb_out.remove(wb_out.active)
+    issue_sheet_names = []
+
+    for name, key, builder in _SA_SHEET_SPECS:
+        items = issues.get(key) or []
+        if not items:
+            continue
+        log(f"Generating '{name}' ({len(items)} row(s))...")
+        headers, rows = builder(items, page_lookup, brand, cache)
+        if not rows:
+            continue
+        _write_sheet(wb_out, name, headers, rows)
+        issue_sheet_names.append(name)
+
+    if issue_sheet_names:
+        label = brand or results.get("domain") or Path(out_path).stem
+        _write_all_issue_sheet(wb_out, issue_sheet_names, label)
+    else:
+        wb_out.create_sheet("No Issues Found").append(
+            ["This site audit found no issues in a category this report covers."])
+
+    wb_out.save(out_path)
+    log(f"[DONE] {out_path}")
+    return out_path
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="in_path", default=None, help="SEranking Site Audit .xlsx export")

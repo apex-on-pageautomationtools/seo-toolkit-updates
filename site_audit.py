@@ -26,6 +26,7 @@ import html as _html
 import concurrent.futures
 import urllib.request as _ur
 import urllib.error as _ue
+import urllib.parse as _up
 
 import health_audit
 
@@ -101,7 +102,7 @@ def _fetch_page(url, timeout=15):
                 "redirect_hops": 0, "error": str(e)}
 
 
-def _extract_page_data(html_body):
+def _extract_page_data(html_body, page_url=None):
     titles, descs, robots_vals = [], [], []
     for m in re.finditer(r'<title[^>]*>(.*?)</title>', html_body, re.I | re.S):
         t = re.sub(r'\s+', ' ', m.group(1)).strip()
@@ -121,10 +122,20 @@ def _extract_page_data(html_body):
 
     imgs = re.findall(r'<img\s[^>]*>', html_body, re.I)
     missing_alt = 0
+    missing_alt_srcs = []
     for tag in imgs:
         alt_m = re.search(r'alt\s*=\s*["\']([^"\']*)["\']', tag, re.I)
         if not alt_m or not alt_m.group(1).strip():
             missing_alt += 1
+            src_m = re.search(r'\bsrc\s*=\s*["\']([^"\']*)["\']', tag, re.I)
+            src = src_m.group(1).strip() if src_m else ""
+            if src and page_url:
+                try:
+                    src = _up.urljoin(page_url, src)
+                except Exception:
+                    pass
+            if src:
+                missing_alt_srcs.append(src)
 
     text = re.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', html_body, flags=re.I | re.S)
     text = re.sub(r'<[^>]+>', ' ', text)
@@ -141,6 +152,7 @@ def _extract_page_data(html_body):
         "h1s": h1s[:3],
         "image_count": len(imgs),
         "missing_alt_count": missing_alt,
+        "missing_alt_srcs": missing_alt_srcs,
         "word_count": word_count,
     }
 
@@ -157,7 +169,7 @@ def _analyze_pages(urls, log_fn=print, max_workers=10, stop_event=None):
         for fut in concurrent.futures.as_completed(futures):
             page = fut.result()
             if page["html"]:
-                page.update(_extract_page_data(page["html"]))
+                page.update(_extract_page_data(page["html"], page_url=page["url"]))
             results.append(page)
             done += 1
             if done % 20 == 0 or done == total:
@@ -270,6 +282,16 @@ def run_site_audit(domain, cap=300, log_fn=print, stop_event=None):
 
     summary, issues = _aggregate(pages, status_results, broken_links, robots_check, sitemap_check)
 
+    # Full per-page extracted data (title/description/h1s/missing-alt image srcs/
+    # word count), minus the raw "html" body - the report builder (see
+    # scripts/generate_seranking_audit.py's build_report_from_site_audit) needs
+    # each flagged page's real current title/meta/H1 text to generate a
+    # suggestion from, but the issue items above only carry what's needed for
+    # the in-app table (e.g. a "missing title" item is just {"url": ...}).
+    # "html" itself is dropped - it's not needed downstream and this whole dict
+    # gets serialized to JSON on every status poll while a run is in progress.
+    pages_out = [{k: v for k, v in p.items() if k != "html"} for p in pages]
+
     log_fn("Done.")
     return {
         "domain": domain,
@@ -278,6 +300,7 @@ def run_site_audit(domain, cap=300, log_fn=print, stop_event=None):
         "discovery_source": source,
         "summary": summary,
         "issues": issues,
+        "pages": pages_out,
         "robots": robots_check,
         "sitemap": sitemap_check,
         "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
