@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.9.0"
+APP_VERSION = "4.9.1"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -2630,6 +2630,29 @@ def _fetch_runtime_keys_now():
 
 
 RUNTIME_KEYS_RETRY_TTL = 60  # short retry after a failed sync, instead of waiting the full 15 min
+
+
+BACKGROUND_UPDATE_CHECK_TTL = 1800  # 30 min
+
+
+def _background_update_loop():
+    """Pulls OTA updates on a timer for the life of the backend process, not just
+    once when a page happens to load - the backend keeps running even after the
+    browser window is closed (nothing kills it on window-close), so without this
+    an update sits unfetched until someone next opens the app long enough for the
+    in-page auto-check to fire. The in-page version-chip comparison already
+    handles surfacing "restart to apply" correctly regardless of which check
+    actually downloaded the files, since it just compares the running process's
+    baked-in APP_VERSION against the manifest's version on every page poll."""
+    while True:
+        time.sleep(BACKGROUND_UPDATE_CHECK_TTL)
+        try:
+            result = updater.check_and_update(log_fn=lambda _m: None)
+            if result.get("updated"):
+                n = len(result.get("updated_files", []))
+                print(f"[GRC] Background update check: {n} file(s) updated to v{result.get('remote_version')}")
+        except Exception as e:
+            print(f"[GRC] Background update check failed: {e}")
 
 
 def _runtime_keys_sync_loop():
@@ -6419,6 +6442,10 @@ def main():
     # Keep runtime API keys (ImgBB, PSI, Gemini, etc.) synced for every user
     # automatically - see _runtime_keys_sync_loop for the central+per-building merge.
     threading.Thread(target=_runtime_keys_sync_loop, daemon=True).start()
+
+    # Keep pulling OTA updates on a timer even while the browser window is closed -
+    # see _background_update_loop.
+    threading.Thread(target=_background_update_loop, daemon=True).start()
 
     try:
         from werkzeug.serving import make_server
