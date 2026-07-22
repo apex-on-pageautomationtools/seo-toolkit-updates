@@ -54,7 +54,7 @@ import google_ads_keywords
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.5.0"
+APP_VERSION = "4.6.0"
 
 # --------------------------------------------------------------------------- #
 # Paths
