@@ -2663,6 +2663,246 @@ def build_neon(data, out_path, log_fn=None):
     return out_path
 
 
+# --- Xenon K (8 slides) ---
+# Portrait A4 deck cloned from the "Xenon K" client reference
+# (D:\Report Formats\GSC Audit Report\Xenon K\Webmaster Audit Report Format.pptx).
+# Unlike the other 8-slide formats above (landscape 13.33x7.5), this reference is
+# a portrait A4 page (8.27x11.69in) with a dark-navy page background (#1F3864),
+# a medium-blue header bar (#2E75B6) on every content slide, and pill/oval status
+# badges. The reference's tiny badge icons (info / eye / check) are custom PNG
+# artwork; those are approximated here with a small white circle + a centered
+# glyph rather than bundling new binary image assets - matching this codebase's
+# existing convention (see brief_analysis.py's icon_circle()) of drawing every
+# report element with plain pptx shapes/text instead of embedded icon images.
+
+def build_xenonk(data, out_path, log_fn=None):
+    if log_fn is None:
+        log_fn = print
+    Presentation, Inches, Pt, Emu, RGBColor, PP_ALIGN, MSO_ANCHOR = _init_pptx()
+    from pptx.enum.shapes import MSO_SHAPE
+
+    prs = Presentation()
+    prs.slide_width = Inches(8.27)
+    prs.slide_height = Inches(11.69)
+
+    C = lambda h: RGBColor(int(h[1:3],16), int(h[3:5],16), int(h[5:7],16))
+    BG = C("#1F3864"); BANNER = C("#14264A"); BLUE = C("#2E75B6")
+    LIGHT_BLUE = C("#A9C7E8"); WHITE = RGBColor(0xFF,0xFF,0xFF)
+
+    domain = data.get("domain", "")
+    screenshots = data.get("screenshots", {})
+    gsc_statuses = screenshots.get("_statuses", {})
+    perf_daily = data.get("perfDaily", data.get("perf_daily", []))
+    generated = data.get("endDate") or datetime.now().strftime("%Y-%m-%d")
+
+    def _oval(slide, x, y, w, h, color):
+        shape = slide.shapes.add_shape(MSO_SHAPE.OVAL, Inches(x), Inches(y), Inches(w), Inches(h))
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = C(color) if isinstance(color, str) else color
+        shape.line.fill.background()
+        return shape
+
+    def _rrect(slide, x, y, w, h, color):
+        shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(h))
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = C(color) if isinstance(color, str) else color
+        shape.line.fill.background()
+        return shape
+
+    def _parallelogram(slide, x, y, w, h, color):
+        shape = slide.shapes.add_shape(MSO_SHAPE.PARALLELOGRAM, Inches(x), Inches(y), Inches(w), Inches(h))
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = C(color) if isinstance(color, str) else color
+        shape.line.fill.background()
+        return shape
+
+    def _brand_mark(slide, x, y, w, h, two_tone=True):
+        """4 diagonal slashes standing in for the reference's decorative logo mark."""
+        n = 4
+        slash_w = w / (n * 1.6)
+        gap = (w - n * slash_w) / (n - 1) if n > 1 else 0
+        colors = ["#2E75B6", "#A9C7E8", "#2E75B6", "#A9C7E8"]
+        for i in range(n):
+            sx = x + i * (slash_w + gap)
+            _parallelogram(slide, sx, y, slash_w, h, colors[i % len(colors)])
+
+    def _icon_badge(slide, cx, cy, d, glyph, glyph_color="#2E75B6", glyph_size=None):
+        """White circle with a centered glyph - stand-in for the reference's
+        custom info/eye/check icon artwork (see module note above)."""
+        r = d / 2.0
+        _oval(slide, cx - r, cy - r, d, d, "#FFFFFF")
+        if glyph_size is None:
+            glyph_size = max(8, int(d * 44))
+        tb = _text(slide, glyph, cx - r, cy - r, d, d, glyph_size, "Calibri",
+                   glyph_color, bold=True, align=PP_ALIGN.CENTER)
+        tb.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+        tb.text_frame.word_wrap = False
+        return tb
+
+    def _two_run_text(slide, x, y, w, h, label, value, size=13,
+                      label_color="#A9C7E8", value_color="#FFFFFF"):
+        txBox = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+        tf = txBox.text_frame
+        tf.word_wrap = True
+        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        p = tf.paragraphs[0]
+        r1 = p.add_run()
+        r1.text = label
+        r1.font.size = Pt(size); r1.font.name = "Calibri"; r1.font.bold = True
+        r1.font.color.rgb = C(label_color)
+        r2 = p.add_run()
+        r2.text = value
+        r2.font.size = Pt(size); r2.font.name = "Calibri"; r2.font.bold = True
+        r2.font.color.rgb = C(value_color)
+        return txBox
+
+    def bg_slide():
+        s = prs.slides.add_slide(prs.slide_layouts[6])
+        _rect(s, 0, 0, 8.27, 11.69, "#1F3864")
+        return s
+
+    def cover_footer(s):
+        _rect(s, 0, 9.90, 8.27, 1.79, "#FFFFFF")
+        _text(s, domain or "Website Name", 0.60, 10.35, 6.00, 0.70, 24,
+              "Bookman Old Style", BG, bold=True)
+        _brand_mark(s, 2.72, 9.72, 2.63, 0.29)
+
+    def header_slide(title):
+        s = bg_slide()
+        _rect(s, 0, 0, 8.27, 0.62, "#2E75B6")
+        hdr = _text(s, "Webmaster Audit Report", 0, 0, 8.27, 0.62, 13,
+                    "Bookman Old Style", WHITE, bold=True, align=PP_ALIGN.CENTER)
+        hdr.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+        _text(s, title, 0.60, 0.90, 7.07, 1.00, 27, "Bookman Old Style", WHITE, bold=True)
+        _rect(s, 0, 11.02, 8.27, 0.67, "#FFFFFF")
+        _brand_mark(s, 2.72, 10.85, 2.63, 0.29)
+        return s
+
+    def status_pill(s, label, value, w=3.26):
+        _rrect(s, 0.60, 3.55, w, 0.60, "#2E75B6")
+        _icon_badge(s, 1.03, 3.85, 0.30, "✓", "#2E75B6")
+        _two_run_text(s, 1.32, 3.55, w - 0.44, 0.60, label, value)
+
+    def screenshot_frame(s, shot_key, x, y, w, h, pad=0.12):
+        _rrect(s, x, y, w, h, "#FFFFFF")
+        img_path = screenshots.get(shot_key, "")
+        ix, iy, iw, ih = x + pad, y + pad, w - 2 * pad, h - 2 * pad
+        if img_path and os.path.exists(img_path):
+            from PIL import Image
+            with Image.open(img_path) as im:
+                pw, ph = im.size
+            aspect = pw / ph
+            target_w = Inches(iw); target_h = Inches(ih)
+            if aspect > (iw / ih):
+                fw = target_w; fh = int(target_w / aspect)
+            else:
+                fh = target_h; fw = int(target_h * aspect)
+            cx = Inches(ix) + (target_w - fw) // 2
+            cy = Inches(iy) + (target_h - fh) // 2
+            s.shapes.add_picture(img_path, cx, cy, fw, fh)
+        else:
+            _text(s, "Please check this manually", x, y + h / 2 - 0.25, w, 0.5, 16,
+                  "Calibri", BG, align=PP_ALIGN.CENTER)
+
+    # Slide 1: Cover
+    s = bg_slide()
+    _rect(s, 0, 0, 3.90, 0.62, "#14264A")
+    gen1 = _text(s, f"Generated: {generated}", 0.50, 0.0, 3.30, 0.62, 12.5,
+                "Calibri", WHITE, bold=True)
+    gen1.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+    _brand_mark(s, 4.20, 0.20, 4.07, 0.55)
+    _text(s, "GOOGLE SEARCH CONSOLE", 0.60, 3.90, 7.07, 0.50, 18, "Calibri", LIGHT_BLUE, bold=True)
+    _text(s, "AUDIT", 0.60, 4.50, 7.07, 1.10, 52, "Bookman Old Style", WHITE, bold=True)
+    _text(s, "REPORT", 0.60, 5.65, 7.07, 1.10, 52, "Bookman Old Style", WHITE, bold=True)
+    cover_footer(s)
+
+    # Slide 2: Introduction
+    s = header_slide("Introduction")
+    _text(s,
+          "Reviewing the Search Console for the website is one of the major aspects of our work. "
+          "We check the webmaster for all the important parameters - like traffic, manual actions, "
+          "security issues, and more - to confirm everything is performing well, so we can take "
+          "corrective steps if required.",
+          0.60, 2.10, 7.07, 1.90, 15, "Calibri", WHITE)
+    _text(s, "This 3rd-phase report is shared for your acknowledgment.",
+          0.60, 4.10, 7.07, 0.50, 15, "Calibri", WHITE)
+    _oval(s, 2.63, 6.60, 3.00, 3.00, "#2E75B6")
+    _icon_badge(s, 4.13, 8.10, 1.50, "i", "#2E75B6", glyph_size=66)
+
+    # Slide 3: Sitemap
+    s = header_slide("Sitemap")
+    _text(s,
+          "A sitemap is a file on your site that tells Google which pages we want it to know about. "
+          "It helps search engines discover and crawl your important pages efficiently.",
+          0.60, 2.00, 7.07, 1.50, 14.5, "Calibri", WHITE)
+    _rrect(s, 0.60, 3.55, 2.87, 0.60, "#2E75B6")
+    _icon_badge(s, 1.03, 3.85, 0.30, "\U0001F441", "#2E75B6", glyph_size=13)
+    _two_run_text(s, 1.32, 3.55, 2.43, 0.60, "Status:  ", "See Screenshot")
+    screenshot_frame(s, "sitemap", 0.60, 5.41, 7.07, 3.09)
+
+    # Slide 4: Performance
+    s = header_slide("Performance")
+    _text(s,
+          "The Performance report shows clicks, impressions, CTR, and average position from Google "
+          "Search over the selected period.",
+          0.60, 2.00, 7.07, 1.10, 14.5, "Calibri", WHITE)
+    total_clicks, total_impr, total_ctr, avg_pos = _totals(perf_daily)
+    stat_cards = [
+        (_fmt_num(total_clicks), "Total Clicks"),
+        (_fmt_num(total_impr), "Impressions"),
+        (f"{total_ctr:.1%}", "Avg. CTR"),
+        (f"{avg_pos:.1f}" if avg_pos else "0.0", "Avg. Position"),
+    ]
+    for i, (val, label) in enumerate(stat_cards):
+        cx = 0.60 + i * 1.82
+        _rect(s, cx, 3.20, 1.62, 1.15, "#14264A")
+        _text(s, val, cx, 3.30, 1.62, 0.55, 20, "Bookman Old Style", WHITE, bold=True, align=PP_ALIGN.CENTER)
+        _text(s, label, cx, 3.85, 1.62, 0.40, 11, "Calibri", LIGHT_BLUE, align=PP_ALIGN.CENTER)
+    screenshot_frame(s, "perf", 0.60, 5.93, 7.07, 3.44)
+
+    # Slide 5: Manual Action
+    s = header_slide("Manual Action")
+    _text(s,
+          "Google issues a manual action against a site when a human reviewer determines that pages "
+          "are not compliant with Google's webmaster quality guidelines.",
+          0.60, 2.00, 7.07, 1.50, 14.5, "Calibri", WHITE)
+    status_pill(s, "Status:  ", gsc_statuses.get("manual", "No Issues Detected"))
+    screenshot_frame(s, "manual", 0.60, 5.68, 7.07, 1.84)
+
+    # Slide 6: Security Issue
+    s = header_slide("Security Issue")
+    _text(s,
+          "If a Google evaluation determines that a site was hacked, or exhibits behaviour that could "
+          "harm visitors, the Security Issues report will show Google's findings.",
+          0.60, 2.00, 7.07, 1.50, 14.5, "Calibri", WHITE)
+    status_pill(s, "Status:  ", gsc_statuses.get("security", "No Issues Detected"))
+    screenshot_frame(s, "security", 0.60, 5.68, 7.07, 1.84)
+
+    # Slide 7: Check Any Page Found in Removal
+    s = header_slide("Check Any Page Found in Removal")
+    _text(s,
+          "Checks for any pages that have been temporarily or permanently removed from Google Search "
+          "results, so nothing important is unintentionally hidden.",
+          0.60, 2.00, 7.07, 1.50, 14.5, "Calibri", WHITE)
+    status_pill(s, "Status:  ", gsc_statuses.get("removals", "No Active Removals"))
+    screenshot_frame(s, "removals", 0.60, 5.41, 7.07, 3.09)
+
+    # Slide 8: Thank You
+    s = bg_slide()
+    _rect(s, 0, 0, 3.90, 0.62, "#14264A")
+    gen8 = _text(s, f"Generated: {generated}", 0.50, 0.0, 3.30, 0.62, 12.5,
+                "Calibri", WHITE, bold=True)
+    gen8.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+    _brand_mark(s, 4.20, 0.20, 4.07, 0.55)
+    _text(s, "THANK", 0.60, 4.30, 7.07, 1.10, 52, "Bookman Old Style", WHITE, bold=True)
+    _text(s, "YOU!", 0.60, 5.45, 7.07, 1.10, 52, "Bookman Old Style", WHITE, bold=True)
+    cover_footer(s)
+
+    prs.save(out_path)
+    log_fn(f"  Xenon K report saved: {os.path.basename(out_path)}")
+    return out_path
+
+
 # ---------------------------------------------------------------------------
 # Format registry & main entry point
 # ---------------------------------------------------------------------------
@@ -2673,6 +2913,7 @@ GSC_FORMATS = {
     "sigma":       {"label": "Sigma (10 slides)",           "builder": build_sigma},
     "omega":       {"label": "Omega (8 slides)",            "builder": build_omega},
     "neon":        {"label": "Neon (8 slides)",             "builder": build_neon},
+    "xenonk":      {"label": "Xenon K (8 slides)",          "builder": build_xenonk},
 }
 
 # Status strings that mean "no problem" - everything else from
@@ -2770,8 +3011,10 @@ def run_gsc_audit(domain, email, fmt="james", out_dir=None, driver=None,
         "generatedDate": datetime.now().strftime("%d-%B-%Y"),
     }
 
-    # Fetch API data for James Full and Sigma
-    if fmt in ("james", "sigma"):
+    # Fetch API data for James Full, Sigma, and Xenon K (Xenon K's Performance
+    # slide shows real Total Clicks / Impressions / CTR / Position stat cards,
+    # not just the raw GSC screenshot, so it needs perfDaily too).
+    if fmt in ("james", "sigma", "xenonk"):
         log_fn("  Fetching GSC API data...")
         api_data = fetch_all_api_data(token, property_url, start_date, end_date, log_fn)
         report_data.update(api_data)
