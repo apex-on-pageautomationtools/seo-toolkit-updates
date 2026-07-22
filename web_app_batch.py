@@ -5696,6 +5696,132 @@ def api_admin_delete_proxy():
             _shared_proxies_cache["ts"] = 0
     return jsonify(result)
 
+@app.route("/api/admin/bulk_save_proxies", methods=["POST"])
+def api_admin_bulk_save_proxies():
+    """Bulk-paste add path: one upsert call per proxy line, all sharing the same
+    Title/Region + Type entered once above the textarea. Reuses the existing
+    single-proxy `proxies_upsert` gateway action (no gateway change needed) -
+    just calls it N times server-side so the browser only makes one round trip."""
+    if _admin_auth_params() is None:
+        return jsonify({"error": "You're not logged in as an approved admin on this device."})
+    data = request.get_json(silent=True) or {}
+    proxies = data.get("proxies") or []
+    if not isinstance(proxies, list) or not proxies:
+        return jsonify({"error": "No proxies provided"})
+    if len(proxies) > 500:
+        return jsonify({"error": "Too many proxies in one paste (max 500) - split into smaller batches"})
+    created = 0
+    updated = 0
+    errors = []
+    for p in proxies:
+        host = (p.get("host") or "").strip()
+        port = (p.get("port") or "").strip()
+        if not host or not port:
+            errors.append({"line": p.get("_line", ""), "error": "Missing host or port"})
+            continue
+        result = _admin_call(
+            "proxies_upsert",
+            type=(p.get("type") or "http").strip(),
+            host=host,
+            port=port,
+            user=(p.get("user") or "").strip(),
+            **{"pass": (p.get("pass") or "").strip()},
+            region=(p.get("region") or "").strip(),
+            active=p.get("active", True),
+            notes=(p.get("notes") or "").strip(),
+        )
+        if result.get("error"):
+            errors.append({"line": p.get("_line", f"{host}:{port}"), "error": result["error"]})
+        elif result.get("mode") == "updated":
+            updated += 1
+        else:
+            created += 1
+    if created or updated:
+        activity(f"Admin bulk-added shared proxies: {created} created, {updated} updated"
+                  + (f", {len(errors)} failed" if errors else ""))
+        with _shared_proxies_lock:
+            _shared_proxies_cache["ts"] = 0
+    return jsonify({"success": True, "created": created, "updated": updated,
+                     "failed": len(errors), "errors": errors})
+
+def _check_one_proxy(p):
+    """Live health-check for a single proxy: routes a real HTTPS request through it
+    to an IP-echo endpoint, proving it actually forwards traffic (not just that the
+    port is open) and revealing the exit IP so a mismatch can be spotted."""
+    from urllib.parse import quote as _quote
+    proxy_type = (p.get("type") or "http").strip().lower()
+    host = (p.get("host") or "").strip()
+    port = str(p.get("port") or "").strip()
+    user = p.get("user") or ""
+    pw = p.get("pass") or ""
+    out = {"host": host, "port": port, "user": user, "type": proxy_type,
+           "status": "failed", "response_ms": None, "exit_ip": None, "error": None}
+    if not host or not port:
+        out["error"] = "Missing host/port"
+        return out
+    # socks5h resolves the target hostname on the proxy side (not locally), which is
+    # the correct behavior for a real proxy check - matches how engine.ProxyPool's
+    # proxies are actually used for outbound requests elsewhere in this app.
+    scheme = "socks5h" if proxy_type == "socks5" else "http"
+    auth_part = f"{_quote(user, safe='')}:{_quote(pw, safe='')}@" if (user or pw) else ""
+    proxy_url = f"{scheme}://{auth_part}{host}:{port}"
+    proxies = {"http": proxy_url, "https": proxy_url}
+    start = time.time()
+    try:
+        resp = http_requests.get("https://api.ipify.org?format=json", proxies=proxies,
+                                  timeout=12, headers={"User-Agent": "Mozilla/5.0"})
+        elapsed_ms = int((time.time() - start) * 1000)
+        if resp.status_code == 200:
+            try:
+                exit_ip = resp.json().get("ip")
+            except Exception:
+                exit_ip = (resp.text or "").strip()[:64]
+            out.update(status="working", response_ms=elapsed_ms, exit_ip=exit_ip or None)
+        else:
+            out.update(status="failed", response_ms=elapsed_ms, error=f"HTTP {resp.status_code} from target")
+    except http_requests.exceptions.ProxyError as e:
+        out["error"] = "Proxy error: " + str(e)[:180]
+    except http_requests.exceptions.ConnectTimeout:
+        out["error"] = "Connection to proxy timed out"
+    except http_requests.exceptions.ReadTimeout:
+        out["error"] = "Proxy accepted connection but response timed out"
+    except http_requests.exceptions.ConnectionError as e:
+        out["error"] = "Connection failed: " + str(e)[:180]
+    except Exception as e:
+        out["error"] = str(e)[:180]
+    return out
+
+@app.route("/api/admin/check_proxies", methods=["POST"])
+def api_admin_check_proxies():
+    """Live health-check for a region group (or any list of proxies the caller sends).
+    Admin/superadmin only - same gate as the other admin proxy routes. Each proxy is
+    tested concurrently via a real outbound request (see _check_one_proxy)."""
+    if _admin_auth_params() is None:
+        return jsonify({"error": "You're not logged in as an approved admin on this device."})
+    data = request.get_json(silent=True) or {}
+    proxies = data.get("proxies") or []
+    if not isinstance(proxies, list) or not proxies:
+        return jsonify({"error": "No proxies provided"})
+    proxies = proxies[:100]  # sane cap on one check batch
+    import concurrent.futures
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(proxies))) as pool:
+        for r in pool.map(_check_one_proxy, proxies):
+            results.append(r)
+    working = sum(1 for r in results if r["status"] == "working")
+    total = len(results)
+    times = [r["response_ms"] for r in results if r.get("response_ms") is not None]
+    activity(f"Admin checked {total} shared prox{'y' if total == 1 else 'ies'}: "
+             f"{working} working, {total - working} failed")
+    return jsonify({
+        "results": results,
+        "total": total,
+        "working": working,
+        "failed": total - working,
+        "success_rate": round(working / total * 100, 1) if total else 0,
+        "avg_response_ms": int(sum(times) / len(times)) if times else None,
+    })
+
 @app.route("/api/admin/save_building", methods=["POST"])
 def api_admin_save_building():
     data = request.get_json(silent=True) or {}

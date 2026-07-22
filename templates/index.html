@@ -3680,8 +3680,8 @@ https://example.com/page-2"></textarea>
               <div class="card-t"
                 style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
                 <span>Shared Proxy Pool</span>
-                <button class="btn btn-primary" style="font-size:12px;padding:6px 16px" onclick="admOpenProxyModal()">+
-                  Add Proxy</button>
+                <button class="btn btn-primary" style="font-size:12px;padding:6px 16px"
+                  onclick="admOpenBulkProxyModal()">+ Bulk Add Proxies</button>
               </div>
               <div class="note" style="margin-bottom:10px">Used automatically and occasionally across every install to
                 spread block risk away from the office IP. Passwords here are never shown outside this admin screen.
@@ -4190,7 +4190,7 @@ https://example.com/page-2"></textarea>
     <div class="sheet" id="proxy-modal" role="dialog" aria-modal="true" aria-label="Add or edit shared proxy">
       <div class="sheet-grip"></div>
       <div class="sheet-hd">
-        <h2 id="pm-title">Add Proxy</h2>
+        <h2 id="pm-title">Edit Proxy</h2>
         <button class="icon-btn" onclick="admCloseProxyModal()" title="Close">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
             stroke-linecap="round">
@@ -4241,6 +4241,77 @@ https://example.com/page-2"></textarea>
       <div class="sheet-foot">
         <button class="btn btn-tonal" style="flex:1" onclick="admCloseProxyModal()">Cancel</button>
         <button class="btn btn-primary" style="flex:2" id="pm-save-btn" onclick="admSaveProxy()">Save Proxy</button>
+      </div>
+    </div>
+
+    <!-- ===================== BULK ADD PROXIES SHEET (admin/superadmin only) ===================== -->
+    <div class="sheet-overlay" id="proxy-bulk-modal-overlay" onclick="admCloseBulkProxyModal()"></div>
+    <div class="sheet" id="proxy-bulk-modal" role="dialog" aria-modal="true" aria-label="Bulk add shared proxies">
+      <div class="sheet-grip"></div>
+      <div class="sheet-hd">
+        <h2>Bulk Add Proxies</h2>
+        <button class="icon-btn" onclick="admCloseBulkProxyModal()" title="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+            stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="sheet-body">
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;margin-bottom:8px">
+          <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Title <span
+                class="hint">(groups these proxies, e.g. "UK")</span></label>
+            <input type="text" id="pbm-title" placeholder="e.g. UK" autocomplete="off"
+              style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+          </div>
+          <div><label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Type</label>
+            <select id="pbm-type"
+              style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+              <option value="http">http</option>
+              <option value="socks5">socks5</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-bottom:8px">
+          <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Proxies <span
+              class="hint">(one per line)</span></label>
+          <textarea id="pbm-lines" rows="10" spellcheck="false"
+            placeholder="username:password@host:port&#10;username:password@host:port&#10;username:password@host:port"
+            style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12.5px;font-family:monospace;resize:vertical"></textarea>
+        </div>
+        <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="pbm-active" checked style="width:16px;height:16px">
+          <label for="pbm-active" style="font-size:13px">Active</label>
+        </div>
+        <div id="pbm-result" class="note" style="margin-top:4px"></div>
+      </div>
+      <div class="sheet-foot">
+        <button class="btn btn-tonal" style="flex:1" onclick="admCloseBulkProxyModal()">Cancel</button>
+        <button class="btn btn-primary" style="flex:2" id="pbm-save-btn" onclick="admSaveBulkProxies()">Save
+          Proxies</button>
+      </div>
+    </div>
+
+    <!-- ===================== PROXY CHECK RESULTS SHEET (admin/superadmin only) ===================== -->
+    <div class="sheet-overlay" id="proxy-check-modal-overlay" onclick="admCloseProxyCheckModal()"></div>
+    <div class="sheet" id="proxy-check-modal" role="dialog" aria-modal="true" aria-label="Proxy check results">
+      <div class="sheet-grip"></div>
+      <div class="sheet-hd">
+        <h2 id="pcm-title">Proxy Check Results</h2>
+        <button class="icon-btn" onclick="admCloseProxyCheckModal()" title="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+            stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="sheet-body" id="pcm-body">
+        <div class="note">Checking proxies...</div>
+      </div>
+      <div class="sheet-foot">
+        <button class="btn btn-primary" style="flex:1" onclick="admCloseProxyCheckModal()">Close</button>
       </div>
     </div>
 
@@ -7087,24 +7158,51 @@ https://example.com/page-2"></textarea>
           const r = await (await fetch('/api/admin/proxies')).json();
           if (r.error) { $('adm-proxies-list').textContent = r.error; return; }
           ADM_PROXIES = r.proxies || [];
-          if (!ADM_PROXIES.length) { $('adm-proxies-list').textContent = 'No shared proxies configured yet.'; return; }
-          $('adm-proxies-list').innerHTML = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Type</th><th style="padding:6px">Host:Port</th><th style="padding:6px">User</th><th style="padding:6px">Region</th><th style="padding:6px">Active</th><th style="padding:6px">Actions</th></tr></thead><tbody>' +
-            ADM_PROXIES.map(p => '<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px">' + esc(p.type || 'http') + '</td><td style="padding:6px;font-family:monospace;white-space:nowrap">' + esc(p.host) + ':' + esc(p.port) + '</td><td style="padding:6px">' + esc(p.user || '-') + '</td><td style="padding:6px">' + esc(p.region || '-') + '</td><td style="padding:6px">' + (p.active === false ? 'No' : 'Yes') + '</td>' +
-              '<td style="padding:6px;white-space:nowrap"><button class="btn btn-tonal" style="font-size:10px;padding:2px 8px" onclick="admOpenProxyModal(\'' + esc(p.host) + '\',\'' + esc(p.port) + '\')">Edit</button> <button class="btn btn-tonal" style="font-size:10px;padding:2px 8px" onclick="admDeleteProxy(\'' + esc(p.host) + '\',\'' + esc(p.port) + '\')">Remove</button></td></tr>').join('') + '</tbody></table></div>';
+          admRenderProxies();
         } catch (e) { $('adm-proxies-list').textContent = 'Failed to load proxies.'; }
       }
+      // Grouped by Title/Region (matches the reference UX) - proxies with no region
+      // fall under a single "Ungrouped" section rather than being hidden.
+      function admRenderProxies() {
+        if (!ADM_PROXIES.length) { $('adm-proxies-list').textContent = 'No shared proxies configured yet.'; return; }
+        const groups = {};
+        ADM_PROXIES.forEach(p => {
+          const key = (p.region || '').trim() || 'Ungrouped';
+          (groups[key] = groups[key] || []).push(p);
+        });
+        const names = Object.keys(groups).sort((a, b) => a === 'Ungrouped' ? 1 : b === 'Ungrouped' ? -1 : a.localeCompare(b));
+        $('adm-proxies-list').innerHTML = names.map(name => {
+          const rows = groups[name];
+          const working = rows.filter(p => p.active !== false).length;
+          return '<div style="margin-bottom:14px;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden">' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--surface-2)">' +
+            '<div style="font-weight:700;font-size:13px">' + esc(name) + ' <span style="font-weight:400;color:var(--text-3)">(' + rows.length + ' prox' + (rows.length === 1 ? 'y' : 'ies') + ', ' + working + ' active)</span></div>' +
+            '<button class="btn btn-tonal" style="font-size:10px;padding:3px 10px" onclick="admCheckProxies(' + JSON.stringify(name) + ')">Check Proxies</button>' +
+            '</div>' +
+            '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Type</th><th style="padding:6px">Host:Port</th><th style="padding:6px">User</th><th style="padding:6px">Active</th><th style="padding:6px">Actions</th></tr></thead><tbody>' +
+            rows.map(p => '<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px">' + esc(p.type || 'http') + '</td><td style="padding:6px;font-family:monospace;white-space:nowrap">' + esc(p.host) + ':' + esc(p.port) + '</td><td style="padding:6px">' + esc(p.user || '-') + '</td><td style="padding:6px">' + (p.active === false ? 'No' : 'Yes') + '</td>' +
+              '<td style="padding:6px;white-space:nowrap">' +
+              '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admCheckProxies(null,\'' + esc(p.host) + '\',\'' + esc(p.port) + '\')">Check</button>' +
+              '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;margin-right:4px" onclick="admOpenProxyModal(\'' + esc(p.host) + '\',\'' + esc(p.port) + '\')">Edit</button>' +
+              '<button class="btn btn-tonal" style="font-size:10px;padding:2px 8px;color:var(--err)" onclick="admDeleteProxy(\'' + esc(p.host) + '\',\'' + esc(p.port) + '\')">Remove</button>' +
+              '</td></tr>').join('') + '</tbody></table></div></div>';
+        }).join('');
+      }
+      // Edit-only now (bulk paste is the primary add path) - always called with an
+      // existing host/port from a row's Edit button.
       function admOpenProxyModal(host, port) {
-        const existing = host ? ADM_PROXIES.find(p => p.host === host && String(p.port) === String(port)) : null;
-        $('pm-title').textContent = existing ? 'Edit Proxy' : 'Add Proxy';
-        $('pm-host').value = existing ? existing.host : '';
-        $('pm-host').dataset.origHost = existing ? existing.host : '';
-        $('pm-host').dataset.origPort = existing ? existing.port : '';
-        $('pm-port').value = existing ? existing.port : '';
-        $('pm-user').value = existing ? (existing.user || '') : '';
-        $('pm-pass').value = existing ? (existing.pass || '') : '';
-        $('pm-type').value = existing ? (existing.type || 'http') : 'http';
-        $('pm-region').value = existing ? (existing.region || '') : '';
-        $('pm-active').checked = existing ? existing.active !== false : true;
+        const existing = ADM_PROXIES.find(p => p.host === host && String(p.port) === String(port));
+        if (!existing) { toast('Proxy not found'); return; }
+        $('pm-title').textContent = 'Edit Proxy';
+        $('pm-host').value = existing.host;
+        $('pm-host').dataset.origHost = existing.host;
+        $('pm-host').dataset.origPort = existing.port;
+        $('pm-port').value = existing.port;
+        $('pm-user').value = existing.user || '';
+        $('pm-pass').value = existing.pass || '';
+        $('pm-type').value = existing.type || 'http';
+        $('pm-region').value = existing.region || '';
+        $('pm-active').checked = existing.active !== false;
         $('proxy-modal-overlay').classList.add('open'); $('proxy-modal').classList.add('open');
         document.body.style.overflow = 'hidden';
       }
@@ -7135,6 +7233,127 @@ https://example.com/page-2"></textarea>
         if (!confirm('Remove proxy ' + host + ':' + port + '?')) return;
         toast('Removing...');
         try { await fetch('/api/admin/delete_proxy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host, port }) }); toast('Removed'); admLoadProxies(); } catch (e) { toast('Failed'); }
+      }
+
+      /* ----- bulk-paste add proxies ----- */
+      function admOpenBulkProxyModal() {
+        $('pbm-title').value = '';
+        $('pbm-type').value = 'http';
+        $('pbm-lines').value = '';
+        $('pbm-active').checked = true;
+        $('pbm-result').textContent = '';
+        $('proxy-bulk-modal-overlay').classList.add('open'); $('proxy-bulk-modal').classList.add('open');
+        document.body.style.overflow = 'hidden';
+      }
+      function admCloseBulkProxyModal() {
+        $('proxy-bulk-modal-overlay').classList.remove('open'); $('proxy-bulk-modal').classList.remove('open');
+        document.body.style.overflow = '';
+      }
+      // Parses "user:pass@host:port" per line. Also tolerates a bare "host:port"
+      // (no credentials) and an optional "scheme://" prefix, since pasted lists in
+      // the wild aren't always perfectly uniform - anything that doesn't match at
+      // least a host:port shape is reported back as a per-line error, not silently
+      // dropped.
+      function admParseProxyLine(line) {
+        let s = line.trim();
+        if (!s) return null;
+        s = s.replace(/^[a-zA-Z0-9]+:\/\//, '');
+        let user = '', pass = '', hostPort = s;
+        const atIdx = s.lastIndexOf('@');
+        if (atIdx !== -1) {
+          const cred = s.slice(0, atIdx);
+          hostPort = s.slice(atIdx + 1);
+          const cIdx = cred.indexOf(':');
+          if (cIdx === -1) { user = cred; } else { user = cred.slice(0, cIdx); pass = cred.slice(cIdx + 1); }
+        }
+        const hpIdx = hostPort.lastIndexOf(':');
+        if (hpIdx === -1) return { error: 'Missing :port' };
+        const host = hostPort.slice(0, hpIdx).trim();
+        const port = hostPort.slice(hpIdx + 1).trim();
+        if (!host || !port || !/^\d+$/.test(port)) return { error: 'Could not parse host:port' };
+        return { host, port, user, pass };
+      }
+      async function admSaveBulkProxies() {
+        const title = $('pbm-title').value.trim();
+        const type = $('pbm-type').value;
+        const active = $('pbm-active').checked;
+        const rawLines = $('pbm-lines').value.split('\n').map(l => l.trim()).filter(Boolean);
+        if (!rawLines.length) { toast('Paste at least one proxy line'); return; }
+        const proxies = [];
+        const parseErrors = [];
+        rawLines.forEach(line => {
+          const parsed = admParseProxyLine(line);
+          if (!parsed) return;
+          if (parsed.error) { parseErrors.push(line + ' - ' + parsed.error); return; }
+          proxies.push({ type, host: parsed.host, port: parsed.port, user: parsed.user, pass: parsed.pass, region: title, active, _line: line });
+        });
+        if (!proxies.length) {
+          $('pbm-result').innerHTML = '<span style="color:var(--err)">No valid lines found.' + (parseErrors.length ? '<br>' + esc(parseErrors.join('<br>')) : '') + '</span>';
+          return;
+        }
+        const btn = $('pbm-save-btn'); const orig = btn.textContent;
+        btn.disabled = true; btn.innerHTML = '<span class="auth-spin"></span>Saving...';
+        try {
+          const r = await (await fetch('/api/admin/bulk_save_proxies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proxies }) })).json();
+          if (r.error) { $('pbm-result').innerHTML = '<span style="color:var(--err)">' + esc(r.error) + '</span>'; return; }
+          const allErrors = parseErrors.concat((r.errors || []).map(e => e.line + ' - ' + e.error));
+          $('pbm-result').innerHTML = '<span style="color:var(--ok)">' + r.created + ' added, ' + r.updated + ' updated.</span>' +
+            (allErrors.length ? '<br><span style="color:var(--err)">' + allErrors.length + ' line(s) failed:<br>' + esc(allErrors.join('<br>')) + '</span>' : '');
+          toast('Bulk save complete: ' + r.created + ' added, ' + r.updated + ' updated');
+          admLoadProxies();
+          if (!allErrors.length) admCloseBulkProxyModal();
+        } catch (e) { $('pbm-result').innerHTML = '<span style="color:var(--err)">Failed to save proxies.</span>'; }
+        finally { btn.disabled = false; btn.textContent = orig; }
+      }
+
+      /* ----- check proxies (live health-check) ----- */
+      // region: check every proxy in that Title/Region group. Or pass (null, host, port)
+      // to check a single row instead.
+      async function admCheckProxies(region, host, port) {
+        let toCheck;
+        if (region !== null && region !== undefined) {
+          toCheck = ADM_PROXIES.filter(p => ((p.region || '').trim() || 'Ungrouped') === region);
+        } else {
+          toCheck = ADM_PROXIES.filter(p => p.host === host && String(p.port) === String(port));
+        }
+        if (!toCheck.length) { toast('No proxies to check'); return; }
+        $('pcm-title').textContent = 'Proxy Check Results' + (region ? ' - ' + region : '');
+        $('pcm-body').innerHTML = '<div class="note"><span class="auth-spin"></span> Checking ' + toCheck.length + ' prox' + (toCheck.length === 1 ? 'y' : 'ies') + '...</div>';
+        $('proxy-check-modal-overlay').classList.add('open'); $('proxy-check-modal').classList.add('open');
+        document.body.style.overflow = 'hidden';
+        try {
+          const body = { proxies: toCheck.map(p => ({ type: p.type, host: p.host, port: p.port, user: p.user, pass: p.pass })) };
+          const r = await (await fetch('/api/admin/check_proxies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+          if (r.error) { $('pcm-body').innerHTML = '<div class="note" style="color:var(--err)">' + esc(r.error) + '</div>'; return; }
+          admRenderProxyCheckResults(r);
+        } catch (e) { $('pcm-body').innerHTML = '<div class="note" style="color:var(--err)">Failed to check proxies.</div>'; }
+      }
+      function admRenderProxyCheckResults(r) {
+        const avg = r.avg_response_ms !== null && r.avg_response_ms !== undefined ? r.avg_response_ms + 'ms' : '-';
+        const chip = (label, value, cls) => '<span class="tag ' + cls + '" style="margin-right:6px">' + label + ': ' + value + '</span>';
+        let html = '<div style="margin-bottom:12px">' +
+          chip('Total', r.total, 't-unknown') +
+          chip('Working', r.working, 't-yes') +
+          chip('Failed', r.failed, 't-no') +
+          chip('Success rate', r.success_rate + '%', r.success_rate >= 50 ? 't-yes' : 't-no') +
+          chip('Avg response', avg, 't-unknown') +
+          '</div>';
+        html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px"><thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Proxy</th><th style="padding:6px">Status</th><th style="padding:6px">Scheme</th><th style="padding:6px">Response</th><th style="padding:6px">Exit IP</th><th style="padding:6px">Error</th></tr></thead><tbody>' +
+          (r.results || []).map(res => {
+            const masked = esc(res.user || '') + ':••••@' + esc(res.host) + ':' + esc(res.port);
+            const cls = res.status === 'working' ? 't-yes' : 't-no';
+            return '<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px;font-family:monospace;white-space:nowrap">' + masked + '</td>' +
+              '<td style="padding:6px"><span class="tag ' + cls + '">' + esc(res.status === 'working' ? 'Working' : 'Failed') + '</span></td>' +
+              '<td style="padding:6px">' + esc(res.type || 'http') + '</td>' +
+              '<td style="padding:6px">' + (res.response_ms !== null && res.response_ms !== undefined ? res.response_ms + 'ms' : '-') + '</td>' +
+              '<td style="padding:6px;font-family:monospace">' + esc(res.exit_ip || '-') + '</td>' +
+              '<td style="padding:6px;color:var(--err)">' + esc(res.error || '-') + '</td></tr>';
+          }).join('') + '</tbody></table></div>';
+        $('pcm-body').innerHTML = html;
+      }
+      function admCloseProxyCheckModal() {
+        $('proxy-check-modal-overlay').classList.remove('open'); $('proxy-check-modal').classList.remove('open');
+        document.body.style.overflow = '';
       }
 
       /* ----- bulk add users ----- */
