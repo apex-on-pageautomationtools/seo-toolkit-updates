@@ -395,6 +395,24 @@
       margin: 8px 10px
     }
 
+    .sb-section-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      padding: 2px 14px 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      transition: opacity .2s var(--ease);
+    }
+
+    .sidebar.collapsed .sb-section-label {
+      opacity: 0;
+      height: 0;
+      padding: 0;
+    }
+
     .sb-foot {
       padding: 8px;
       border-top: 1px solid var(--border)
@@ -1613,38 +1631,74 @@
       </button>
     </div>
     <div class="sb-nav">
-      <button class="sb-item active" id="tab-ranking" data-tip="Rank Checker" onclick="switchTab('ranking')">
+      <button class="sb-item active" id="tab-ranking" data-tip="Google Rank Checker" onclick="switchTab('ranking')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <line x1="6" y1="20" x2="6" y2="14" />
           <line x1="12" y1="20" x2="12" y2="4" />
           <line x1="18" y1="20" x2="18" y2="10" />
         </svg>
-        <span class="sb-label">Rank Checker</span>
+        <span class="sb-label">Google Rank Checker</span>
       </button>
-      <button class="sb-item" id="tab-index" data-tip="Indexing Checker" onclick="switchTab('index')">
+      <button class="sb-item" id="tab-index" data-tip="Google Index Checker (site:)" onclick="switchTab('index')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <path d="M9 12l2 2 4-4" />
           <path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c1.66 0 3.21.45 4.55 1.23" />
         </svg>
-        <span class="sb-label">Indexing Checker</span>
+        <span class="sb-label">Google Index Checker (site:)</span>
       </button>
-      <button class="sb-item" id="tab-count" data-tip="Search Results Count" onclick="switchTab('count')">
+      <button class="sb-item" id="tab-count" data-tip="Google Search Results Count" onclick="switchTab('count')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <line x1="4" y1="9" x2="20" y2="9" />
           <line x1="4" y1="15" x2="20" y2="15" />
           <line x1="10" y1="3" x2="8" y2="21" />
           <line x1="16" y1="3" x2="14" y2="21" />
         </svg>
-        <span class="sb-label">Results Count</span>
+        <span class="sb-label">Google Search Results Count</span>
       </button>
-      <button class="sb-item" id="tab-backlink" data-tip="Backlink Status" onclick="switchTab('backlink')">
+      <button class="sb-item" id="tab-backlink" data-tip="Backlink Status Checker" onclick="switchTab('backlink')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
           <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
         </svg>
-        <span class="sb-label">Backlink Status</span>
+        <span class="sb-label">Backlink Status Checker</span>
       </button>
-      <button class="sb-item" id="tab-onpage" data-tip="SEO On-Page" onclick="switchTab('onpage')">
+      <div class="sb-sep"></div>
+      <button class="sb-item" id="tab-crawl" data-tip="Crawl Date Tracker (by GSC)" onclick="switchTab('crawl')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <rect x="3" y="4" width="18" height="18" rx="2" />
+          <line x1="16" y1="2" x2="16" y2="6" />
+          <line x1="8" y1="2" x2="8" y2="6" />
+          <line x1="3" y1="10" x2="21" y2="10" />
+        </svg>
+        <span class="sb-label">Crawl Date Tracker (by GSC)</span>
+      </button>
+      <button class="sb-item" id="tab-indexing" data-tip="Submit for Indexing (by GSC)" onclick="switchTab('indexing')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z" />
+          <path d="M2 17l10 5 10-5" />
+          <path d="M2 12l10 5 10-5" />
+        </svg>
+        <span class="sb-label">Submit for Indexing (by GSC)</span>
+      </button>
+      <button class="sb-item" id="tab-wayback" data-tip="Wayback Submission" onclick="switchTab('wayback')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <circle cx="12" cy="12" r="9" />
+          <polyline points="12 7 12 12 15.5 14" />
+        </svg>
+        <span class="sb-label">Wayback Submission</span>
+      </button>
+      <div class="sb-sep"></div>
+      <div class="sb-section-label">Report Creation tools</div>
+      <button class="sb-item" id="tab-brief" data-tip="Brief Analysis Report" onclick="switchTab('brief')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+          <rect x="9" y="3" width="6" height="4" rx="1" />
+          <line x1="9" y1="12" x2="15" y2="12" />
+          <line x1="9" y1="16" x2="13" y2="16" />
+        </svg>
+        <span class="sb-label">Brief Analysis Report</span>
+      </button>
+      <button class="sb-item" id="tab-onpage" data-tip="SEO On-Page Report" onclick="switchTab('onpage')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
           <polyline points="14 2 14 8 20 8" />
@@ -1652,55 +1706,22 @@
           <line x1="16" y1="17" x2="8" y2="17" />
           <line x1="10" y1="9" x2="8" y2="9" />
         </svg>
-        <span class="sb-label">SEO On-Page</span>
+        <span class="sb-label">SEO On-Page Report</span>
       </button>
-      <div class="sb-sep"></div>
-      <button class="sb-item" id="tab-health" data-tip="Health Audit" onclick="switchTab('health')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-        </svg>
-        <span class="sb-label">Health Audit</span>
-      </button>
-      <button class="sb-item" id="tab-gsc" data-tip="GSC Audit" onclick="switchTab('gsc')">
+      <button class="sb-item" id="tab-gsc" data-tip="GSC Audit Report" onclick="switchTab('gsc')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <circle cx="11" cy="11" r="8" />
           <line x1="21" y1="21" x2="16.65" y2="16.65" />
           <line x1="11" y1="8" x2="11" y2="14" />
           <line x1="8" y1="11" x2="14" y2="11" />
         </svg>
-        <span class="sb-label">GSC Audit</span>
+        <span class="sb-label">GSC Audit Report</span>
       </button>
-      <button class="sb-item" id="tab-crawl" data-tip="Crawl Tracker" onclick="switchTab('crawl')">
+      <button class="sb-item" id="tab-health" data-tip="Health Audit Report" onclick="switchTab('health')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <rect x="3" y="4" width="18" height="18" rx="2" />
-          <line x1="16" y1="2" x2="16" y2="6" />
-          <line x1="8" y1="2" x2="8" y2="6" />
-          <line x1="3" y1="10" x2="21" y2="10" />
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
         </svg>
-        <span class="sb-label">Crawl Tracker</span>
-      </button>
-      <button class="sb-item" id="tab-wayback" data-tip="Wayback Submitter" onclick="switchTab('wayback')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <circle cx="12" cy="12" r="9" />
-          <polyline points="12 7 12 12 15.5 14" />
-        </svg>
-        <span class="sb-label">Wayback Submitter</span>
-      </button>
-      <button class="sb-item" id="tab-seranking" data-tip="SEranking Audit" onclick="switchTab('seranking')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <polyline points="14 2 14 8 20 8" />
-          <path d="M9 15l2 2 4-4" />
-        </svg>
-        <span class="sb-label">SEranking Audit</span>
-      </button>
-      <button class="sb-item" id="tab-geo" data-tip="GEO / AI Optimization" onclick="switchTab('geo')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <circle cx="12" cy="12" r="3" />
-          <path
-            d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
-        </svg>
-        <span class="sb-label">GEO / AI Optimization</span>
+        <span class="sb-label">Health Audit Report</span>
       </button>
       <button class="sb-item" id="tab-performance" data-tip="Performance Report" onclick="switchTab('performance')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
@@ -1710,13 +1731,21 @@
         </svg>
         <span class="sb-label">Performance Report</span>
       </button>
-      <button class="sb-item" id="tab-indexing" data-tip="Submit for Indexing" onclick="switchTab('indexing')">
+      <button class="sb-item" id="tab-seranking" data-tip="SERanking Audit" onclick="switchTab('seranking')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <path d="M12 2L2 7l10 5 10-5-10-5z" />
-          <path d="M2 17l10 5 10-5" />
-          <path d="M2 12l10 5 10-5" />
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <path d="M9 15l2 2 4-4" />
         </svg>
-        <span class="sb-label">Submit for Indexing</span>
+        <span class="sb-label">SERanking Audit</span>
+      </button>
+      <button class="sb-item" id="tab-geo" data-tip="GEO/AI Optimization Suggestions" onclick="switchTab('geo')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <circle cx="12" cy="12" r="3" />
+          <path
+            d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
+        </svg>
+        <span class="sb-label">GEO/AI Optimization Suggestions</span>
       </button>
       <!-- Hidden for everyone for now - the Google Ads Developer Token behind
          Keyword Search Volume is still on Test Access (blocks real customer
@@ -1732,22 +1761,13 @@
         </svg>
         <span class="sb-label">Keyword Search Volume</span>
       </button>
-      <button class="sb-item" id="tab-brief" data-tip="Brief Analysis" onclick="switchTab('brief')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
-          <rect x="9" y="3" width="6" height="4" rx="1" />
-          <line x1="9" y1="12" x2="15" y2="12" />
-          <line x1="9" y1="16" x2="13" y2="16" />
-        </svg>
-        <span class="sb-label">Brief Analysis</span>
-      </button>
       <div class="sb-sep"></div>
-      <button class="sb-item" id="tab-gscaccounts" data-tip="Google Accounts" onclick="switchTab('gscaccounts')">
+      <button class="sb-item" id="tab-gscaccounts" data-tip="Google Accounts (GSC-GS)" onclick="switchTab('gscaccounts')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <circle cx="12" cy="8" r="4" />
           <path d="M4 21v-1a8 8 0 0 1 16 0v1" />
         </svg>
-        <span class="sb-label">Google Accounts</span>
+        <span class="sb-label">Google Accounts (GSC-GS)</span>
       </button>
       <button class="sb-item" id="tab-admin" data-tip="Admin" onclick="switchTab('admin')" style="display:none">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
@@ -1806,8 +1826,8 @@
 
     <!-- ===================== BIG HEADER ===================== -->
     <div class="bighead">
-      <h1 id="page-title">Keyword Ranking</h1>
-      <p id="page-sub">Find where your domain ranks on Google - across regions, CAPTCHA-resistant.</p>
+      <h1 id="page-title">Google Rank Checker</h1>
+      <p id="page-sub">Find where your domain ranks on Google - across regions. It can have captcha so please use VPN on system as much possible.</p>
     </div>
 
     <!-- ===================== MAIN ===================== -->
@@ -1827,7 +1847,7 @@
             Rank Settings
           </div>
           <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Find where your domain ranks
-            on Google - across regions, CAPTCHA-resistant.</p>
+            on Google - across regions. It can have captcha so please use VPN on system as much possible.</p>
           <div class="field">
             <label>Domain to track</label>
             <input type="text" id="r-domain" placeholder="example.com" autocomplete="off">
@@ -3774,29 +3794,6 @@ https://example.com/page-2"></textarea>
                 </svg></div>
               <p>Enter URLs to check if they are indexed in Google search.</p>
             </div>
-            <!-- Bridge to the Submit for Indexing tool: appears once any URL comes
-             back "Not Indexed" (and only if the user has that tool). -->
-            <div id="idx-notindexed-bar" class="hidden"
-              style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;padding:11px 15px;background:color-mix(in srgb,var(--warn) 11%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 34%,var(--border));border-radius:var(--r-md)">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" stroke-width="2.2"
-                style="flex-shrink:0">
-                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                <line x1="12" y1="9" x2="12" y2="13" />
-                <line x1="12" y1="17" x2="12.01" y2="17" />
-              </svg>
-              <span style="font-size:13px;color:var(--text-2);line-height:1.4"><b id="idx-ni-count"
-                  style="color:var(--text)">0</b> URL(s) not indexed &mdash; send them straight to Google for
-                indexing.</span>
-              <button class="btn btn-primary btn-sm" style="margin-left:auto;white-space:nowrap"
-                onclick="submitNotIndexedToGoogle()">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
-                  style="margin-right:3px;vertical-align:-2px">
-                  <line x1="22" y1="2" x2="11" y2="13" />
-                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                </svg>
-                Submit to Google
-              </button>
-            </div>
             <table id="tbl-i" class="hidden">
               <thead>
                 <tr>
@@ -4588,10 +4585,10 @@ https://example.com/page-2"></textarea>
         $('tbl-performance').style.display = m === 'performance' ? '' : 'none';
         $('tbl-indexing').style.display = m === 'indexing' ? '' : 'none';
         $('tbl-keywordvolume').style.display = m === 'keywordvolume' ? '' : 'none';
-        const titles = { ranking: 'Keyword Ranking', index: 'Google Indexing Checker', count: 'Search Results Count', backlink: 'Backlink Index/Noindex Status', onpage: 'SEO On-Page Report', health: 'Website Health Audit', gsc: 'GSC Audit Studio', crawl: 'Crawl Date Tracker', brief: 'Brief Website Analysis', wayback: 'Wayback Machine Submitter', seranking: 'SEranking Audit', geo: 'GEO / AI Optimization', performance: 'Performance Report', indexing: 'Submit for Indexing', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts', admin: 'Admin Panel' };
+        const titles = { ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SERanking Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GS)', admin: 'Admin Panel' };
         const subs = {
-          ranking: 'Find where your domain ranks on Google - across regions, CAPTCHA-resistant.',
-          index: 'Check if your URLs are indexed in Google - searches site:url to verify.',
+          ranking: 'Find where your domain ranks on Google - across regions. It can have captcha so please use VPN on system as much possible.',
+          index: 'Check if pages/backlinks are indexed on Google (it will use site:) - verify indexing status for up to 100 URLs at once.',
           count: 'Get Google\'s total "About N results" number for each keyword - regional, CAPTCHA-resistant.',
           backlink: 'Check if backlink pages have index/noindex meta tag, and if your link is dofollow/nofollow.',
           onpage: 'Generate a comprehensive SEO on-page analysis report with meta, alt, canonical suggestions.',
@@ -5346,39 +5343,12 @@ https://example.com/page-2"></textarea>
         $(emp).style.display = 'block';
         if (m === 'ranking') document.querySelectorAll('.col-target').forEach(el => el.classList.add('hidden'));
         lastCounts[m] = 0;
-        if (m === 'index' && window.idxRefreshNotIndexedBar) idxRefreshNotIndexedBar();
         if (m === mode) { $('count').textContent = '0 results'; $('btn-export').disabled = true; }
       }
       window.tbody_r = document.getElementById('tbody-r');
       window.tbody_i = document.getElementById('tbody-i');
       window.tbody_b = document.getElementById('tbody-b');
       window.tbody_c = document.getElementById('tbody-c');
-
-      /* Bridge: pipe the Indexing Checker's "Not Indexed" URLs into the Submit for
-         Indexing tool. We only pre-fill that tool's textarea - the real submit still
-         goes through its own access-control, daily quota and GSC fallback, nothing
-         is bypassed here. */
-      function idxRefreshNotIndexedBar() {
-        const bar = $('idx-notindexed-bar'); if (!bar) return;
-        // Only offer this when the user actually has the Submit for Indexing tool -
-        // applyToolFilter() hides that sidebar tab otherwise.
-        const tabBtn = $('tab-indexing');
-        const hasTool = !(tabBtn && tabBtn.style.display === 'none');
-        const n = document.querySelectorAll('#tbody-i tr[data-indexed="No"]').length;
-        if (n > 0 && hasTool) { $('idx-ni-count').textContent = n; bar.classList.remove('hidden'); }
-        else bar.classList.add('hidden');
-      }
-      function submitNotIndexedToGoogle() {
-        const urls = [...document.querySelectorAll('#tbody-i tr[data-indexed="No"]')]
-          .map(tr => tr.dataset.idxUrl).filter(Boolean);
-        const uniq = [...new Set(urls)];
-        if (!uniq.length) { toast('No "Not Indexed" URLs to submit'); return; }
-        switchTab('indexing');
-        const box = $('idx-urls');
-        if (box) box.value = uniq.join('\n');
-        toast(uniq.length + ' not-indexed URL(s) added to Submit for Indexing' + (uniq.length > 10 ? ' (10 sent per request)' : ''));
-        try { box.focus(); box.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { }
-      }
 
       function rankClass(r) { if (r <= 0) return 'r-none'; if (r <= 3) return 'r-gold'; if (r <= 10) return 'r-green'; if (r <= 20) return 'r-blue'; return 'r-gray'; }
       function appendRow(row, num, m) {
@@ -5423,10 +5393,8 @@ https://example.com/page-2"></textarea>
             '<td class="cell-url">' + found + '</td>' +
             '<td><span class="tag ' + (row.status === 'ok' ? 't-yes' : 't-unknown') + '">' + esc(row.status === 'ok' ? 'Checked' : (row.status || '').replace(/_/g, ' ')) + '</span></td>' +
             '<td style="text-align:center">' + issCell + '</td>';
-          tr.dataset.idxUrl = row.url || ''; tr.dataset.indexed = rawIdx;
           tbody_i.appendChild(tr);
           $('tbl-i').classList.remove('hidden'); $('empty-index').style.display = 'none';
-          idxRefreshNotIndexedBar();
         } else if (m === 'count') {
           const raw = (row.results_count == null ? '' : String(row.results_count)).trim();
           const failed = (row.status && row.status !== 'ok');
