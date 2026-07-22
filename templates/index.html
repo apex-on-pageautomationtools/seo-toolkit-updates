@@ -175,6 +175,11 @@
       cursor: pointer
     }
 
+    .chip-latest.chip-latest-ok {
+      color: var(--ok);
+      background: rgba(30, 166, 114, .14)
+    }
+
     .appbar .actions {
       display: flex;
       align-items: center;
@@ -228,7 +233,7 @@
       left: 0;
       bottom: 0;
       z-index: 35;
-      width: 220px;
+      width: 280px;
       background: var(--surface);
       border-right: 1px solid var(--border);
       display: flex;
@@ -431,7 +436,7 @@
 
     /* ===================== Layout ===================== */
     .app-body {
-      margin-left: 220px;
+      margin-left: 280px;
       transition: margin-left .3s var(--ease);
       min-height: 100vh;
       display: flex;
@@ -1249,7 +1254,7 @@
       right: 0;
       bottom: 36px;
       z-index: 25;
-      left: 220px;
+      left: 280px;
       transition: left .3s var(--ease);
       padding: 14px 20px calc(14px + env(safe-area-inset-bottom));
       background: color-mix(in srgb, var(--bg) 80%, transparent);
@@ -1734,13 +1739,6 @@
         </svg>
         <span class="sb-label">Health Audit Report</span>
       </button>
-      <button class="sb-item" id="tab-siteaudit" data-tip="Site Audit" onclick="switchTab('siteaudit')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="9 12 11 14 15 10" />
-        </svg>
-        <span class="sb-label">Site Audit</span>
-      </button>
       <button class="sb-item" id="tab-performance" data-tip="Performance Report" onclick="switchTab('performance')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <line x1="18" y1="20" x2="18" y2="10" />
@@ -1764,6 +1762,13 @@
             d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
         </svg>
         <span class="sb-label">GEO/AI Optimization Suggestions</span>
+      </button>
+      <button class="sb-item" id="tab-siteaudit" data-tip="Website Audit" onclick="switchTab('siteaudit')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="9 12 11 14 15 10" />
+        </svg>
+        <span class="sb-label">Website Audit</span>
       </button>
       <!-- Hidden for everyone for now - the Google Ads Developer Token behind
          Keyword Search Volume is still on Test Access (blocks real customer
@@ -1837,7 +1842,7 @@
     <header class="appbar">
       <div class="brand">
         <span class="chip-ver">v{{ version }}</span>
-        <span id="chip-latest" class="chip-latest hidden" onclick="restartTool()" title="A newer version has been downloaded - click to restart and apply it"></span>
+        <span id="chip-latest" class="chip-latest hidden" onclick="verLatestChipClick()"></span>
       </div>
       <div class="actions">
       </div>
@@ -2535,7 +2540,7 @@
               <circle cx="12" cy="12" r="10" />
               <polyline points="9 12 11 14 15 10" />
             </svg>
-            Site Audit <span class="testing-badge">(testing)</span>
+            Website Audit <span class="testing-badge">(testing)</span>
           </div>
           <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Crawl a whole site from just
             its domain - no manual page list, no SE Ranking account needed - and report broken links, missing/
@@ -4597,7 +4602,7 @@ https://example.com/page-2"></textarea>
         sb.classList.toggle('collapsed');
         const collapsed = sb.classList.contains('collapsed');
         localStorage.setItem('sb-collapsed', collapsed ? '1' : '');
-        const l = collapsed ? '56px' : '220px';
+        const l = collapsed ? '56px' : '280px';
         document.querySelector('.actionbar').style.left = l;
         const ab = document.getElementById('activity-bar'); if (ab) ab.style.left = l;
       }
@@ -4674,7 +4679,7 @@ https://example.com/page-2"></textarea>
         $('tbl-performance').style.display = m === 'performance' ? '' : 'none';
         $('tbl-indexing').style.display = m === 'indexing' ? '' : 'none';
         $('tbl-keywordvolume').style.display = m === 'keywordvolume' ? '' : 'none';
-        const titles = { ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Site Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SERanking Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GS)', admin: 'Admin Panel' };
+        const titles = { ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Website Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SERanking Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GS)', admin: 'Admin Panel' };
         const subs = {
           ranking: 'Find where your domain ranks on Google - across regions. It can have captcha so please use VPN on system as much possible.',
           index: 'Check if pages/backlinks are indexed on Google (it will use site:) - verify indexing status for up to 100 URLs at once.',
@@ -6716,13 +6721,27 @@ https://example.com/page-2"></textarea>
           // process at startup), a restart is what picks it up, even when d.updated
           // is false (files already matched from an earlier auto-check this run).
           const chip = $('chip-latest');
-          if (chip && d.remote_version && d.remote_version !== CURRENT_VERSION) {
-            chip.textContent = 'Latest: v' + d.remote_version + ' - click to restart';
+          if (chip && d.remote_version) {
+            if (d.remote_version !== CURRENT_VERSION) {
+              chip.textContent = 'Latest: v' + d.remote_version + ' - click to restart';
+              chip.title = 'A newer version has been downloaded - click to restart and apply it';
+              chip.classList.remove('chip-latest-ok');
+              chip.style.cursor = 'pointer';
+            } else {
+              chip.textContent = 'Latest';
+              chip.title = 'You are on the latest version';
+              chip.classList.add('chip-latest-ok');
+              chip.style.cursor = 'default';
+            }
             chip.classList.remove('hidden');
           } else if (chip) {
             chip.classList.add('hidden');
           }
         } catch (e) { }
+      }
+      function verLatestChipClick() {
+        const chip = $('chip-latest');
+        if (chip && !chip.classList.contains('chip-latest-ok')) restartTool();
       }
       async function restartTool() {
         toast('Restarting - a fresh window will open...');
@@ -6817,7 +6836,7 @@ https://example.com/page-2"></textarea>
         { key: 'ranking', label: 'Rank Checker' }, { key: 'index', label: 'Indexing Checker' },
         { key: 'count', label: 'Results Count' }, { key: 'backlink', label: 'Backlink Status' },
         { key: 'onpage', label: 'SEO On-Page' }, { key: 'health', label: 'Health Audit' },
-        { key: 'siteaudit', label: 'Site Audit' },
+        { key: 'siteaudit', label: 'Website Audit' },
         { key: 'gsc', label: 'GSC Audit' }, { key: 'crawl', label: 'Crawl Tracker' },
         { key: 'brief', label: 'Brief Analysis' }, { key: 'wayback', label: 'Wayback Submitter' },
         { key: 'seranking', label: 'SEranking Audit' }, { key: 'geo', label: 'GEO / AI Optimization' },
@@ -7614,7 +7633,7 @@ https://example.com/page-2"></textarea>
     </script>
     <!-- Activity Log Bar -->
     <div id="activity-bar"
-      style="position:fixed;bottom:0;right:0;left:220px;z-index:30;transition:left .3s var(--ease);display:none">
+      style="position:fixed;bottom:0;right:0;left:280px;z-index:30;transition:left .3s var(--ease);display:none">
       <div onclick="toggleActivityLog()"
         style="background:var(--surface-2);border-top:1px solid var(--border);padding:8px 20px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--text-3);user-select:none">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
