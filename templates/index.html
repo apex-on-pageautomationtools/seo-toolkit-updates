@@ -164,6 +164,17 @@
       border-radius: var(--r-pill)
     }
 
+    .chip-latest {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--warn);
+      background: rgba(240, 160, 32, .14);
+      padding: 3px 9px;
+      border-radius: var(--r-pill);
+      margin-left: 6px;
+      cursor: pointer
+    }
+
     .appbar .actions {
       display: flex;
       align-items: center;
@@ -1819,6 +1830,7 @@
     <header class="appbar">
       <div class="brand">
         <span class="chip-ver">v{{ version }}</span>
+        <span id="chip-latest" class="chip-latest hidden" onclick="restartTool()" title="A newer version has been downloaded - click to restart and apply it"></span>
       </div>
       <div class="actions">
       </div>
@@ -6471,6 +6483,7 @@ https://example.com/page-2"></textarea>
         } catch (e) { const msg = 'Update check failed - try again.'; if (st) st.textContent = msg; toast(msg); }
         if (btn) { btn.disabled = false; btn.textContent = old; }
       }
+      const CURRENT_VERSION = "{{ version }}";
       async function autoCheckUpdates() {
         try {
           const d = await (await fetch('/api/check-updates', { method: 'POST' })).json();
@@ -6478,6 +6491,19 @@ https://example.com/page-2"></textarea>
             const n = d.updated_files.length;
             $('update-banner-text').textContent = 'Update installed (' + n + ' file' + (n > 1 ? 's' : '') + ') - restart to apply.';
             $('update-banner').style.display = 'block';
+          }
+          // Show current-vs-latest right in the badge so the team can see at a glance
+          // whether an update is pending, instead of clicking "Check for updates"
+          // repeatedly. remote_version is the manifest's version at the moment of
+          // this check - if it's ahead of what's actually running (baked into this
+          // process at startup), a restart is what picks it up, even when d.updated
+          // is false (files already matched from an earlier auto-check this run).
+          const chip = $('chip-latest');
+          if (chip && d.remote_version && d.remote_version !== CURRENT_VERSION) {
+            chip.textContent = 'Latest: v' + d.remote_version + ' - click to restart';
+            chip.classList.remove('hidden');
+          } else if (chip) {
+            chip.classList.add('hidden');
           }
         } catch (e) { }
       }
