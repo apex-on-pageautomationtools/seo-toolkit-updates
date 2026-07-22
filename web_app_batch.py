@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.8.2"
+APP_VERSION = "4.8.3"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -961,15 +961,20 @@ class Session:
             add_log("SERP Counter loaded - results will show position numbers")
         return exts
 
-    def start(self, rotate=False):
+    def start(self, rotate=False, force_no_proxy=False):
         self.quit()
         self.profile = mode_profile(self.profile_key) if self.profile_key else pick_profile()
         add_log(f"Using profile: {os.path.basename(self.profile)}")
-        proxy = self.pool.next() if rotate else self.pool.current()
-        if proxy is None and self.pool:
-            proxy = self.pool.next()
-        if proxy:
-            add_log(f"Using proxy {proxy.get('host')}:{proxy.get('port')}")
+        if force_no_proxy:
+            proxy = None
+            add_log("Proxy skipped for this attempt (going direct) - the configured "
+                    "proxy pool kept failing to even connect.")
+        else:
+            proxy = self.pool.next() if rotate else self.pool.current()
+            if proxy is None and self.pool:
+                proxy = self.pool.next()
+            if proxy:
+                add_log(f"Using proxy {proxy.get('host')}:{proxy.get('port')}")
         self.driver = engine.build_driver(
             self.profile, proxy=proxy, headless=self.headless,
             country=self.country, extra_extensions=self._extensions(),
@@ -1047,15 +1052,25 @@ def _recover(sess, kind):
         if stop_event.is_set():
             return False
         backoff = min(120, 15 * (2 ** (i - 1))) + random.uniform(0, 8)
+        # network_error is the "browser couldn't even connect" symptom - most likely
+        # the proxy itself, not Google blocking this IP (that's soft_block/http_403,
+        # where the proxy is the one thing actually protecting the real office IP, so
+        # dropping it there would be counterproductive). Give the proxy pool one honest
+        # retry first (rotates to a different entry, in case it was transient), then
+        # fall back to a direct connection for the rest - confirmed live: a small/bad
+        # pool can keep rotating back to the same failing proxy and never recover on
+        # its own otherwise.
+        skip_proxy = kind == "network_error" and i >= 2 and bool(sess.pool)
         add_log(f"Recovery {i}/{retries}: cooldown {backoff:.0f}s"
-                + (" + rotating proxy/identity" if sess.pool else " + fresh identity"))
+                + (" + trying a direct connection (no proxy)" if skip_proxy
+                   else " + rotating proxy/identity" if sess.pool else " + fresh identity"))
         slept = 0
         while slept < backoff and not stop_event.is_set():
             time.sleep(1); slept += 1
         if stop_event.is_set():
             return False
         try:
-            sess.start(rotate=bool(sess.pool))
+            sess.start(rotate=bool(sess.pool), force_no_proxy=skip_proxy)
         except BrowserClosedError:
             raise
         except Exception as e:
@@ -1425,7 +1440,6 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
             kind = classify_page(src)
 
         if kind in ("captcha", "soft_block", "http_403", "network_error"):
-            add_log(f"Block detected ({kind}). Starting recovery...")
             if not _recover(sess, kind):
                 return {"status": "captcha", "matches": match_domain([], domain_clean)}
             _reanchor_locale(sess, country, lang)
@@ -2147,7 +2161,6 @@ def count_one(sess, keyword, country, city=None, lang="en"):
             src = page_source(sess.driver)
             kind = classify_page(src)
         if kind in ("captcha", "soft_block", "http_403", "network_error"):
-            add_log(f"Block detected ({kind}). Starting recovery...")
             if not _recover(sess, kind):
                 return {"status": "captcha", "results_count": ""}
             _reanchor_locale(sess, country, lang)
