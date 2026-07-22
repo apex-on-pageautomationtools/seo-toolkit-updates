@@ -6769,6 +6769,9 @@ https://example.com/page-2"></textarea>
             msg = /reach/i.test(d.reason) ? 'Could not reach the update server - check internet/firewall.' : d.reason;
           } else if (d.updated && (d.updated_files || []).length) {
             msg = 'Updated ' + d.updated_files.length + ' file(s). Please close and reopen the app to apply.';
+          } else if ((d.failed || []).length) {
+            const firstReason = Object.values(d.failed_reasons || {})[0] || '';
+            msg = d.failed.length + ' file(s) failed to update' + (firstReason ? ' - ' + firstReason : '') + '.';
           } else {
             msg = 'You are on the latest version.';
           }

@@ -60,6 +60,24 @@ def _fetch_json(url, timeout=30):
         return None
 
 
+def _looks_intercepted(path):
+    """A downloaded .py/.html/.json file that starts with an HTML doctype/tag (or
+    a captive-portal/login redirect) means something between here and GitHub
+    substituted a block/login page for the real content - a corporate proxy or
+    antivirus web filter, not a real network failure. Confirmed live: a machine
+    hit a 100% hash-mismatch rate on EVERY file, every retry, for every update
+    cycle - a pattern ordinary flakiness doesn't produce, since flaky networks
+    fail intermittently, not deterministically on everything. Detecting this
+    specifically lets the log say what's actually wrong instead of just
+    'hash mismatch', which looks identical to a transient blip."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(512).lstrip().lower()
+    except Exception:
+        return False
+    return head.startswith((b"<!doctype html", b"<html"))
+
+
 def _download_file(url, dest, timeout=90):
     """Download a file from URL to dest path. Downloads to a temp file first, then
     atomically replaces dest - a failure/interruption partway through never leaves a
@@ -198,11 +216,21 @@ def check_and_update(log_fn=None):
         for _attempt in range(3):
             dl_ok, err = _download_file(download_url, local_path)
             if dl_ok:
-                if not remote_hash or _file_hash(local_path) == remote_hash:
+                got_hash = _file_hash(local_path)
+                if not remote_hash or got_hash == remote_hash:
                     ok = True
                     break
-                last_err = "hash mismatch after download"
-                _log_update(f"Hash mismatch (try {_attempt + 1}): {rel_path}")
+                if _looks_intercepted(local_path):
+                    last_err = ("network is intercepting this download (a proxy/antivirus web "
+                                "filter is substituting a block or login page for the real file) "
+                                "- ask IT to allow raw.githubusercontent.com, a normal retry won't help")
+                    _log_update(f"Hash mismatch (try {_attempt + 1}): {rel_path} - looks INTERCEPTED "
+                                f"(downloaded content is an HTML page, not the real file) - "
+                                f"expected {remote_hash[:8]}..., got {got_hash[:8]}...")
+                else:
+                    last_err = "hash mismatch after download"
+                    _log_update(f"Hash mismatch (try {_attempt + 1}): {rel_path} - "
+                                f"expected {remote_hash[:8]}..., got {got_hash[:8]}...")
             else:
                 last_err = err
                 _log_update(f"Download error (try {_attempt + 1}) for {rel_path}: {err}")
@@ -249,6 +277,8 @@ def check_and_update(log_fn=None):
     if updated_files:
         log_fn(f"[update] {len(updated_files)} file(s) updated to v{remote_version}")
         _log_update(f"Update complete: {len(updated_files)} files, v{remote_version}")
+    elif failed:
+        log_fn(f"[update] {len(failed)} file(s) failed to update - NOT up to date")
     else:
         log_fn("[update] Everything up to date")
 
