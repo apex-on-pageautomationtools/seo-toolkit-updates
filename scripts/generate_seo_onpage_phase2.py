@@ -1217,10 +1217,13 @@ FORMAT_CANON_XLSX = {
                                                "Suggested Canonical Tag"], "366092"),
 }
 
-# Values: (sheet_name, [(header label, data field key)], color). Field keys index
-# into each alt entry's dict: "page", "image", "existing_alt", "suggested_alt" -
-# a (label, field) list (not just labels) because some references (ETA) order
-# Image before Page and/or drop the existing-alt column entirely (Neon/Sara/Octal).
+# Values: (sheet_name, [(header label, data field key)], color[, header_font_color]).
+# Field keys index into each alt entry's dict: "page", "image", "existing_alt",
+# "suggested_alt" - a (label, field) list (not just labels) because some
+# references (ETA) order Image before Page and/or drop the existing-alt column
+# entirely (Neon/Sara/Octal). The optional 4th element overrides the header
+# font color (defaults to white) - Hexa Up's real reference uses a black
+# header font on its orange fill.
 FORMAT_ALT_XLSX = {
     "neon": ("Sheet1", [("Page URL", "page"), ("Image URL", "image"),
                         ("Recommended Alt Tag Suggestions", "suggested_alt")], "215967"),
@@ -1233,6 +1236,12 @@ FORMAT_ALT_XLSX = {
     "kappa": ("Sheet1", [("Page URL", "page"), ("Image URL", "image"),
                          ("Existing Image Alt Text", "existing_alt"),
                          ("Suggested Image Alt Text", "suggested_alt")], "4A86E8"),
+    # Verified against "Image Alt tag suggestion - youreyeexpert.com.xlsx" - sheet
+    # "Image Alt tag", Page URLs / Image URLs / "Suggestd Alt Text" (verbatim typo
+    # kept - matches the real reference exactly), orange (Accent 2) header fill
+    # with a black header font.
+    "hexaup": ("Image Alt tag", [("Page URLs", "page"), ("Image URLs", "image"),
+                                 ("Suggestd Alt Text", "suggested_alt")], "ED7D31", "000000"),
 }
 
 
@@ -1357,6 +1366,120 @@ def write_meta_xlsx(metas, out_path, fmt=None):
     wb.save(out_path)
 
 
+def write_meta_xlsx_hexaup(pages_data, metas, targets, out_path, country=None):
+    """Hexa Up - verified against "Meta Suggestion Report - Youreyeexpert.com.xlsx"
+    (D:\\Report Formats\\On-Page Report Formats\\Hexa Up - On-Page\\): a single
+    workbook with 2 sheets, not the shared write_meta_xlsx() layout - "Meta
+    Suggestion Report" (Address / Existing+Suggested Meta Title / Existing+
+    Suggested Meta Description / Existing+Suggested H1 / Suggested H2, green
+    #70AD47 header) and "Keyword" (an embedded copy of the Target Pages sheet -
+    "Website - <domain>" / "Target Location - <country>" banner rows in orange,
+    then S. No / Keywords / Target Page).
+
+    Suggested H1/H2 are derived from each page's REAL captured heading list
+    (pd["h1s"] / pd["headings"]) - "Convert Existing H2 Tag "..." into H1 tag"
+    only when an actual H2 exists to point at, "No Change Required" (matching
+    the reference's exact wording) when nothing needs fixing - never a
+    fabricated per-page suggestion the crawler has no evidence for."""
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill
+
+    no_change_generic = "No changes needed - existing tag is already optimized"
+
+    def _hx(val):
+        return "No Change Required" if val == no_change_generic else val
+
+    def _h2_texts(pd):
+        return [txt for tag, txt in (pd.get("headings") or [])
+                if tag.lower() == "h2" and (txt or "").strip()]
+
+    def _existing_h1(pd):
+        h1s = pd.get("h1s") or []
+        if len(h1s) > 1:
+            return "Multiple H1 Found"
+        existing = pd.get("h1")
+        return "Missing" if (not existing or existing == MISSING) else existing
+
+    def _suggested_h1(pd):
+        h1s = pd.get("h1s") or []
+        existing = pd.get("h1")
+        needs_fix = len(h1s) > 1 or (not existing or existing == MISSING)
+        if not needs_fix:
+            return "No Change Required"
+        h2s = _h2_texts(pd)
+        if h2s:
+            return f'Convert Existing H2 Tag "{h2s[0]}" into H1 tag'
+        return "Add a keyword-optimized H1 tag"
+
+    def _suggested_h2(pd):
+        return "No Change Required" if _h2_texts(pd) else "Add an H2 tag using the target keyword"
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Meta Suggestion Report"
+    headers = ["Address", "Existing Meta Title", "Suggested Meta Title",
+               "Existing Meta Description", "Suggested Meta Description",
+               "Existing H1", "Suggested H1", "Suggested H2"]
+    header_fill = PatternFill("solid", fgColor="70AD47")
+    header_font = Font(bold=True, size=11, color="FF000000")
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    for c, label in enumerate(headers, 1):
+        cell = ws.cell(1, c, label)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = left
+    ws.freeze_panes = "A2"
+    for i, w in enumerate([55, 40, 40, 45, 45, 20, 45, 20]):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i + 1)].width = w
+
+    yellow = PatternFill("solid", fgColor="FFFF00")
+    red_bold = Font(bold=True, color="FFFF0000")
+    for r, (pd, m) in enumerate(zip(pages_data, metas), 2):
+        existing_h1 = _existing_h1(pd)
+        row = [m["page"], m["existing_title"], _hx(m["suggested_title"]),
+               m["existing_description"], _hx(m["suggested_description"]),
+               existing_h1, _suggested_h1(pd), _suggested_h2(pd)]
+        for c, val in enumerate(row, 1):
+            cell = ws.cell(r, c, val)
+            cell.alignment = left
+            if val == "No Change Required":
+                cell.fill = yellow
+            if c == 6 and existing_h1 in ("Missing", "Multiple H1 Found"):
+                cell.font = red_bold
+
+    # ---- Keyword sheet (Target Pages, embedded as its own sheet here rather than
+    # a separate xlsx - matches the real reference workbook exactly) ----
+    ws2 = wb.create_sheet("Keyword")
+    site_url = pages_data[0]["url"] if pages_data else ""
+    host = re.sub(r"^www\.", "", urllib.parse.urlparse(site_url).netloc or site_url)
+    ws2.merge_cells("A1:C1")
+    c1 = ws2.cell(1, 1, f"Website - {host[:1].upper()}{host[1:]}" if host else "Website")
+    c1.font = Font(bold=True, size=20, color="FFFFFFFF")
+    c1.fill = PatternFill("solid", fgColor="C55A11")
+    hdr_row = 2
+    if country:
+        ws2.merge_cells("A2:C2")
+        c2 = ws2.cell(2, 1, f"Target Location  -  {country}")
+        c2.font = Font(bold=True, size=14, color="FF000000")
+        c2.fill = PatternFill("solid", fgColor="F4B083")
+        hdr_row = 3
+    for c_i, label in enumerate(["S. No", "Keywords", "Target Page"], 1):
+        ws2.cell(hdr_row, c_i, label).font = Font(bold=True)
+    r, sno = hdr_row + 1, 1
+    for t in (targets or []):
+        page = t["page"]
+        for kw in (t.get("keywords") or []):
+            ws2.cell(r, 1, sno)
+            ws2.cell(r, 2, kw)
+            ws2.cell(r, 3, page)
+            sno += 1
+            r += 1
+    ws2.column_dimensions["A"].width = 10
+    ws2.column_dimensions["B"].width = 45
+    ws2.column_dimensions["C"].width = 75
+    wb.save(out_path)
+
+
 def write_alt_xlsx(self_hosted, external_cdn, out_path, fmt=None):
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill
@@ -1364,8 +1487,11 @@ def write_alt_xlsx(self_hosted, external_cdn, out_path, fmt=None):
     ws = wb.active
 
     spec = FORMAT_ALT_XLSX.get(str(fmt or "").strip().lower())
+    header_font_color = "FFFFFF"
     if spec:
-        sheet_name, columns, color_hex = spec
+        sheet_name, columns, color_hex = spec[0], spec[1], spec[2]
+        if len(spec) > 3 and spec[3]:
+            header_font_color = spec[3]
         headers = [label for label, _field in columns]
         field_order = [field for _label, field in columns]
         header_fill = PatternFill("solid", fgColor=color_hex) if color_hex else PatternFill("solid", fgColor="2F5496")
@@ -1377,7 +1503,7 @@ def write_alt_xlsx(self_hosted, external_cdn, out_path, fmt=None):
         # solid 2F5496 fill with a white bold font, and a frozen header row.
         header_fill = PatternFill("solid", fgColor="2F5496")
     ws.title = sheet_name
-    header_font = Font(bold=True, size=11, color="FFFFFF")
+    header_font = Font(bold=True, size=11, color=header_font_color)
     header_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
     for c, h in enumerate(headers, 1):
         cell = ws.cell(1, c, h)
@@ -8084,6 +8210,379 @@ def _build_docx_sigma(domain, pages_data, findings, captured, brand, out_path):
     doc.save(out_path)
 
 
+def _build_docx_hexaup(domain, pages_data, findings, captured, brand, out_path):
+    """Hexa Up - verified against "On Page Suggestion Report - Youreyeexpert.com.docx"
+    (D:\\Report Formats\\On-Page Report Formats\\Hexa Up - On-Page\\): no cover
+    image, no tables - 122 Normal-style paragraphs. Domain title / "Objective:" /
+    the Meta-suggestion heading are Bookman Old Style, bold, underlined, 15pt,
+    brown (#833C0B), centered only for the title. Every other main-section
+    heading ("Content Optimization Suggestions", "XML Sitemap File Suggestion:",
+    "Robots.txt:", "Canonical Tag:", "URL Structure Optimization:", "URL
+    Redirection Check:", "Hyperlink Analysis:", "External Linking:", "Broken
+    Link Test:", "Image Alt Tag Optimization:", "Site Security:", "Additional
+    Suggestion:") is Book Antiqua, bold, 15pt, same brown, NOT underlined.
+    Sub-headings ("Schema Code Suggestions", "Breadcrumbs Navigation") are Book
+    Antiqua bold 13pt black. Body text is Book Antiqua 12pt black; bold "Lead–"
+    labels precede most status lines. Closing "Thank You!" is Bookman Old
+    Style, 24pt, underlined, brown, centered.
+
+    The reference's site-specific micro-suggestions (exact hyperlink before/
+    after examples, phrase-level "Find With/Replace With" content edits, the
+    real business's Organization JSON-LD fields such as phone/address/founder,
+    a specific breadcrumb path, copyright-year/blog-date specifics) have no
+    counterpart in this script's crawl data and are NOT fabricated here - only
+    the structural/wording template plus whatever this script's own findings
+    dict (content_word_count, sitemap_found, robots_found, canonical_issue,
+    www_redirect_issue, ext_count, broken_links, alt_missing, sucuri_clean,
+    copyright_year/copyright_stale, has_blog, pd["h1s"]/pd["headings"]) can
+    genuinely verify per-domain."""
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc, h = _setup_docx(domain, use_cover=False)
+    root = h["root"]; d = h["d"]
+
+    BROWN = RGBColor(0x83, 0x3C, 0x0B)
+    BLACK = RGBColor(0x00, 0x00, 0x00)
+    RED = RGBColor(0xEE, 0x00, 0x00)
+
+    def _run(p, text, bold=False, underline=False, color=BLACK, size=12, font="Book Antiqua"):
+        r = p.add_run(text)
+        r.font.name = font
+        r.font.size = Pt(size)
+        r.font.bold = bold
+        r.font.underline = underline
+        if color is not None:
+            r.font.color.rgb = color
+        return r
+
+    def title_heading(text, centered=False):
+        p = doc.add_paragraph()
+        if centered:
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _run(p, text, bold=True, underline=True, color=BROWN, size=15, font="Bookman Old Style")
+        return p
+
+    def section(text):
+        p = doc.add_paragraph()
+        _run(p, text, bold=True, color=BROWN, size=15)
+        return p
+
+    def subheading(text):
+        p = doc.add_paragraph()
+        _run(p, text, bold=True, color=BLACK, size=13)
+        return p
+
+    def body(text, justify=False, size=12):
+        p = doc.add_paragraph()
+        if justify:
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        _run(p, text, size=size)
+        return p
+
+    def lead(lead_text, text, lead_color=BLACK):
+        p = doc.add_paragraph()
+        _run(p, lead_text, bold=True, color=lead_color)
+        _run(p, text)
+        return p
+
+    def shot(key):
+        src = (captured or {}).get(key)
+        if src and Path(src).exists():
+            try:
+                hr._add_bordered_image(doc, src)
+            except Exception:
+                pass
+
+    # ---- Title ----
+    title_heading((d[:1].upper() + d[1:]) if d else domain, centered=True)
+
+    # ---- Objective ----
+    title_heading("Objective:")
+    body("The objective of on-page optimization is to improve website visibility, rankings, and "
+         "user experience by refining meta tags, headers, content quality, and technical aspects "
+         "like page speed and mobile responsiveness. By aligning with search engine algorithms and "
+         "user intent, these efforts enhance traffic and engagement, fostering long-term online "
+         "success.")
+    body("This report outlines the identified website issues and offers comprehensive "
+         "recommendations for optimization. Each on-page factor listed requires careful review, "
+         "and the recommended changes should be implemented as necessary. Addressing these areas "
+         "will help improve the website's overall performance and align it with best practices.")
+
+    # ---- Meta title/description note ----
+    title_heading("SEO Meta Title and Description Optimization Suggestions")
+    body("We suggest Meta suggestions (Meta Title & Meta Description) including Heading tags in "
+         "the attached file, so please find and update it on the website.")
+
+    # ---- Content Optimization Suggestions ----
+    section("Content Optimization Suggestions")
+    body("Content optimization involves ensuring that your website's content is relevant, "
+         "engaging, and keyword-rich. Well-optimized content provides value to users, improving "
+         "user experience and increasing your chances of ranking higher on search engines, which "
+         "in turn drives more traffic and conversions.", justify=True)
+
+    def _needs_content(pd):
+        return (pd.get("content_word_count") or 0) < 100
+
+    def _low_density(pd):
+        kws = pd.get("keywords") or []
+        if not kws:
+            return False
+        return "not found" in check_content_keyword_match(pd, kws)
+
+    content_needed = [pd for pd in pages_data if _needs_content(pd)]
+    low_density = [pd for pd in pages_data if not _needs_content(pd) and _low_density(pd)]
+
+    def _pair(pd):
+        p = doc.add_paragraph()
+        _run(p, "Page URL – ", bold=True)
+        _run(p, pd["url"])
+        p2 = doc.add_paragraph()
+        _run(p2, "Content Required For – ", bold=True)
+        kws = ", ".join(pd.get("keywords") or []) or \
+            (pd.get("h1") if pd.get("h1") and pd.get("h1") != MISSING else "the target keyword")
+        _run(p2, kws)
+
+    if content_needed:
+        lead("Add More Content: ", "We inform you that, when we analyzing your website, we didn't "
+             "find enough amount of content in landing pages. So, we suggest you to add (80-100 "
+             "words) keyword orient content (in sensible manner) in target pages. Use the keyword "
+             "respective to the pages as suggested below-")
+        for pd in content_needed:
+            _pair(pd)
+    else:
+        body("No pages with critically thin content were found on the target pages checked.")
+
+    if low_density:
+        lead("Low Keyword Density Content: ", "We inform you that, when we analyzing your website, "
+             "we found that existing content of the following pages has low keyword density. It is "
+             "required to incorporate targeted keywords (in sensible manner) within the existing "
+             "content in following pages-")
+        for pd in low_density:
+            _pair(pd)
+    else:
+        body("No pages with low keyword density were found on the target pages checked.")
+
+    # ---- XML Sitemap ----
+    section("XML Sitemap File Suggestion: ")
+    body("An XML sitemap helps search engines easily discover and index your website's important "
+         "pages. It ensures that all pages are crawled efficiently, improving visibility and SEO "
+         "performance.")
+    if findings.get("sitemap_found"):
+        lead("Suggestions– ", "Sitemap file found on the website and appears correctly "
+             "configured. This is good from an SEO point of view.")
+        p = doc.add_paragraph()
+        _run(p, findings.get("sitemap_url") or (root + "/sitemap.xml"), bold=True)
+    else:
+        lead("Suggestions– ", "No sitemap.xml file was found on the website. Please create "
+             "and upload a sitemap.xml file to the root directory.", lead_color=RED)
+    shot("sitemap")
+
+    # ---- Robots.txt ----
+    section("Robots.txt:")
+    body("The robots.txt file directs search engines on which pages to crawl or avoid, ensuring "
+         "only important pages are indexed and improving SEO efficiency.")
+    if findings.get("robots_found"):
+        lead("Suggestions– ", "The robots.txt file is found on the website and appears "
+             "correctly configured. This is good from an SEO point of view.")
+    else:
+        lead("Suggestions– ", "The robots.txt file was not found (or is not optimized) on the "
+             "website. We have created a robots.txt file. So, we recommend you add it to the root "
+             "directory of the website.", lead_color=RED)
+    p = doc.add_paragraph()
+    _run(p, root + "/robots.txt", bold=True)
+    shot("robots")
+
+    # ---- Canonical Tag ----
+    section("Canonical Tag:")
+    body("Canonical tags prevent duplicate content issues by specifying the preferred version of a "
+         "page. This helps search engines know which page to index, improving SEO and avoiding "
+         "penalties for duplicate content.")
+    if findings.get("canonical_issue"):
+        lead("Suggestions– ", f"When we analyzed your website, the canonical tag did not match "
+             f"the live URL (found: {findings.get('home_canonical') or '(missing)'}). Please review "
+             "and correct it.", lead_color=RED)
+    else:
+        lead("Suggestions– ", "When we analyzed your website, we found the correct canonical "
+             "tag on your website. This is good from an SEO point of view.")
+    shot("canonical")
+
+    # ---- URL Structure ----
+    section("URL Structure Optimization: ")
+    body("URL structure refers to how a web address is organized to properly locate specific pages "
+         "on a website. A well-structured URL helps search engines better understand page content, "
+         "improves search visibility and Google rankings, enhances user experience by making links "
+         "clean and readable, and establishes a clear and logical website hierarchy for both users "
+         "and crawlers.")
+    url_changes = findings.get("url_changes") or []
+    if url_changes:
+        lead("Suggestions- ", "The following URL(s) could be improved for better search engine "
+             "readability:", lead_color=RED)
+        for existing, recommended in url_changes:
+            p = doc.add_paragraph()
+            _run(p, "Existing – ", bold=True)
+            _run(p, existing)
+            p2 = doc.add_paragraph()
+            _run(p2, "Recommended – ", bold=True)
+            _run(p2, recommended)
+    else:
+        lead("Suggestions- ", "Existing URL structure of the website is fine; it is good from "
+             "search engine point of view.")
+
+    # ---- URL Redirection ----
+    section("URL Redirection Check:")
+    body("A redirect is a method used to automatically send both users and search engines to a "
+         "different URL than the one they initially requested.")
+    if findings.get("www_redirect_issue"):
+        lead("Suggestions– ", "Both www and non-www (or http/https) versions of the website "
+             "are reachable without a single redirect to one canonical version. Please fix this "
+             "with a proper 301 redirect.", lead_color=RED)
+        shot("redirect")
+    else:
+        lead("Suggestions– ", "No redirection issue found on the website. It is good from a "
+             "search engine point of view.")
+
+    # ---- Hyperlink Analysis ----
+    section("Hyperlink Analysis:")
+    p = doc.add_paragraph()
+    _run(p, "Website URL", bold=True)
+    _run(p, f"– {root}/")
+    body("We have found that linking of the pages on the navigation and footer is well-structured, "
+         "which is good from an SEO point of view.")
+
+    # ---- External Linking ----
+    section("External Linking:")
+    body("External linking connects your site to credible sources, adding value for users and "
+         "improving content relevance for search engines.")
+    ext_count = findings.get("ext_count", 0)
+    if ext_count:
+        lead("Status– ", f"Our analysis found {ext_count} external link(s) on the website's "
+             "target pages.")
+        for item in (findings.get("external_links_detail") or [])[:20]:
+            p = doc.add_paragraph()
+            _run(p, item.get("link", ""), bold=True)
+        shot("externallinks")
+    else:
+        lead("Status– ", "No external links found on the website's target pages.")
+
+    # ---- Broken Link Test ----
+    section("Broken Link Test:")
+    body("Broken links lead users to non-existent pages, harming user experience and SEO. "
+         "Identifying and fixing these ensures smoother navigation and better site performance.")
+    broken = findings.get("broken_links") or []
+    if broken:
+        p = doc.add_paragraph()
+        _run(p, "Status– ", bold=True)
+        _run(p, "We inform you that, when we analyzing your website, we found ")
+        _run(p, str(len(broken)), bold=True)
+        _run(p, " Broken link(s)", bold=True)
+        _run(p, " in your website. It is not good from search engine point of view. So, we suggest "
+                "you to check attached broken links sheet and resolve them.")
+        shot("brokenlinks")
+    else:
+        lead("Status– ", "No broken links were found on the website's target pages.")
+
+    # ---- Image Alt Tag Optimization ----
+    section("Image Alt Tag Optimization: ")
+    body("Image alt tags describe the content of images for search engines and improve "
+         "accessibility. Optimizing them with relevant keywords enhances SEO and helps search "
+         "engines understand the image context, leading to better rankings.")
+    alt_missing = findings.get("alt_missing", 0)
+    if alt_missing:
+        lead("Suggestions: ", f"Image alt tag not found on {alt_missing} image(s) in target pages. "
+             "It is not good from search engine point of view. So, we suggest image alt tag "
+             "suggestions in attached file, so please find and update it on the website.",
+             lead_color=RED)
+    else:
+        lead("Suggestions: ", "Appropriate ALT tags were found on the website's target pages.")
+
+    # ---- Site Security ----
+    section("Site Security: ")
+    body("Site security ensures your website is protected against threats and provides a safe "
+         "browsing experience for users. Secure websites, often marked by HTTPS, are also favoured "
+         "by search engines, enhancing credibility and rankings.")
+    if findings.get("sucuri_clean") is False:
+        lead("Status– ", "Security issues were found on your website. Please review and "
+             "resolve them.", lead_color=RED)
+    else:
+        lead("Status– ", "We didn't find any security issues on your website. It is good from "
+             "an SEO point of view.")
+    shot("sucuri")
+
+    # ---- Additional Suggestion ----
+    section("Additional Suggestion: ")
+    subheading("Schema Code Suggestions")
+    homepage = pages_data[0] if pages_data else {}
+    home_html = homepage.get("html") or ""
+    has_org_schema = bool(re.search(r'"@type"\s*:\s*"[^"]*Organization[^"]*"', home_html))
+    if not has_org_schema:
+        body("As per the website audit, we observed that the homepage does not include "
+             "Organization Schema Markup. Adding this Schema will help search engines better "
+             "understand your business information and improve your website's SEO visibility, "
+             "branding, and trust signals in search results.")
+        body("Please check the suggested Organization Schema below and implement it on the "
+             "website homepage - fill in the business-specific fields (address, phone, social "
+             "profiles) before publishing.")
+        org_name = brand or d
+        org_desc = homepage.get("description")
+        schema_lines = ["{", '  "@context": "https://schema.org",', '  "@type": "Organization",',
+                        f'  "@id": "{root}/#organization",', f'  "name": "{org_name}",',
+                        f'  "url": "{root}/",']
+        if org_desc and org_desc != MISSING:
+            schema_lines.append(f'  "description": "{org_desc}",')
+        schema_lines.append('  "sameAs": []')
+        schema_lines.append("}")
+        for line in schema_lines:
+            body(line, size=11)
+    else:
+        body("As per the website audit, Organization Schema Markup was found on the homepage. No "
+             "changes required.")
+
+    subheading("Breadcrumbs Navigation")
+    body("Breadcrumb navigation improves SEO by helping search engines understand a website's "
+         "structure and hierarchy. It enhances internal linking, distributes link equity, and can "
+         "improve how pages appear in search results. Breadcrumbs also improve user experience by "
+         "making navigation clearer, reducing bounce rates, and helping visitors find content "
+         "faster - all signals that support stronger search performance.", justify=True)
+    body("Please review the target pages and add proper breadcrumb navigation along with valid "
+         "Breadcrumb Schema Markup where missing, to improve website navigation, enhance user "
+         "experience, and help search engines better understand the page hierarchy for improved "
+         "SEO performance.", justify=True)
+
+    if findings.get("copyright_stale"):
+        lead("Note for Copyright: ", "We inform you that, when we analyzing your website, we "
+             f"noticed that your copyright year is not updated (showing "
+             f"{findings.get('copyright_year')}). So, we suggest you to update this to the present "
+             "year.")
+
+    if findings.get("has_blog"):
+        lead("Blog Suggestion: ", "While analyzing the website we have found the blog section on "
+             "the website. We suggest you kindly post articles on a regular basis, at least 1 "
+             "article a week. Articles should be according to targeted keywords and about your "
+             "services. It is the best way to drive traffic to your website and increase your SEO.")
+    else:
+        lead("Blog Suggestion: ", "While analyzing the website we did not find a blog section. We "
+             "suggest you add one and kindly post articles on a regular basis, at least 1 article "
+             "a week, according to targeted keywords and your services - the best way to drive "
+             "traffic to your website and increase your SEO.")
+
+    all_links = set()
+    for pd in pages_data:
+        all_links.update(pd.get("internal_links") or [])
+        all_links.add(pd.get("url", ""))
+    if not any(re.search(r"/contact", u, re.I) for u in all_links):
+        lead("Note for Contact Us Page: ", "We inform you that, while analyzing your website we "
+             "noticed that we didn't find a contact page. So, we suggest you to create a contact "
+             "page and link it in the homepage menu bar.")
+
+    # ---- Closing ----
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _run(p, "Thank You!", bold=False, underline=True, color=BROWN, size=24, font="Bookman Old Style")
+
+    doc.save(out_path)
+
+
 def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, fmt="james"):
     """Dispatch to the format-specific DOCX builder - builds EXACTLY the selected
     format, or raises rather than silently defaulting to another one."""
@@ -8101,6 +8600,7 @@ def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, f
         "camila": _build_docx_camila, "alpha": _build_docx_alpha,
         "eta": _build_docx_eta, "kappa": _build_docx_kappa,
         "theta": _build_docx_theta, "sigma": _build_docx_sigma,
+        "hexaup": _build_docx_hexaup,
     }
     fn = builders.get(str(fmt or "").strip().lower())
     if not fn:
@@ -8118,7 +8618,7 @@ def main():
     ap.add_argument("--out", default=str(OUTPUT_DIR))
     ap.add_argument("--dry-run", action="store_true", help="use mock crawl data (no network)")
     ap.add_argument("--no-capture", action="store_true", help="skip live screenshots (text-only docx)")
-    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma", "sara", "peta", "deltafl", "deltafvr", "deltaup", "octal", "camila", "alpha", "eta", "kappa", "theta", "sigma"],
+    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma", "sara", "peta", "deltafl", "deltafvr", "deltaup", "octal", "camila", "alpha", "eta", "kappa", "theta", "sigma", "hexaup"],
                     help="Report sub-format: james (Driftzine), omega (alltechco), neon (sumitechengineers), xenon, gamma (Hawkeev), sara (teal template)")
     ap.add_argument("--gsc-token", default=None, help="GSC API access token for URL inspection")
     ap.add_argument("--property-url", default=None, help="GSC property URL (e.g. sc-domain:example.com)")
@@ -8229,11 +8729,18 @@ def main():
     else:
         doc_name = f"On Page-Analysis-Report - {domain}.docx"
 
-    meta_x = work / f"Meta Suggestions - {domain}.xlsx"
+    # Hexa Up's real reference names this "Meta Suggestion Report" (singular,
+    # + "Report") and embeds the Target Pages/Keywords sheet AS A SECOND SHEET
+    # inside that same workbook (see write_meta_xlsx_hexaup) rather than as its
+    # own file - so it skips the generic meta_x/targets_x naming below.
+    meta_x = work / (f"Meta Suggestion Report - {domain}.xlsx" if fmt == "hexaup"
+                     else f"Meta Suggestions - {domain}.xlsx")
     can_x = work / f"Canonical Tag Suggestions - {domain}.xlsx"
     doc_f = work / doc_name
 
-    if fmt in FORMAT_META_XLSX_KEYWORDS:
+    if fmt == "hexaup":
+        write_meta_xlsx_hexaup(pages_data, metas, targets, meta_x, country=args.country)
+    elif fmt in FORMAT_META_XLSX_KEYWORDS:
         write_meta_xlsx_with_keywords(metas, targets, meta_x, fmt)
     else:
         write_meta_xlsx(metas, meta_x, fmt=fmt)
@@ -8241,9 +8748,14 @@ def main():
 
     # Omega: no separate Alt Tag XLSX; has Target-pages-and-keywords-Report
     # Neon + James: include Alt Tag XLSX + Target Pages
+    # Hexa Up: Alt Tag XLSX only - its Target Pages/Keywords data is the
+    # "Keyword" sheet already embedded in meta_x above, not a separate file.
     if fmt == "omega":
         targets_x = work / f"Target-pages-and-keywords-Report - {domain}.xlsx"
         write_targets_xlsx(targets, targets_x, fmt=fmt)
+    elif fmt == "hexaup":
+        alt_x = work / f"Image Alt tag suggestion - {domain}.xlsx"
+        write_alt_xlsx(all_self_hosted, all_external_cdn, alt_x, fmt=fmt)
     else:
         alt_x = work / f"Image Alt Tag Suggestions - {domain}.xlsx"
         write_alt_xlsx(all_self_hosted, all_external_cdn, alt_x, fmt=fmt)
@@ -8263,8 +8775,12 @@ def main():
     # already generated above), built strictly from real data this script has
     # already collected. See D:\Report Formats\On-Page Report Formats\<Format>\
     # for the reference this is matched against.
-    if fmt in ("camila", "deltafvr", "theta", "eta"):
-        broken_x = work / f"Broken Link Suggestion - {domain}.xlsx"
+    if fmt in ("camila", "deltafvr", "theta", "eta", "hexaup"):
+        # Hexa Up's real reference file is "Broken link Suggestion - <domain>.xlsx"
+        # (lowercase "link") with its own sheet name/header color - every other
+        # format here keeps the shared default name/style.
+        broken_x = work / (f"Broken link Suggestion - {domain}.xlsx" if fmt == "hexaup"
+                           else f"Broken Link Suggestion - {domain}.xlsx")
         broken_cols = {
             "camila": [("Broken Link URL", "url"), ("Source Page URL", "found_on"),
                       ("Status", "code"), ("Suggestion", "suggested_redirect")],
@@ -8272,9 +8788,19 @@ def main():
                      ("Server Response", "code"), ("Solution", "suggested_redirect")],
             "eta": [("Broken Links", "url"), ("Link Text", None),
                    ("Source Pages", "found_on"), ("Suggestion", "suggested_redirect")],
+            # "Link Text" (anchor text) has no live data source in this crawler
+            # (check_broken_links never captures anchor text) - left blank (field
+            # None) rather than fabricated, same convention ETA already uses above.
+            "hexaup": [("Broken Link", "url"), ("Source Page", "found_on"),
+                      ("Server Response", "code"), ("Link Text", None),
+                      ("Solution", "suggested_redirect")],
         }
+        broken_kwargs = {"columns": broken_cols.get(fmt)}
+        if fmt == "hexaup":
+            broken_kwargs["sheet_name"] = "Broken link"
+            broken_kwargs["color"] = "2F5597"
         write_broken_link_xlsx(findings.get("broken_links_detail"), broken_x,
-                                columns=broken_cols.get(fmt))
+                                **broken_kwargs)
 
     if fmt in ("deltafvr", "deltaup"):
         web_x = work / f"Webarchive URL - {domain}.xlsx"
