@@ -1,5 +1,5 @@
 {
-  "version": "4.7.0",
+  "version": "4.8.0",
   "files": [
     {
       "path": "da_checker.py",
@@ -33,7 +33,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "0af0d465c52d38e9019ca0415a0ab4116c5ba95d5fa823c3f52e5df58e322c11",
+      "hash": "d25f0e801bb54b2ca20e9e7c37dc5cbc06825242a300c2d18af1df02eff95ef8",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -138,13 +138,18 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "2b6800946ec7a90a3f2ad030c9cbf0995fd41832333918ee5ce9b255afe6324c",
+      "hash": "d940328db91df44b7a7587e4bc46f569508b7ce3f334049e5c3de0208e5d5e33",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {
       "path": "brief_analysis.py",
       "hash": "229a5ff3cdf4cce3475377f88fcc82adf915a7b8f92bb662abb2c6d5010f0d3d",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/brief_analysis.py"
+    },
+    {
+      "path": "site_audit.py",
+      "hash": "5cc073b9a4e2974ea7204298ad09aa9cf7b0d0a6a0a3238d9f455e810afd7ba0",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/site_audit.py"
     },
     {
       "path": "python/Lib/site-packages/openpyxl_bundle.zip",
