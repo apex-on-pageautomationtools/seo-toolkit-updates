@@ -1,5 +1,5 @@
 {
-  "version": "4.8.0",
+  "version": "4.8.1",
   "files": [
     {
       "path": "da_checker.py",
@@ -33,7 +33,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "d25f0e801bb54b2ca20e9e7c37dc5cbc06825242a300c2d18af1df02eff95ef8",
+      "hash": "763fa23f89e878de65c4f395289385c5abcc968ca49f5bb831f311fc20066b03",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -138,7 +138,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "d940328db91df44b7a7587e4bc46f569508b7ce3f334049e5c3de0208e5d5e33",
+      "hash": "49a9257039e330b0f921eaaafc5b75b48678e28081df1dfa5712c018f5a7a41a",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {
@@ -148,7 +148,7 @@
     },
     {
       "path": "site_audit.py",
-      "hash": "5cc073b9a4e2974ea7204298ad09aa9cf7b0d0a6a0a3238d9f455e810afd7ba0",
+      "hash": "52b4736e90cb2dcabfb36e66fc95961f7a95ef2d7eb4e5efa24aec4234cafdf4",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/site_audit.py"
     },
     {
@@ -183,7 +183,7 @@
     },
     {
       "path": "scripts/generate_seranking_audit.py",
-      "hash": "3e5e35cf4bb536d0b11999f03148992a260a153fca986daaf54940fac931704c",
+      "hash": "82239917f10807dd1b075c288d388282935bbf2b8f130780a2de533df14bd56d",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seranking_audit.py"
     },
     {
