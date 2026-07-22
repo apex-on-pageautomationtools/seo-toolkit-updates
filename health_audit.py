@@ -1047,11 +1047,18 @@ SIGMA_KEYS = [
     "blank_page", "dummy", "pagespeed",
 ]
 
+XENONK_KEYS = [
+    # Xenon K sequence: exactly JAMES_KEYS minus "broken_links" and "pagespeed"
+    # (the reference report has no checkpoint for either), order preserved.
+    k for k in JAMES_KEYS if k not in ("broken_links", "pagespeed")
+]
+
 FORMAT_INFO = {
-    "james": {"keys": JAMES_KEYS, "ext": "docx", "label": "James (Full DOCX)"},
-    "sigma": {"keys": SIGMA_KEYS, "ext": "pptx", "label": "Sigma (PPTX)"},
-    "omega": {"keys": OMEGA_KEYS, "ext": "pptx", "label": "Omega (PPTX)"},
-    "neon":  {"keys": NEON_KEYS,  "ext": "docx", "label": "Neon (DOCX)"},
+    "james":  {"keys": JAMES_KEYS,   "ext": "docx", "label": "James (Full DOCX)"},
+    "sigma":  {"keys": SIGMA_KEYS,   "ext": "pptx", "label": "Sigma (PPTX)"},
+    "omega":  {"keys": OMEGA_KEYS,   "ext": "pptx", "label": "Omega (PPTX)"},
+    "neon":   {"keys": NEON_KEYS,    "ext": "docx", "label": "Neon (DOCX)"},
+    "xenonk": {"keys": XENONK_KEYS,  "ext": "docx", "label": "Xenon K"},
 }
 
 # Screenshot URLs for each checkpoint
@@ -1845,6 +1852,256 @@ def build_health_docx(domain, captured, computed, out_dir, include_keys=None, vo
     return str(out_path), placed, missing
 
 
+# ---------- DOCX builder (Xenon K) ----------
+def build_health_docx_xenonk(domain, captured, computed, out_dir, include_keys=None):
+    """Dedicated builder matching the "Xenon K" client reference exactly:
+    a navy (1F3864) title banner with light-blue (BFD3EC) centred domain text and a
+    blue (2E75B6) rule underneath, a very light blue (D9E2F3) page background tint,
+    a thin auto-colour page border, Calibri body text (10.5pt, #2A2A2A - the
+    reference's Word doc-default, left untouched rather than forced), navy
+    (1F3864) bold checkpoint labels, and blue (2E75B6) bold intro label - all
+    confirmed byte-for-byte against
+    "Xenon format -Health Audit Report.docx" (word/document.xml + styles.xml).
+
+    Screenshots are framed with the same 6.3in-wide, 3pt/#111111-bordered single-cell
+    table used by build_health_docx's _add_bordered_picture (that table's column
+    width - 9072 dxa - is an exact match for the reference's own screenshot tables).
+    Two reference images (the Sucuri screenshot and the Wayback "Check Website
+    Layout" screenshot) are instead a raw inline picture with a picture-level
+    3pt border + drop shadow baked into the DrawingML; visually near-identical to
+    the bordered-table treatment used everywhere else, so - to keep one proven
+    code path - this builder frames those two the same bordered-table way as the
+    rest rather than hand-building that DrawingML border+shadow XML. The only
+    visible difference from the reference is the missing drop-shadow on those 2
+    images.
+    """
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import parse_xml, OxmlElement
+    from docx.oxml.ns import nsdecls, qn
+    from docx.shared import Inches, Pt, RGBColor
+
+    FONT_NAME = "Calibri"
+    BODY_COLOR = RGBColor(0x2A, 0x2A, 0x2A)
+    LABEL_COLOR = RGBColor(0x1F, 0x38, 0x64)
+    INTRO_LABEL_COLOR = RGBColor(0x2E, 0x75, 0xB6)
+    TITLE_TEXT_COLOR = RGBColor(0xBF, 0xD3, 0xEC)
+    TITLE_BG = "1F3864"
+    TITLE_RULE_COLOR = "2E75B6"
+    PAGE_BG = "D9E2F3"
+    IMAGE_WIDTH_IN = 6.3
+    IMAGE_MAX_H_IN = 4.6
+
+    def _set_cell_border(cell, sz=24, color="111111"):
+        tcPr = cell._tc.get_or_add_tcPr()
+        for old in tcPr.findall(qn('w:tcBorders')):
+            tcPr.remove(old)
+        borders = OxmlElement('w:tcBorders')
+        for edge in ('top', 'left', 'bottom', 'right'):
+            el = OxmlElement('w:' + edge)
+            el.set(qn('w:val'), 'single')
+            el.set(qn('w:sz'), str(sz))
+            el.set(qn('w:space'), '0')
+            el.set(qn('w:color'), color)
+            borders.append(el)
+        tcPr.append(borders)
+
+    def _zero_cell_margins(cell):
+        tcPr = cell._tc.get_or_add_tcPr()
+        mar = OxmlElement('w:tcMar')
+        for edge in ('top', 'start', 'bottom', 'end'):
+            el = OxmlElement('w:' + edge)
+            el.set(qn('w:w'), '0')
+            el.set(qn('w:type'), 'dxa')
+            mar.append(el)
+        tcPr.append(mar)
+
+    def _add_bordered_picture(img_path):
+        """Screenshot framed with a 3pt/#111111 border via a single-cell table -
+        matches the reference report's screenshot tables exactly (9072 dxa = 6.3in)."""
+        from docx.enum.table import WD_TABLE_ALIGNMENT
+        from PIL import Image as PILImage
+        with PILImage.open(img_path) as im:
+            iw, ih = im.size
+        if (IMAGE_WIDTH_IN * ih / iw) > IMAGE_MAX_H_IN:
+            disp_w = IMAGE_MAX_H_IN * iw / ih
+            pic_kwargs = {"height": Inches(IMAGE_MAX_H_IN)}
+        else:
+            disp_w = IMAGE_WIDTH_IN
+            pic_kwargs = {"width": Inches(IMAGE_WIDTH_IN)}
+
+        table = doc.add_table(rows=1, cols=1)
+        table.alignment = WD_TABLE_ALIGNMENT.LEFT
+        table.autofit = False
+        table.allow_autofit = False
+        col_w = Inches(disp_w)
+        table.columns[0].width = col_w
+        cell = table.cell(0, 0)
+        cell.width = col_w
+        _zero_cell_margins(cell)
+        _set_cell_border(cell, sz=24, color="111111")
+
+        cp = cell.paragraphs[0]
+        cp.paragraph_format.space_before = Pt(0)
+        cp.paragraph_format.space_after = Pt(0)
+        cp.paragraph_format.line_spacing = 1.0
+        run = cp.add_run()
+        run.add_picture(img_path, **pic_kwargs)
+
+        spacer = doc.add_paragraph()
+        spacer.add_run("").font.size = Pt(6)
+        spacer.paragraph_format.space_after = Pt(6)
+        spacer.paragraph_format.space_before = Pt(0)
+
+    use_keys = include_keys or XENONK_KEYS
+    cps = [CHECKPOINT_BY_KEY[k] for k in use_keys if k in CHECKPOINT_BY_KEY]
+    doc = Document()
+
+    # Reference doc-default run properties (word/styles.xml docDefaults):
+    # Calibri, 10.5pt (sz 21 half-points), color #2A2A2A. Left un-set at the
+    # style level too (matches reference, whose "Normal"/"List Paragraph"
+    # style entries carry no explicit rPr/pPr of their own).
+    for sname in ("Normal", "List Paragraph"):
+        try:
+            st = doc.styles[sname]
+            st.font.name = FONT_NAME
+            st.font.size = Pt(10.5)
+            st.font.color.rgb = BODY_COLOR
+        except KeyError:
+            pass
+
+    sec = doc.sections[0]
+    sec.page_width, sec.page_height = Inches(8.5), Inches(11.0)
+    sec.left_margin = sec.right_margin = Inches(1.0)
+    sec.top_margin = sec.bottom_margin = Inches(0.75)
+
+    # Thin auto-colour page border, offset 24pt from the page edge (matches
+    # the reference's <w:pgBorders w:offsetFrom="page"> sz=4/color=auto exactly).
+    sectPr = sec._sectPr
+    pgBorders = parse_xml(
+        '<w:pgBorders xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+        ' w:offsetFrom="page">'
+        '<w:top w:val="single" w:sz="4" w:space="24" w:color="auto"/>'
+        '<w:left w:val="single" w:sz="4" w:space="24" w:color="auto"/>'
+        '<w:bottom w:val="single" w:sz="4" w:space="24" w:color="auto"/>'
+        '<w:right w:val="single" w:sz="4" w:space="24" w:color="auto"/>'
+        '</w:pgBorders>'
+    )
+    pgSz = sectPr.find('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pgSz')
+    if pgSz is not None:
+        pgSz.addnext(pgBorders)
+    else:
+        sectPr.append(pgBorders)
+
+    # Very light blue page background tint (matches reference's <w:background>).
+    body_bg = parse_xml(
+        f'<w:background {nsdecls("w")} w:color="{PAGE_BG}"/>'
+    )
+    doc.element.insert(0, body_bg)
+
+    # Title banner: navy fill, centred light-blue 24pt text, blue rule underneath.
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    pPr = p._p.get_or_add_pPr()
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), TITLE_BG)
+    pPr.append(shd)
+    pBdr = OxmlElement('w:pBdr')
+    bottom = OxmlElement('w:bottom')
+    bottom.set(qn('w:val'), 'single')
+    bottom.set(qn('w:sz'), '24')
+    bottom.set(qn('w:space'), '2')
+    bottom.set(qn('w:color'), TITLE_RULE_COLOR)
+    pBdr.append(bottom)
+    pPr.append(pBdr)
+    run = p.add_run(domain)
+    run.font.size = Pt(24)
+    run.font.color.rgb = TITLE_TEXT_COLOR
+    p.paragraph_format.space_after = Pt(10)
+
+    def _add_label_body(label, body, label_color=LABEL_COLOR):
+        p = doc.add_paragraph(style="List Paragraph")
+        p.paragraph_format.left_indent = Inches(0)
+        if label:
+            r = p.add_run(label)
+            r.bold = True
+            r.font.color.rgb = label_color
+        if body:
+            r = p.add_run(body)
+        return p
+
+    # Intro (identical wording/formatting to the reference: bold blue label,
+    # default-coloured body, single hard line-break between the two sentences).
+    intro_p = doc.add_paragraph()
+    ip_fmt = intro_p.paragraph_format
+    ip_fmt.left_indent = Inches(0.083)
+    ip_fmt.right_indent = Inches(0.083)
+    ip_fmt.space_before = Pt(3)
+    ip_fmt.space_after = Pt(6)
+    ip_fmt.line_spacing = 1.15
+    for i, (label, body) in enumerate(INTRO):
+        if label:
+            r = intro_p.add_run(label)
+            r.bold = True
+            r.font.color.rgb = INTRO_LABEL_COLOR
+        if body:
+            if i > 0:
+                intro_p.add_run().add_break()
+            intro_p.add_run(body)
+    doc.add_paragraph()
+
+    placed = missing = 0
+    for n, cp in enumerate(cps, start=1):
+        body = cp["body"]
+        for k, v in computed.items():
+            body = body.replace("{" + k + "}", v)
+        try:
+            body = body.format(domain=domain)
+        except Exception:
+            pass
+
+        _add_label_body(f"{n}. {cp['label']}", body)
+
+        extra = cp.get("extra")
+        if extra:
+            p = doc.add_paragraph(style="List Paragraph")
+            p.paragraph_format.left_indent = Inches(0)
+            r = p.add_run(extra[0])
+            r.bold = True
+            r.font.color.rgb = LABEL_COLOR
+            p.add_run(extra[1].format(domain=domain))
+
+        real_status = (captured.get("_statuses") or {}).get(cp["key"])
+        status = cp.get("status")
+        if real_status or status:
+            p = doc.add_paragraph(style="List Paragraph")
+            p.paragraph_format.left_indent = Inches(0)
+            r = p.add_run(status[0] if status else "Status: ")
+            r.bold = True
+            r.font.color.rgb = LABEL_COLOR
+            p.add_run(real_status if real_status else status[1])
+
+        img = captured.get(cp["key"])
+        if img and os.path.exists(img):
+            try:
+                _add_bordered_picture(img)
+                placed += 1
+            except Exception:
+                missing += 1
+        else:
+            missing += 1
+
+        doc.add_paragraph()
+
+    gen_date = datetime.now().strftime("%d-%B-%Y")
+    out_path = Path(out_dir) / f"{domain} Website health checkup analysis report {gen_date}.docx"
+    out_path = _safe_save_path(out_path)
+    doc.save(str(out_path))
+    return str(out_path), placed, missing
+
+
 # ---------- PPTX builder (Sigma) ----------
 def build_health_pptx_sigma(domain, captured, computed, out_dir, include_keys=None):
     from pptx import Presentation
@@ -2307,6 +2564,8 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
         path, placed, miss = build_health_pptx_omega(domain, captured, computed, out_dir)
     elif fmt == "neon":
         path, placed, miss = build_health_docx(domain, captured, computed, out_dir, use_keys, voice="i", header_fill="215868")
+    elif fmt == "xenonk":
+        path, placed, miss = build_health_docx_xenonk(domain, captured, computed, out_dir, use_keys)
     else:
         path, placed, miss = build_health_docx(domain, captured, computed, out_dir, use_keys, page_border=True)
 
