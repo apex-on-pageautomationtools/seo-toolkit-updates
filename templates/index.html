@@ -1734,6 +1734,13 @@
         </svg>
         <span class="sb-label">Health Audit Report</span>
       </button>
+      <button class="sb-item" id="tab-siteaudit" data-tip="Site Audit" onclick="switchTab('siteaudit')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="9 12 11 14 15 10" />
+        </svg>
+        <span class="sb-label">Site Audit</span>
+      </button>
       <button class="sb-item" id="tab-performance" data-tip="Performance Report" onclick="switchTab('performance')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <line x1="18" y1="20" x2="18" y2="10" />
@@ -2521,6 +2528,36 @@
             broken links, dummy content, PageSpeed, and more. Generates a DOCX or PPTX report.</div>
         </section>
 
+        <!-- SITE AUDIT -->
+        <section class="card panel" id="panel-siteaudit" style="display:none">
+          <div class="card-t">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="9 12 11 14 15 10" />
+            </svg>
+            Site Audit <span class="testing-badge">(testing)</span>
+          </div>
+          <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Crawl a whole site from just
+            its domain - no manual page list, no SE Ranking account needed - and report broken links, missing/
+            duplicate titles &amp; meta descriptions, H1 issues, missing image alt text, thin content, redirect
+            chains, noindex pages, and sitemap/robots.txt problems.</p>
+          <div class="field">
+            <label>Domain</label>
+            <input type="text" id="sa-domain" placeholder="example.com" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Pages to crawl</label>
+            <select id="sa-cap">
+              <option value="50">50 pages</option>
+              <option value="100" selected>100 pages</option>
+              <option value="200">200 pages</option>
+              <option value="300">300 pages</option>
+            </select>
+          </div>
+          <div class="note">Discovers pages from the site's sitemap (falling back to a homepage-link crawl if none
+            exists), then checks every discovered page for technical and on-page issues.</div>
+        </section>
+
         <!-- GSC AUDIT -->
         <section class="card panel" id="panel-gsc" style="display:none">
           <div class="card-t">
@@ -3225,6 +3262,33 @@ https://example.com/page-2"></textarea>
                 </button>
                 <button class="btn btn-tonal" onclick="haReset()">New Audit</button>
                 <button class="btn btn-tonal" onclick="copyLogText('ha-log')">Copy Log</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- site audit report -->
+          <div id="tbl-siteaudit" style="flex:1;display:none">
+            <div class="empty" id="empty-siteaudit">
+              <div class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  stroke-width="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="9 12 11 14 15 10" />
+                </svg></div>
+              <p>Enter a domain and click <b>Start</b> to run a site audit.</p>
+            </div>
+            <div id="siteaudit-active" class="hidden">
+              <div style="margin-bottom:12px">
+                <span class="tag t-yes" id="sa-progress">Starting...</span>
+                <span id="sa-timer" style="font-size:12px;color:var(--text-3);margin-left:8px"></span>
+              </div>
+              <div class="prog" style="margin-bottom:12px">
+                <div class="prog-bar" id="sa-progbar"></div>
+              </div>
+              <div class="log" id="sa-log" style="height:220px;overflow-y:auto;font-size:12px"></div>
+              <div id="sa-results" class="hidden" style="margin-top:16px"></div>
+              <div style="margin-top:14px;display:flex;gap:10px">
+                <button class="btn btn-tonal" onclick="saReset()">New Audit</button>
+                <button class="btn btn-tonal" onclick="copyLogText('sa-log')">Copy Log</button>
               </div>
             </div>
           </div>
@@ -4573,6 +4637,7 @@ https://example.com/page-2"></textarea>
         $('panel-backlink').style.display = m === 'backlink' ? '' : 'none';
         $('panel-onpage').style.display = m === 'onpage' ? '' : 'none';
         $('panel-health').style.display = m === 'health' ? '' : 'none';
+        $('panel-siteaudit').style.display = m === 'siteaudit' ? '' : 'none';
         $('panel-gsc').style.display = m === 'gsc' ? '' : 'none';
         $('panel-gscaccounts').style.display = m === 'gscaccounts' ? '' : 'none';
         $('panel-crawl').style.display = m === 'crawl' ? '' : 'none';
@@ -4590,6 +4655,7 @@ https://example.com/page-2"></textarea>
         $('tbl-backlink').style.display = m === 'backlink' ? '' : 'none';
         $('tbl-onpage').style.display = m === 'onpage' ? '' : 'none';
         $('tbl-health').style.display = m === 'health' ? '' : 'none';
+        $('tbl-siteaudit').style.display = m === 'siteaudit' ? '' : 'none';
         $('tbl-gsc').style.display = m === 'gsc' ? '' : 'none';
         $('tbl-crawl').style.display = m === 'crawl' ? '' : 'none';
         $('tbl-admin').style.display = m === 'admin' ? '' : 'none';
@@ -4600,13 +4666,14 @@ https://example.com/page-2"></textarea>
         $('tbl-performance').style.display = m === 'performance' ? '' : 'none';
         $('tbl-indexing').style.display = m === 'indexing' ? '' : 'none';
         $('tbl-keywordvolume').style.display = m === 'keywordvolume' ? '' : 'none';
-        const titles = { ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SERanking Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GS)', admin: 'Admin Panel' };
+        const titles = { ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Site Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SERanking Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GS)', admin: 'Admin Panel' };
         const subs = {
           ranking: 'Find where your domain ranks on Google - across regions. It can have captcha so please use VPN on system as much possible.',
           index: 'Check if pages/backlinks are indexed on Google (it will use site:) - verify indexing status for up to 100 URLs at once.',
           count: 'Get Google\'s total "About N results" number for each keyword - regional, CAPTCHA-resistant.',
           backlink: 'Check if backlink pages have index/noindex meta tag, and if your link is dofollow/nofollow.',
           onpage: 'Generate a comprehensive SEO on-page analysis report with meta, alt, canonical suggestions.',
+          siteaudit: 'Crawl a whole site from just its domain - no manual page list, no SE Ranking account needed - and report broken links, missing/duplicate titles & meta descriptions, H1 issues, missing alt text, thin content, redirect chains, noindex pages, and sitemap/robots.txt problems.',
           health: 'Run a full website health checkup - Sucuri, robots, sitemap, canonical, broken links, PageSpeed, and more.',
           gsc: 'Run a Google Search Console audit - sitemaps, indexing, performance, manual actions, security. Generates a PPTX report.',
           crawl: 'Check when Google last crawled your URLs - uses URL Inspection API via configured GSC accounts.',
@@ -4888,6 +4955,27 @@ https://example.com/page-2"></textarea>
           startHaPoll();
           startReportTimer('ha');
           return;
+        } else if (mode === 'siteaudit') {
+          p.domain = $('sa-domain').value.trim();
+          p.cap = parseInt($('sa-cap').value, 10);
+          if (!p.domain) { toast('Enter a domain'); return; }
+          setButtons('starting', 'siteaudit');   // instant feedback, before the network round-trip
+          $('empty-siteaudit').style.display = 'none';
+          $('siteaudit-active').classList.remove('hidden');
+          $('sa-results').classList.add('hidden'); $('sa-results').innerHTML = '';
+          $('sa-log').textContent = 'Starting audit...';
+          $('sa-progress').textContent = 'Starting...'; $('sa-progress').className = 'tag t-yes';
+          const r3 = await fetch('/api/site-audit/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+          const d3 = await r3.json();
+          // 'siteaudit' explicit below - see the onpage branch's comment on why (mode
+          // may have moved on to a different tab by the time this await resolves).
+          if (d3.error) { toast(d3.error); setButtons('idle', 'siteaudit'); $('empty-siteaudit').style.display = 'block'; $('siteaudit-active').classList.add('hidden'); return; }
+          toast('Site audit started');
+          resetToolProgress('sa');
+          setButtons('running', 'siteaudit');
+          startSaPoll();
+          startReportTimer('sa');
+          return;
         } else if (mode === 'brief') {
           p.domain = $('ba-domain').value.trim();
           p.targets = $('ba-targets').value.trim();
@@ -5135,6 +5223,7 @@ https://example.com/page-2"></textarea>
         if (mode === 'crawl') { crawlStop(); return; }
         if (mode === 'onpage') { await opStop(); return; }
         if (mode === 'health') { await haStop(); return; }
+        if (mode === 'siteaudit') { await saStop(); return; }
         if (mode === 'brief') { await baStop(); return; }
         if (mode === 'wayback') { await wbStop(); return; }
         if (mode === 'seranking') { await srStop(); return; }
@@ -5148,6 +5237,7 @@ https://example.com/page-2"></textarea>
         // so resetting must never reach into a different tool's state/results.
         if (mode === 'onpage') { opReset(); return; }
         if (mode === 'health') { haReset(); return; }
+        if (mode === 'siteaudit') { saReset(); return; }
         if (mode === 'gsc') { gscReset(); return; }
         if (mode === 'brief') { baReset(); return; }
         if (mode === 'crawl') { crawlReset(); return; }
@@ -5648,6 +5738,91 @@ https://example.com/page-2"></textarea>
         $('ha-log').textContent = '';
         $('btn-ha-download').disabled = true;
         setButtons('idle', 'health'); stopHaPoll(); resetReportTimer('ha'); resetToolProgress('ha');
+      }
+
+      /* ===================== site audit ===================== */
+      let saTimer = null;
+      const SA_ISSUE_LABELS = {
+        broken_links: 'Broken link', missing_titles: 'Missing title', duplicate_titles: 'Duplicate title',
+        missing_meta: 'Missing meta description', duplicate_meta: 'Duplicate meta description',
+        missing_h1: 'Missing H1', multiple_h1: 'Multiple H1s', missing_alt_images: 'Missing image alt text',
+        thin_content_pages: 'Thin content', redirect_chains: 'Redirect chain', noindex_pages: 'Noindex page',
+        sitemap_issues: 'Sitemap issue', robots_issues: 'robots.txt issue',
+      };
+      function startSaPoll() { stopSaPoll(); saTimer = setInterval(saPoll, 2000); }
+      function stopSaPoll() { if (saTimer) { clearInterval(saTimer); saTimer = null; } }
+      async function saPoll() {
+        try {
+          const r = await fetch('/api/site-audit/status');
+          const d = await r.json();
+          const el = $('sa-log');
+          if (d.log && d.log.length) el.textContent = d.log.join('\n');
+          el.scrollTop = el.scrollHeight;
+          mirrorSidebarLog(d.log, 'siteaudit');
+          $('sa-progress').textContent = d.progress || d.status;
+          if (d.status === 'completed') {
+            $('sa-progress').className = 'tag t-yes';
+            finishToolProgress('sa', true);
+            setButtons('completed', 'siteaudit'); stopSaPoll(); stopReportTimer('sa');
+            if (d.results) saRenderResults(d.results);
+            toast('Site audit complete');
+          } else if (d.status === 'error') {
+            $('sa-progress').className = 'tag t-not_found';
+            $('sa-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
+            finishToolProgress('sa', false);
+            setButtons('stopped', 'siteaudit'); stopSaPoll(); stopReportTimer('sa');
+          } else if (d.status === 'stopped') {
+            $('sa-progress').className = 'tag t-unknown';
+            finishToolProgress('sa', false);
+            setButtons('stopped', 'siteaudit'); stopSaPoll(); stopReportTimer('sa');
+          } else {
+            $('sa-progress').className = 'tag t-yes';
+            setToolProgress('sa', d.progress);
+          }
+        } catch (e) { }
+      }
+      async function saStop() { await fetch('/api/site-audit/stop', { method: 'POST' }); toast('Stopping...'); }
+      function saReset() {
+        $('empty-siteaudit').style.display = 'block';
+        $('siteaudit-active').classList.add('hidden');
+        $('sa-log').textContent = '';
+        $('sa-results').classList.add('hidden'); $('sa-results').innerHTML = '';
+        setButtons('idle', 'siteaudit'); stopSaPoll(); resetReportTimer('sa'); resetToolProgress('sa');
+      }
+      function saRenderResults(results) {
+        const s = results.summary || {};
+        const chips = Object.keys(SA_ISSUE_LABELS).map(k =>
+          '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 14px;min-width:120px">'
+          + '<div style="font-size:20px;font-weight:700;' + (s[k] ? 'color:#c62828' : '') + '">' + (s[k] || 0) + '</div>'
+          + '<div style="font-size:11px;color:var(--text-3)">' + SA_ISSUE_LABELS[k] + '</div></div>').join('');
+        let rows = '';
+        Object.keys(SA_ISSUE_LABELS).forEach(key => {
+          (results.issues && results.issues[key] || []).forEach(item => {
+            const url = item.url || (item.urls && item.urls[0]) || '';
+            let detail = '';
+            if (key === 'broken_links') detail = 'HTTP ' + item.code + (item.found_on ? ' - found on ' + item.found_on[0] : '');
+            else if (key === 'duplicate_titles') detail = '"' + item.title + '" (' + item.urls.length + ' pages)';
+            else if (key === 'duplicate_meta') detail = item.urls.length + ' pages share this description';
+            else if (key === 'multiple_h1') detail = item.count + ' H1 tags';
+            else if (key === 'missing_alt_images') detail = item.count + ' image(s) missing alt text';
+            else if (key === 'thin_content_pages') detail = item.word_count + ' words';
+            else if (key === 'redirect_chains') detail = item.hops + ' hops -> ' + item.final_url;
+            else if (key === 'noindex_pages') detail = item.robots;
+            else if (key === 'sitemap_issues' || key === 'robots_issues') detail = item.summary;
+            rows += '<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px">' + esc(SA_ISSUE_LABELS[key])
+              + '</td><td style="padding:6px;word-break:break-all">' + esc(url) + '</td><td style="padding:6px">' + esc(detail || '') + '</td></tr>';
+          });
+        });
+        const table = rows
+          ? '<div style="overflow-x:auto;max-height:420px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px">'
+            + '<thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Issue Type</th><th style="padding:6px">URL</th><th style="padding:6px">Detail</th></tr></thead>'
+            + '<tbody>' + rows + '</tbody></table></div>'
+          : '<p style="color:var(--text-3);font-size:12px">No issues found across the ' + (results.pages_analyzed || 0) + ' page(s) checked.</p>';
+        $('sa-results').innerHTML = '<div style="font-size:12px;color:var(--text-3);margin-bottom:10px">'
+          + esc(results.domain || '') + ' - ' + (results.pages_discovered || 0) + ' page(s) discovered via ' + esc(results.discovery_source || '')
+          + ', ' + (results.pages_analyzed || 0) + ' analyzed.</div>'
+          + '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px">' + chips + '</div>' + table;
+        $('sa-results').classList.remove('hidden');
       }
 
       /* ===================== gsc audit ===================== */
@@ -6603,6 +6778,7 @@ https://example.com/page-2"></textarea>
         { key: 'ranking', label: 'Rank Checker' }, { key: 'index', label: 'Indexing Checker' },
         { key: 'count', label: 'Results Count' }, { key: 'backlink', label: 'Backlink Status' },
         { key: 'onpage', label: 'SEO On-Page' }, { key: 'health', label: 'Health Audit' },
+        { key: 'siteaudit', label: 'Site Audit' },
         { key: 'gsc', label: 'GSC Audit' }, { key: 'crawl', label: 'Crawl Tracker' },
         { key: 'brief', label: 'Brief Analysis' }, { key: 'wayback', label: 'Wayback Submitter' },
         { key: 'seranking', label: 'SEranking Audit' }, { key: 'geo', label: 'GEO / AI Optimization' },
@@ -7363,7 +7539,7 @@ https://example.com/page-2"></textarea>
           if (typeof t === 'string') t = t.split(',');          // accept comma string
           const allowed = t.map(x => String(x).trim().toLowerCase()).filter(x => x);
           if (allowed.length === 0 || allowed.includes('all')) return;
-          const KEYS = ['ranking', 'index', 'count', 'backlink', 'onpage', 'health', 'gsc', 'crawl', 'brief', 'wayback', 'seranking', 'geo', 'keywordvolume', 'indexing', 'performance'];
+          const KEYS = ['ranking', 'index', 'count', 'backlink', 'onpage', 'health', 'siteaudit', 'gsc', 'crawl', 'brief', 'wayback', 'seranking', 'geo', 'keywordvolume', 'indexing', 'performance'];
           KEYS.forEach(key => {
             if (!allowed.includes(key)) { const b = $('tab-' + key); if (b) b.style.display = 'none'; }
           });

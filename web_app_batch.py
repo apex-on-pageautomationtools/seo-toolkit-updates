@@ -50,6 +50,7 @@ import updater
 import requests as http_requests
 import brief_analysis
 import google_ads_keywords
+import site_audit
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -4568,6 +4569,96 @@ def api_ha_download():
 def api_ha_formats():
     return jsonify([{"value": k, "label": v["label"], "ext": v["ext"]}
                     for k, v in health_audit.FORMAT_INFO.items()])
+
+
+# --------------------------------------------------------------------------- #
+# Site Audit - domain-only technical/on-page crawl audit (no manual page list,
+# no SE Ranking account). Mirrors the Health Audit start/status/stop pattern.
+# --------------------------------------------------------------------------- #
+sa_state = {
+    "status": "idle",  # idle, running, completed, error, stopped
+    "log": [],
+    "domain": "",
+    "results": None,
+    "error_msg": "",
+    "progress": "",
+}
+sa_lock = threading.Lock()
+sa_stop = threading.Event()
+
+
+def _run_site_audit(domain, cap):
+    with sa_lock:
+        sa_state.update({"status": "running", "log": [], "domain": domain,
+                         "results": None, "error_msg": "", "progress": "Starting..."})
+    sa_stop.clear()
+
+    def _log(msg):
+        with sa_lock:
+            sa_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            if msg.startswith("["):
+                sa_state["progress"] = msg
+
+    try:
+        results = site_audit.run_site_audit(domain, cap=cap, log_fn=_log, stop_event=sa_stop)
+        with sa_lock:
+            if sa_stop.is_set():
+                sa_state["status"] = "stopped"
+                sa_state["progress"] = "Stopped"
+            else:
+                sa_state["status"] = "completed"
+                sa_state["results"] = results
+                sa_state["progress"] = "Audit complete"
+        _log("Site audit finished.")
+    except Exception as e:
+        _log(f"Error: {e}")
+        with sa_lock:
+            sa_state["status"] = "error"
+            sa_state["error_msg"] = str(e)
+
+
+@app.route("/api/site-audit/start", methods=["POST"])
+def api_sa_start():
+    if not _require_tool("siteaudit"):
+        return jsonify({"error": "You don't have access to the Site Audit tool."}), 403
+    with sa_lock:
+        if sa_state["status"] == "running":
+            return jsonify({"error": "Site audit already running."}), 400
+
+    data = request.get_json(silent=True) or {}
+    domain = to_domain(data.get("domain") or "")
+    if not domain:
+        return jsonify({"error": "Domain is required."}), 400
+
+    try:
+        cap = int(data.get("cap") or 100)
+    except (TypeError, ValueError):
+        cap = 100
+    cap = max(10, min(cap, 300))
+
+    t = threading.Thread(target=_run_site_audit, args=(domain, cap), daemon=True)
+    t.start()
+    activity(f"Site audit started - {domain} (up to {cap} pages)")
+    return jsonify({"status": "started", "domain": domain})
+
+
+@app.route("/api/site-audit/status")
+def api_sa_status():
+    with sa_lock:
+        return jsonify({
+            "status": sa_state["status"],
+            "log": sa_state["log"][-200:],
+            "domain": sa_state["domain"],
+            "progress": sa_state["progress"],
+            "error_msg": sa_state["error_msg"],
+            "results": sa_state["results"],
+        })
+
+
+@app.route("/api/site-audit/stop", methods=["POST"])
+def api_sa_stop():
+    sa_stop.set()
+    return jsonify({"status": "stopping"})
 
 
 # --------------------------------------------------------------------------- #
