@@ -1801,7 +1801,7 @@
       </button>
     </div>
     <div class="sb-foot">
-      <button class="sb-item" data-tip="Check for updates" onclick="checkUpdates()">
+      <button class="sb-item" id="btn-check-updates" data-tip="Check for updates" onclick="checkUpdates()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <polyline points="23 4 23 10 17 10" />
           <polyline points="1 20 1 14 7 14" />
@@ -1809,7 +1809,7 @@
         </svg>
         <span class="sb-label">Check Updates</span>
       </button>
-      <button class="sb-item" data-tip="Restart tool" onclick="restartTool()">
+      <button class="sb-item" id="sb-restart-btn" data-tip="Restart to apply update" onclick="restartTool()" style="display:none">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <polyline points="1 4 1 10 7 10" />
           <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
@@ -6760,7 +6760,9 @@ https://example.com/page-2"></textarea>
       /* ===================== software updates ===================== */
       async function checkUpdates() {
         const btn = $('btn-check-updates'), st = $('update-status');
-        const old = btn ? btn.textContent : ''; if (btn) { btn.disabled = true; btn.textContent = 'Checking...'; } if (st) st.textContent = '';
+        const label = btn ? btn.querySelector('.sb-label') : null;
+        const old = label ? label.textContent : '';
+        if (btn) btn.disabled = true; if (label) label.textContent = 'Update in Progress...'; if (st) st.textContent = '';
         toast('Checking for updates...');
         try {
           const d = await (await fetch('/api/check-updates', { method: 'POST' })).json();
@@ -6776,8 +6778,9 @@ https://example.com/page-2"></textarea>
             msg = 'You are on the latest version.';
           }
           if (st) st.innerHTML = msg; toast(msg);
+          updateSidebarRestartVisibility(d.remote_version);
         } catch (e) { const msg = 'Update check failed - try again.'; if (st) st.textContent = msg; toast(msg); }
-        if (btn) { btn.disabled = false; btn.textContent = old; }
+        if (btn) btn.disabled = false; if (label) label.textContent = old;
       }
       const CURRENT_VERSION = "{{ version }}";
       async function autoCheckUpdates() {
@@ -6811,7 +6814,18 @@ https://example.com/page-2"></textarea>
           } else if (chip) {
             chip.classList.add('hidden');
           }
+          updateSidebarRestartVisibility(d.remote_version);
         } catch (e) { }
+      }
+      function updateSidebarRestartVisibility(remoteVersion) {
+        // Only ever show the sidebar Restart button once a real update is
+        // waiting to be applied - it used to be visible unconditionally,
+        // which left people unsure whether it was the same "click to
+        // restart and get the update" action as the top chip or just a
+        // generic reload (it only ever did the former).
+        const btn = $('sb-restart-btn');
+        if (!btn) return;
+        btn.style.display = (remoteVersion && remoteVersion !== CURRENT_VERSION) ? 'flex' : 'none';
       }
       function verLatestChipClick() {
         const chip = $('chip-latest');
