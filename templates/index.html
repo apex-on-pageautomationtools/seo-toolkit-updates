@@ -1341,8 +1341,26 @@
 
     .toast.show {
       opacity: 1;
-      transform: translateX(-50%) translateY(0)
+      transform: translateX(-50%) translateY(0);
+      pointer-events: auto
     }
+
+    .toast.toast-err { background: var(--err, #c0392b); color: #fff }
+
+    .toast-close {
+      margin-left: 12px;
+      background: none;
+      border: none;
+      color: inherit;
+      opacity: .75;
+      font-size: 17px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 2px;
+      vertical-align: middle
+    }
+
+    .toast-close:hover { opacity: 1 }
 
     .hidden {
       display: none !important
@@ -4857,7 +4875,30 @@ https://example.com/page-2"></textarea>
       function proxyPayload() { return { proxy_type: p_type.value, proxy_host: p_host.value.trim(), proxy_port: p_port.value.trim(), proxy_user: p_user.value.trim(), proxy_pass: p_pass.value.trim() }; }
       const $ = id => document.getElementById(id);
       ['p_type', 'p_host', 'p_port', 'p_user', 'p_pass'].forEach(k => window[k] = document.getElementById(k.replace('_', '-')));
-      function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 2600); }
+      function toast(msg, type) {
+        // 'err' toasts previously used the exact same 2.6s auto-hide as every
+        // other toast, with no way to re-read a message that scrolled by too
+        // fast (confirmed real complaint: a long interception error message
+        // was gone before it could be read) - errors now stay up much longer
+        // and get a close (x) button so they can be dismissed once actually read.
+        const t = $('toast');
+        const isErr = type === 'err';
+        t.textContent = '';
+        const span = document.createElement('span');
+        span.textContent = msg;
+        t.appendChild(span);
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'toast-close';
+        closeBtn.setAttribute('aria-label', 'Dismiss');
+        closeBtn.textContent = '×';
+        closeBtn.onclick = () => { clearTimeout(t._t); t.classList.remove('show'); };
+        t.appendChild(closeBtn);
+        t.classList.toggle('toast-err', isErr);
+        t.classList.add('show');
+        clearTimeout(t._t);
+        t._t = setTimeout(() => t.classList.remove('show'), isErr ? 15000 : 2600);
+      }
 
       /* country → city sync - both country and city are searchable dropdowns (type to filter
          or pick from the list). country-list (alphabetical) is shared; each city gets its own
@@ -6777,20 +6818,22 @@ https://example.com/page-2"></textarea>
         toast('Checking for updates...');
         try {
           const d = await (await fetch('/api/check-updates', { method: 'POST' })).json();
-          let msg;
+          let msg, isErr = false;
           if (!d.updated && d.reason) {
             msg = /reach/i.test(d.reason) ? 'Could not reach the update server - check internet/firewall.' : d.reason;
+            isErr = true;
           } else if (d.updated && (d.updated_files || []).length) {
             msg = 'Updated ' + d.updated_files.length + ' file(s). Please close and reopen the app to apply.';
           } else if ((d.failed || []).length) {
             const firstReason = Object.values(d.failed_reasons || {})[0] || '';
             msg = d.failed.length + ' file(s) failed to update' + (firstReason ? ' - ' + firstReason : '') + '.';
+            isErr = true;
           } else {
             msg = 'You are on the latest version.';
           }
-          if (st) st.innerHTML = msg; toast(msg);
+          if (st) st.innerHTML = msg; toast(msg, isErr ? 'err' : undefined);
           updateSidebarRestartVisibility(d.remote_version);
-        } catch (e) { const msg = 'Update check failed - try again.'; if (st) st.textContent = msg; toast(msg); }
+        } catch (e) { const msg = 'Update check failed - try again.'; if (st) st.textContent = msg; toast(msg, 'err'); }
         if (btn) btn.disabled = false; if (label) label.textContent = old;
       }
       const CURRENT_VERSION = "{{ version }}";
