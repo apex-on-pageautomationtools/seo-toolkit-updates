@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.9.2"
+APP_VERSION = "4.9.3"
 
 # --------------------------------------------------------------------------- #
 # Paths
