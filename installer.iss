@@ -2,7 +2,7 @@
 ; Download Inno Setup from: https://jrsoftware.org/isdl.php
 
 #define MyAppName "SEO Toolkit Pro"
-#define MyAppVersion "4.9.4"
+#define MyAppVersion "4.9.5"
 #define MyAppPublisher "Vishal Chhipa"
 #define MyAppExeName "Start Tool.vbs"
 

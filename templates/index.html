@@ -6314,9 +6314,20 @@ https://example.com/page-2"></textarea>
           const d = await r.json();
           const accs = d.accounts || [];
           if (!accs.length) { sel.innerHTML = '<option value="">No GSC Browser Session found - create one in the Google Accounts tab</option>'; }
-          else { sel.innerHTML = accs.map(a => '<option value="' + esc(a.email) + '|' + esc(a.session_id) + '">' + esc(a.email) + '</option>').join(''); }
+          // The backend now sorts the account that GSC_Config says actually has
+          // access to this domain to the front and flags it "recommended" - the
+          // select naturally defaults to option 0, so this makes the dropdown
+          // pre-pick the right account instead of whichever happened to be first.
+          else { sel.innerHTML = accs.map(a => '<option value="' + esc(a.email) + '|' + esc(a.session_id) + '">' + esc(a.email) + (a.recommended ? ' (recommended - has access)' : '') + '</option>').join(''); }
           const note = $('idx-fb-remaining');
-          if (note) { note.textContent = (d.domain_remaining !== undefined) ? (d.domain_remaining + '/10 Request-Indexing submissions left today for ' + d.domain) : ''; }
+          if (note) {
+            let noteText = (d.domain_remaining !== undefined) ? (d.domain_remaining + '/10 Request-Indexing submissions left today for ' + d.domain) : '';
+            if (d.recommended_missing && d.recommended_missing.email) {
+              noteText += (noteText ? ' - ' : '') + 'GSC_Config shows ' + d.recommended_missing.email + ' (' + (d.recommended_missing.accessLevel || 'access') +
+                ') actually has access to this domain, but it has no browser session here yet - connect it in the Google Accounts tab for a submission to work.';
+            }
+            note.textContent = noteText;
+          }
         } catch (e) { sel.innerHTML = '<option value="">Could not load accounts</option>'; }
       }
       async function idxFallbackSubmit() {

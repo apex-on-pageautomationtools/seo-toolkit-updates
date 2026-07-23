@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.9.4"
+APP_VERSION = "4.9.5"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -5484,7 +5484,18 @@ def api_indexing_submit():
 def api_indexing_fallback_accounts():
     """Connected GSC accounts that also have a browser session. If a ?domain=
     is supplied, also returns that domain's remaining Request-Indexing
-    allowance for today (~10/day PER DOMAIN, tracked locally)."""
+    allowance for today (~10/day PER DOMAIN, tracked locally).
+
+    Previously this listed every connected account with a session in
+    arbitrary order, with no signal for which one actually has GSC access to
+    the target domain - confirmed real case: pestwildlifecontrolcompany.com
+    failed with "No GSC property found" because the account picked in the
+    dropdown (...access5@gmail.com) has no access to that domain at all,
+    while another connected account (...access4@gmail.com) does, per
+    GSC_Config's Access Level column. Now cross-references the same
+    domain -> best-access-account mapping GSC Audit/Health Audit already use
+    (_gsc_mapping(), backed by GSC_Config) and sorts/flags the one with real
+    access to the front, so it's what the dropdown pre-selects."""
     try:
         accounts = [a for a in gsc_audit.list_accounts() if a.get("has_refresh")]
         sessions = gsc_audit.list_sessions()
@@ -5500,6 +5511,19 @@ def api_indexing_fallback_accounts():
         if domain:
             resp["domain"] = domain
             resp["domain_remaining"] = gsc_audit.indexing_fallback_remaining(domain)
+            best = (_gsc_mapping().get(domain.strip().lower()) or {})
+            best_email = (best.get("email") or "").strip().lower()
+            if best_email:
+                match = next((x for x in out if x["email"].lower() == best_email), None)
+                if match:
+                    match["recommended"] = True
+                    out.remove(match)
+                    out.insert(0, match)
+                else:
+                    # The account GSC_Config says actually has access isn't
+                    # connected with a browser session here yet - surface that
+                    # instead of silently defaulting to an account with no access.
+                    resp["recommended_missing"] = {"email": best.get("email"), "accessLevel": best.get("accessLevel")}
         return jsonify(resp)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

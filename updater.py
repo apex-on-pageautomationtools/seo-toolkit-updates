@@ -178,6 +178,7 @@ def check_and_update(log_fn=None):
     skipped = []
     failed = []
     failed_reasons = {}
+    intercepted = False
 
     for entry in files:
         rel_path = entry.get("path", "")
@@ -213,6 +214,7 @@ def check_and_update(log_fn=None):
         # the hash each try so a corrupt/partial download is rejected and retried.
         ok = False
         last_err = ""
+        file_intercepted = False
         for _attempt in range(3):
             dl_ok, err = _download_file(download_url, local_path)
             if dl_ok:
@@ -227,6 +229,18 @@ def check_and_update(log_fn=None):
                     _log_update(f"Hash mismatch (try {_attempt + 1}): {rel_path} - looks INTERCEPTED "
                                 f"(downloaded content is an HTML page, not the real file) - "
                                 f"expected {remote_hash[:8]}..., got {got_hash[:8]}...")
+                    # Confirmed interception, not a fluke - retrying THIS file won't
+                    # help (the block page is a deterministic response, not a
+                    # transient failure), and it's near-certain every other file
+                    # from the same source will hit the same wall. Stop burning
+                    # up to 90s-per-attempt retries on a lost cause: bail out of
+                    # this file's retry loop immediately, and the outer loop right
+                    # after it - previously this ground through all 3 retries per
+                    # file THEN repeated that for every remaining file in the
+                    # manifest, which could silently hang the "Check Updates"
+                    # button for the better part of an hour with zero feedback.
+                    file_intercepted = True
+                    break
                 else:
                     last_err = "hash mismatch after download"
                     _log_update(f"Hash mismatch (try {_attempt + 1}): {rel_path} - "
@@ -265,6 +279,10 @@ def check_and_update(log_fn=None):
                 except Exception:
                     pass
 
+        if file_intercepted:
+            intercepted = True
+            break
+
     result = {
         "updated": len(updated_files) > 0,
         "remote_version": remote_version,
@@ -273,6 +291,11 @@ def check_and_update(log_fn=None):
         "failed": failed,
         "failed_reasons": failed_reasons,
     }
+    if intercepted:
+        result["reason"] = ("Network is intercepting the update download (a proxy/antivirus web filter is "
+                            "substituting a block or login page for the real file) - ask IT to allow "
+                            "raw.githubusercontent.com. Stopped early instead of retrying every remaining "
+                            "file the same way.")
 
     if updated_files:
         log_fn(f"[update] {len(updated_files)} file(s) updated to v{remote_version}")
