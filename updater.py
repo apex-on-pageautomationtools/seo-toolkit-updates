@@ -15,9 +15,21 @@ from datetime import datetime
 BUNDLE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPDATE_LOG = os.path.join(BUNDLE_DIR, ".update_log")
 
-# Remote manifest URL — set to your GitHub raw URL or Apps Script endpoint
+# Remote manifest URL(s), tried in order until one responds - each entry is a
+# complete, self-contained manifest (its files' own "url" fields already point
+# at that same source), not a list of mirrors for one manifest, so whichever
+# source answers first is used for every file in that update pass, never a mix.
 # Manifest JSON format: {"version": "3.3", "files": [{"path": "health_audit.py", "hash": "sha256...", "url": "https://..."}]}
-UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/update_manifest.json"
+# VPS is tried first - raw.githubusercontent.com is a known target for
+# corporate web-filter/antivirus HTTPS interception (confirmed real case: a
+# machine's proxy substituted a block page for every file, every retry). A
+# domain on our own VPS starts with no such filter-category reputation, so it
+# sidesteps that specific failure mode; GitHub stays as the fallback in case
+# the VPS itself is ever down, so there's still a working path either way.
+UPDATE_MANIFEST_URLS = [
+    "https://indexing.weblinkbuzz.com/ota-updates/update_manifest.json",
+    "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/update_manifest.json",
+]
 
 
 def _file_hash(filepath):
@@ -130,7 +142,7 @@ def check_and_update(log_fn=None):
     if log_fn is None:
         log_fn = print
 
-    if not UPDATE_MANIFEST_URL:
+    if not UPDATE_MANIFEST_URLS:
         return {"updated": False, "reason": "No update URL configured"}
 
     # Prevent two updaters (launcher background run + in-app auto-check) from writing
@@ -156,14 +168,18 @@ def check_and_update(log_fn=None):
     # A transient network blip used to kill the ENTIRE update check for that launch -
     # someone who only restarts occasionally could go a long time genuinely never
     # getting updates just from bad luck on one attempt. Retry the manifest fetch
-    # itself a few times before giving up for this launch.
+    # itself a couple times per source before moving to the next source, and try
+    # every configured source (VPS, then GitHub) before giving up for this launch.
     manifest = None
-    for _attempt in range(3):
-        manifest = _fetch_json(UPDATE_MANIFEST_URL)
+    for _source_url in UPDATE_MANIFEST_URLS:
+        for _attempt in range(2):
+            manifest = _fetch_json(_source_url)
+            if manifest:
+                break
+            if _attempt < 1:
+                time.sleep(1.5 * (_attempt + 1))
         if manifest:
             break
-        if _attempt < 2:
-            time.sleep(1.5 * (_attempt + 1))
     if not manifest:
         _unlock()
         return {"updated": False, "reason": "Could not reach update server"}
