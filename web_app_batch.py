@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.9.6"
+APP_VERSION = "4.9.7"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -1246,6 +1246,13 @@ def _captcha_manual_wait(driver):
         state["captcha_msg"] = ""
         if not stop_event.is_set():
             state["status"] = "running"
+    # The auto-detect break above only exits THIS polling loop - it never set
+    # pause_event, which is the actual gate every caller downstream blocks on
+    # (rank_one's retry loop, the between-keywords wait, etc.). Without this,
+    # an auto-cleared CAPTCHA left the UI saying "running" while the run sat
+    # hung forever on a pause_event.wait() nobody had released - confirmed
+    # real case: log showed "resuming automatically" and then nothing.
+    pause_event.set()
     return not stop_event.is_set()
 
 
