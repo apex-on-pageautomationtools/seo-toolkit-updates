@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.9.7"
+APP_VERSION = "4.9.8"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -1379,11 +1379,16 @@ def _upload_ranking_screenshot(path):
     ImgBB (real, purpose-built image host) is tried FIRST when a key is configured
     (Admin -> Sync API Keys) - it's the only option confirmed reliable, and checking
     it first avoids burning 30+ seconds per screenshot on dead hosts before reaching
-    it. Pixeldrain is a no-key fallback for when no key is set. Dropped entirely:
-    catbox.moe/0x0.st (unreachable/uploads disabled), transfer.sh (connection
-    actively refused - service appears dead), storage.to (Cloudflare bot-challenge
-    page instead of an upload response - can never work via a plain HTTP request,
-    on any network) - all confirmed on a real machine, not just this sandbox."""
+    it. Pixeldrain is the fallback whenever ImgBB doesn't come back with a URL -
+    no key configured, OR a configured key hit an error (rate limit, timeout, etc.):
+    previously a configured-but-failing ImgBB key returned "" immediately without
+    ever trying Pixeldrain, silently losing the shareable screenshot link for that
+    row - confirmed real case: "Screenshot upload (ImgBB) failed: Rate limit
+    reached." Dropped entirely: catbox.moe/0x0.st (unreachable/uploads disabled),
+    transfer.sh (connection actively refused - service appears dead), storage.to
+    (Cloudflare bot-challenge page instead of an upload response - can never work
+    via a plain HTTP request, on any network) - all confirmed on a real machine,
+    not just this sandbox."""
     imgbb_key = CONFIG.get("imgbb_api_key", "").strip()
     if imgbb_key:
         try:
@@ -1395,14 +1400,13 @@ def _upload_ranking_screenshot(path):
             url = (data.get("data") or {}).get("url", "")
             if r.status_code == 200 and data.get("success") and url:
                 return url
-            add_log(f"Screenshot upload (ImgBB) failed: {data.get('error', {}).get('message', r.text[:120])}")
+            add_log(f"Screenshot upload (ImgBB) failed: {data.get('error', {}).get('message', r.text[:120])} - trying Pixeldrain instead.")
         except Exception as e:
-            add_log(f"Screenshot upload (ImgBB) failed: {type(e).__name__}: {e}")
-        return ""
+            add_log(f"Screenshot upload (ImgBB) failed: {type(e).__name__}: {e} - trying Pixeldrain instead.")
 
-    # No ImgBB key configured - Pixeldrain as a no-key fallback (shorter timeout
-    # since it's a fallback of last resort, not worth a long wait if it's blocked
-    # on this network too).
+    # Pixeldrain fallback - either no ImgBB key was configured, or ImgBB itself
+    # just failed above (shorter timeout since this is a fallback of last
+    # resort, not worth a long wait if it's blocked on this network too).
     try:
         with open(path, "rb") as f:
             r = http_requests.post("https://pixeldrain.com/api/file", files={"file": f}, timeout=10)
