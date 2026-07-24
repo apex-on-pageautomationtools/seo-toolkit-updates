@@ -1299,6 +1299,26 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
                 # widget instead of a full-viewport shot.
                 highlight_rect = _highlight_source_snippet(
                     driver, [r'<title\b[^>]*>.*?</title>', r'<meta\b[^>]*name=["\']description["\'][^>]*>'])
+            elif key in ("robots", "sitemap"):
+                # Both are short, content-length-independent pages (a dozen
+                # lines of plain text for robots.txt, a compact table for
+                # sitemap.xml) - a fixed full-window screenshot left a large
+                # blank area below the real content (confirmed real
+                # complaint: "much blank space" on both). Measure the actual
+                # rendered height/width and crop tight to it, same clip
+                # mechanism meta_source already uses below.
+                driver.execute_script("window.scrollTo(0, 0);")
+                try:
+                    content_h = driver.execute_script(
+                        "return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);")
+                    content_w = driver.execute_script(
+                        "return Math.max(document.body.scrollWidth, document.documentElement.scrollWidth);")
+                    vp = driver.execute_script("return {w: window.innerWidth, h: window.innerHeight};")
+                    h_capped = max(80, min(int(content_h or 0), vp["h"]))
+                    w_capped = max(200, min(int(content_w or 0), vp["w"]))
+                    highlight_rect = {"x": 0, "y": 0, "width": w_capped, "height": h_capped}
+                except Exception:
+                    pass
             else:
                 driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(0.5)
@@ -1306,9 +1326,10 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
             # Use CDP for the screenshot - a plain viewport-only capture (no
             # captureBeyondViewport/clip), so every checkpoint gets a tight
             # crop of what's actually on screen after scrolling, not an
-            # oversized capture of the full document. meta_source instead
-            # crops tight to the injected source-viewer widget (see above).
-            if key == "meta_source" and highlight_rect:
+            # oversized capture of the full document. meta_source/robots/
+            # sitemap instead crop tight to their own measured content (see
+            # above).
+            if highlight_rect:
                 margin = 12
                 cdp_params = {"format": "png", "captureBeyondViewport": False,
                               "clip": {"x": max(0, highlight_rect["x"] - margin),
