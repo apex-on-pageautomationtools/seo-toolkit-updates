@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.11.5"
+APP_VERSION = "4.11.6"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -1389,8 +1389,11 @@ def _upload_ranking_screenshot(path):
     (Cloudflare bot-challenge page instead of an upload response - can never work
     via a plain HTTP request, on any network) - all confirmed on a real machine,
     not just this sandbox."""
-    imgbb_key = CONFIG.get("imgbb_api_key", "").strip()
-    if imgbb_key:
+    # Supports multiple keys in the same config field (comma or newline separated) -
+    # tried in order so a rate-limited key falls through to the next one instead of
+    # dropping straight to Pixeldrain.
+    imgbb_keys = [k.strip() for k in _re.split(r"[,\n]+", CONFIG.get("imgbb_api_key", "")) if k.strip()]
+    for i, imgbb_key in enumerate(imgbb_keys):
         try:
             with open(path, "rb") as f:
                 r = http_requests.post("https://api.imgbb.com/1/upload",
@@ -1400,9 +1403,16 @@ def _upload_ranking_screenshot(path):
             url = (data.get("data") or {}).get("url", "")
             if r.status_code == 200 and data.get("success") and url:
                 return url
-            add_log(f"Screenshot upload (ImgBB) failed: {data.get('error', {}).get('message', r.text[:120])} - trying Pixeldrain instead.")
+            err = data.get("error", {}).get("message", r.text[:120])
+            if i < len(imgbb_keys) - 1:
+                add_log(f"Screenshot upload (ImgBB key {i+1}/{len(imgbb_keys)}) failed: {err} - trying next key.")
+            else:
+                add_log(f"Screenshot upload (ImgBB) failed: {err} - trying Pixeldrain instead.")
         except Exception as e:
-            add_log(f"Screenshot upload (ImgBB) failed: {type(e).__name__}: {e} - trying Pixeldrain instead.")
+            if i < len(imgbb_keys) - 1:
+                add_log(f"Screenshot upload (ImgBB key {i+1}/{len(imgbb_keys)}) failed: {type(e).__name__}: {e} - trying next key.")
+            else:
+                add_log(f"Screenshot upload (ImgBB) failed: {type(e).__name__}: {e} - trying Pixeldrain instead.")
 
     # Pixeldrain fallback - either no ImgBB key was configured, or ImgBB itself
     # just failed above (shorter timeout since this is a fallback of last
@@ -1682,9 +1692,11 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
     return {"status": f"not_found in {max_pages} pages", "matches": []}
 
 def _vpn_pause_at_start(vpn_method, driver=None):
-    # Check system IP (no browser needed)
+    # Check through the browser (proxy-aware) when a driver is already running,
+    # so this reflects the real exit IP of the session - not the machine's raw
+    # system IP, which stays the same regardless of which proxy is configured.
     add_log("Checking your IP location...")
-    check_ip_location(logger=add_log)
+    check_ip_location(driver=driver, logger=add_log, use_browser=bool(driver and is_alive(driver)))
 
     msgs = {
         "windscribe": "Windscribe is loaded. Click its icon in the browser toolbar, "
@@ -1721,7 +1733,7 @@ def _vpn_disconnect_pause(vpn_method, driver=None):
     """After results are done, pause to let user disconnect VPN before browser closes."""
     if vpn_method in ("none", "proxy"):
         return
-    loc = check_ip_location(logger=add_log)
+    loc = check_ip_location(driver=driver, logger=add_log, use_browser=bool(driver and is_alive(driver)))
     loc_str = loc.get("location", "VPN") if loc else "VPN"
     if driver and is_alive(driver):
         add_log(f"Analysis complete. VPN still connected ({loc_str}). Pausing to disconnect...")
