@@ -6541,10 +6541,7 @@ https://example.com/page-2"></textarea>
         const box = $('idx-fallback-results');
         box.innerHTML = '<div class="note">Opening a real browser window - log in if prompted, then wait...</div>';
         try {
-          // Include the sidebar Proxy/VPN fields (if set) - this fallback
-          // previously always ran with no proxy at all, so there was no way
-          // to route around an IP-based block for it specifically.
-          const r = await fetch('/api/indexing/fallback-submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, session_id, domain, urls, ...proxyPayload() }) });
+          const r = await fetch('/api/indexing/fallback-submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, session_id, domain, urls }) });
           const d = await r.json();
           if (d.error) { box.innerHTML = '<div class="note" style="color:var(--err,#c00)">' + esc(d.error) + '</div>'; return; }
           let rows = (d.results || []).map(x => '<tr><td style="font-size:11px;padding:3px 6px;word-break:break-all">' + esc(x.url) + '</td>'
