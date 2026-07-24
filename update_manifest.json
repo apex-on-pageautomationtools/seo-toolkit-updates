@@ -1,5 +1,5 @@
 {
-  "version": "4.9.9",
+  "version": "4.10.0",
   "files": [
     {
       "path": "da_checker.py",
@@ -33,7 +33,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "e0a119fe45b17014d792d705c80e2b6353502c1c9995a24cd3a29747b60df5c2",
+      "hash": "73483632ceedf48125297eea15ecc5de937c999f64d279d111c467d6ccd9954e",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -97,6 +97,11 @@
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/capture_gsc.py"
     },
     {
+      "path": "scripts/generate_blog_optimization_suggestions.py",
+      "hash": "c010e85fe9f05b593cbefe7343d511a5516096dcdf91ddf3093d097fa339a4c8",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_blog_optimization_suggestions.py"
+    },
+    {
       "path": "scripts/generate_health_report.py",
       "hash": "402a3d3ea26857789a2cd28c707f43447d7623672b0f12e0b304426fc395ce19",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_health_report.py"
@@ -138,7 +143,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "a9a620f83abd368b179cf6f0dd97b79379ef2918492867c7becb7c87173d8236",
+      "hash": "1620b2eee4abd710c495e527c5ce8c24ae30a87e07da8fdb4bb91decfaaa0e09",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {

@@ -1788,6 +1788,13 @@
         </svg>
         <span class="sb-label">Website Audit</span>
       </button>
+      <button class="sb-item" id="tab-blogopt" data-tip="Blog Optimization Suggestions" onclick="switchTab('blogopt')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z" />
+        </svg>
+        <span class="sb-label">Blog Optimization Suggestions</span>
+      </button>
       <!-- Hidden for everyone for now - the Google Ads Developer Token behind
          Keyword Search Volume is still on Test Access (blocks real customer
          data with a 403), a Basic Access application is pending Google's
@@ -3024,6 +3031,40 @@ https://example.com/page-2"></textarea>
           <div class="note">No browser or GSC needed - runs entirely via HTTP checks. Takes ~30-60 seconds.</div>
         </section>
 
+        <!-- BLOG OPTIMIZATION SUGGESTIONS -->
+        <section class="card panel" id="panel-blogopt" style="display:none">
+          <div class="card-t">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z" />
+            </svg>
+            Blog Optimization Suggestions
+          </div>
+          <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Enter a single blog post
+            URL - scrapes the real live page, generates AI suggestions grounded in that content (category, tags,
+            title, meta description, headings), finds real internal-link opportunities from the site's sitemap, and
+            writes a .docx in the standard format. Nothing is fabricated - suggestions are grounded in the real page,
+            and a missing image is flagged in red rather than guessed.</p>
+          <div class="field">
+            <label>Blog URL</label>
+            <input type="text" id="bo-url" placeholder="https://example.com/blog/some-post/" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Target pages <span class="hint">(optional - one URL per line. If given, internal-link suggestions
+                prioritize these over auto-discovery via the sitemap)</span></label>
+            <textarea id="bo-target-pages" rows="3" placeholder="https://example.com/services/tax-prep/"></textarea>
+          </div>
+          <div class="field">
+            <label>Target keywords <span class="hint">(optional, comma-separated - used to score which sitemap pages
+                are relevant when no target pages are given above)</span></label>
+            <input type="text" id="bo-target-keywords" placeholder="income tax preparation, tax filing dallas" autocomplete="off">
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px">
+            <input type="checkbox" id="bo-nocapture"> Skip placement screenshots (faster, text-only suggestions)
+          </label>
+          <div class="note">Takes 1-3 minutes depending on the site and whether screenshots are captured.</div>
+        </section>
+
         <!-- PROXY / VPN -->
         <section class="card">
           <div class="card-t collapse-h open" id="proxy-h" onclick="toggleCollapse('proxy')">
@@ -3616,6 +3657,37 @@ https://example.com/page-2"></textarea>
                   Download Report
                 </button>
                 <button class="btn btn-tonal" onclick="baReset()">New Analysis</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="tbl-blogopt" style="flex:1;display:none">
+            <div class="empty" id="empty-blogopt">
+              <div class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z" />
+                </svg></div>
+              <p>Enter a blog URL and click <b>Start</b> to generate optimization suggestions.</p>
+            </div>
+            <div id="blogopt-active" class="hidden">
+              <div style="margin-bottom:12px">
+                <span class="tag t-yes" id="bo-progress">Starting...</span>
+                <span id="bo-timer" style="font-size:12px;color:var(--text-3);margin-left:8px"></span>
+              </div>
+              <div class="prog" style="margin-bottom:12px">
+                <div class="prog-bar" id="bo-progbar"></div>
+              </div>
+              <div class="log" id="bo-log" style="height:350px;overflow-y:auto;font-size:12px"></div>
+              <div style="margin-top:14px;display:flex;gap:10px">
+                <button class="btn btn-primary" id="btn-bo-download" onclick="boDownload()" disabled>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Download Report
+                </button>
+                <button class="btn btn-tonal" onclick="boReset()">New Analysis</button>
               </div>
             </div>
           </div>
@@ -4745,6 +4817,7 @@ https://example.com/page-2"></textarea>
         $('panel-crawl').style.display = m === 'crawl' ? '' : 'none';
         $('panel-admin').style.display = m === 'admin' ? '' : 'none';
         $('panel-brief').style.display = m === 'brief' ? '' : 'none';
+        $('panel-blogopt').style.display = m === 'blogopt' ? '' : 'none';
         $('panel-wayback').style.display = m === 'wayback' ? '' : 'none';
         $('panel-seranking').style.display = m === 'seranking' ? '' : 'none';
         $('panel-geo').style.display = m === 'geo' ? '' : 'none';
@@ -4762,6 +4835,7 @@ https://example.com/page-2"></textarea>
         $('tbl-crawl').style.display = m === 'crawl' ? '' : 'none';
         $('tbl-admin').style.display = m === 'admin' ? '' : 'none';
         $('tbl-brief').style.display = m === 'brief' ? '' : 'none';
+        $('tbl-blogopt').style.display = m === 'blogopt' ? '' : 'none';
         $('tbl-wayback').style.display = m === 'wayback' ? '' : 'none';
         $('tbl-seranking').style.display = m === 'seranking' ? '' : 'none';
         $('tbl-geo').style.display = m === 'geo' ? '' : 'none';
@@ -5119,6 +5193,25 @@ https://example.com/page-2"></textarea>
           startBaPoll();
           startReportTimer('ba'); resetToolProgress('ba');
           return;
+        } else if (mode === 'blogopt') {
+          p.url = $('bo-url').value.trim();
+          p.target_pages = $('bo-target-pages').value.trim();
+          p.target_keywords = $('bo-target-keywords').value.trim();
+          p.no_capture = $('bo-nocapture').checked;
+          if (!p.url) { toast('Enter a blog URL'); return; }
+          setButtons('starting', 'blogopt');   // instant feedback, before the network round-trip
+          $('empty-blogopt').style.display = 'none';
+          $('blogopt-active').classList.remove('hidden');
+          if ($('bo-log')) $('bo-log').textContent = 'Starting...';
+          const rbo = await fetch('/api/blogopt/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+          const dbo = await rbo.json();
+          if (dbo.error) { toast(dbo.error, 'err'); setButtons('idle', 'blogopt'); $('empty-blogopt').style.display = 'block'; $('blogopt-active').classList.add('hidden'); return; }
+          toast('Blog optimization suggestions started');
+          $('btn-bo-download').disabled = true;
+          setButtons('running', 'blogopt');
+          startBoPoll();
+          startReportTimer('bo'); resetToolProgress('bo');
+          return;
         } else if (mode === 'seranking') {
           const file = $('sr-file').files[0];
           const pdfFile = $('sr-pdf').files[0];
@@ -5350,6 +5443,7 @@ https://example.com/page-2"></textarea>
         if (mode === 'health') { await haStop(); return; }
         if (mode === 'siteaudit') { await saStop(); return; }
         if (mode === 'brief') { await baStop(); return; }
+        if (mode === 'blogopt') { await boStop(); return; }
         if (mode === 'wayback') { await wbStop(); return; }
         if (mode === 'seranking') { await srStop(); return; }
         if (mode === 'geo') { await geoStop(); return; }
@@ -5365,6 +5459,7 @@ https://example.com/page-2"></textarea>
         if (mode === 'siteaudit') { saReset(); return; }
         if (mode === 'gsc') { gscReset(); return; }
         if (mode === 'brief') { baReset(); return; }
+        if (mode === 'blogopt') { boReset(); return; }
         if (mode === 'crawl') { crawlReset(); return; }
         if (mode === 'wayback') { wbReset(); return; }
         if (mode === 'seranking') { srReset(); return; }
@@ -6064,6 +6159,50 @@ https://example.com/page-2"></textarea>
         $('ba-log').textContent = '';
         $('btn-ba-download').disabled = true;
         setButtons('idle', 'brief'); stopBaPoll(); resetReportTimer('ba'); resetToolProgress('ba');
+      }
+
+      /* ===================== blog optimization suggestions ===================== */
+      let boTimer = null;
+      function startBoPoll() { stopBoPoll(); boTimer = setInterval(boPoll, 2000); }
+      function stopBoPoll() { if (boTimer) { clearInterval(boTimer); boTimer = null; } }
+      async function boPoll() {
+        try {
+          const r = await fetch('/api/blogopt/status');
+          const d = await r.json();
+          const el = $('bo-log');
+          if (d.log && d.log.length) el.textContent = d.log.join('\n');
+          el.scrollTop = el.scrollHeight;
+          mirrorSidebarLog(d.log, 'blogopt');
+          $('bo-progress').textContent = d.progress || d.status;
+          if (d.status === 'completed') {
+            $('bo-progress').className = 'tag t-yes';
+            $('btn-bo-download').disabled = false;
+            finishToolProgress('bo', true);
+            setButtons('completed', 'blogopt'); stopBoPoll(); stopReportTimer('bo'); toast('Blog optimization suggestions ready');
+          } else if (d.status === 'error') {
+            $('bo-progress').className = 'tag t-not_found';
+            $('bo-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
+            finishToolProgress('bo', false);
+            setButtons('stopped', 'blogopt'); stopBoPoll(); stopReportTimer('bo');
+            toast(d.error_msg || 'Blog optimization suggestions failed', 'err');
+          } else if (d.status === 'stopped') {
+            $('bo-progress').className = 'tag t-unknown';
+            finishToolProgress('bo', false);
+            setButtons('stopped', 'blogopt'); stopBoPoll(); stopReportTimer('bo');
+          } else {
+            $('bo-progress').className = 'tag t-yes';
+            setToolProgress('bo', d.progress);
+          }
+        } catch (e) { }
+      }
+      function boDownload() { window.location.href = '/api/blogopt/download'; }
+      async function boStop() { await fetch('/api/blogopt/stop', { method: 'POST' }); toast('Stopping...'); }
+      function boReset() {
+        $('empty-blogopt').style.display = 'block';
+        $('blogopt-active').classList.add('hidden');
+        $('bo-log').textContent = '';
+        $('btn-bo-download').disabled = true;
+        setButtons('idle', 'blogopt'); stopBoPoll(); resetReportTimer('bo'); resetToolProgress('bo');
       }
 
       /* ===================== seranking audit ===================== */
@@ -6982,6 +7121,7 @@ https://example.com/page-2"></textarea>
         { key: 'gsc', label: 'GSC Audit' }, { key: 'crawl', label: 'Crawl Tracker' },
         { key: 'brief', label: 'Brief Analysis' }, { key: 'wayback', label: 'Wayback Submitter' },
         { key: 'seranking', label: 'SEranking Audit' }, { key: 'geo', label: 'GEO / AI Optimization' },
+        { key: 'blogopt', label: 'Blog Optimization Suggestions' },
         { key: 'keywordvolume', label: 'Keyword Search Volume' }];
 
       async function admCheckAdmin() {

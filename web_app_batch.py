@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.9.9"
+APP_VERSION = "4.10.0"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -6373,6 +6373,141 @@ def api_brief_download():
 @app.route("/api/brief/formats")
 def api_brief_formats():
     return jsonify([{"value": "pptx", "label": "PowerPoint (.pptx)"}])
+
+# --------------------------------------------------------------------------- #
+# Blog Optimization Suggestions - single blog URL in, a .docx matching the
+# "james" reference format out. Runs generate_blog_optimization_suggestions.py
+# as a subprocess (same convention as the On-Page report below), streaming
+# its stdout as live progress.
+# --------------------------------------------------------------------------- #
+blogopt_state = {"status": "idle", "log": [], "url": "", "output_file": "", "error_msg": "", "progress": ""}
+blogopt_lock = threading.Lock()
+blogopt_stop = threading.Event()
+
+
+def _run_blogopt_report(url, targets_data, no_capture):
+    with blogopt_lock:
+        blogopt_state.update({"status": "running", "log": [], "url": url,
+                              "output_file": "", "error_msg": "", "progress": "Starting..."})
+    blogopt_stop.clear()
+    activity(f"Blog Optimization Suggestions started for {url}")
+
+    def _log(msg):
+        with blogopt_lock:
+            blogopt_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            if msg.startswith("["):
+                blogopt_state["progress"] = msg
+
+    out_dir = _domain_folder(to_domain(url), "blogopt")
+    os.makedirs(out_dir, exist_ok=True)
+
+    targets_file = None
+    if targets_data and (targets_data.get("target_pages") or targets_data.get("target_keywords")):
+        targets_file = os.path.join(out_dir, "_targets.json")
+        with open(targets_file, "w", encoding="utf-8") as f:
+            json.dump(targets_data, f, ensure_ascii=False)
+
+    python_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "python", "python.exe")
+    script = os.path.join(SCRIPTS_DIR, "generate_blog_optimization_suggestions.py")
+    cmd = [python_exe, "-u", script, url, "--out", out_dir, "--format", "james"]
+    if targets_file:
+        cmd.extend(["--targets", targets_file])
+    if no_capture:
+        cmd.append("--no-capture")
+
+    _log(f"Running: {url}")
+
+    try:
+        # Same centrally-synced key set as On-Page/GEO/SEranking - OpenAI is
+        # tried FIRST for this tool (a per-team decision, since it's a single
+        # URL, not a bulk run, so cost stays small and the paid tier is worth
+        # it for quality) - see ai_chain() in the script itself.
+        proc_env = _ai_key_env()
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1, cwd=SCRIPTS_DIR, env=proc_env
+        )
+        for line in proc.stdout:
+            if blogopt_stop.is_set():
+                proc.kill()
+                _log("Stopped by user.")
+                with blogopt_lock:
+                    blogopt_state["status"] = "stopped"
+                return
+            _log(line.rstrip())
+        proc.wait()
+
+        if proc.returncode != 0:
+            _log(f"Script exited with code {proc.returncode}")
+            with blogopt_lock:
+                blogopt_state["status"] = "error"
+                blogopt_state["error_msg"] = f"Script failed (exit code {proc.returncode})"
+            return
+
+        import glob
+        docs = sorted(glob.glob(os.path.join(out_dir, "*.docx")), key=os.path.getmtime, reverse=True)
+        if docs:
+            with blogopt_lock:
+                blogopt_state["status"] = "completed"
+                blogopt_state["output_file"] = docs[0]
+                blogopt_state["progress"] = "Report ready for download"
+            _log(f"Report generated: {os.path.basename(docs[0])}")
+        else:
+            with blogopt_lock:
+                blogopt_state["status"] = "error"
+                blogopt_state["error_msg"] = "No .docx file found in output"
+            _log("No output .docx found")
+
+    except Exception as e:
+        _log(f"Error: {e}")
+        with blogopt_lock:
+            blogopt_state["status"] = "error"
+            blogopt_state["error_msg"] = str(e)
+
+
+@app.route("/api/blogopt/start", methods=["POST"])
+def api_blogopt_start():
+    if not _require_tool("blogopt"):
+        return jsonify({"error": "You don't have access to Blog Optimization Suggestions."}), 403
+    with blogopt_lock:
+        if blogopt_state["status"] == "running":
+            return jsonify({"error": "Already running"}), 400
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "Blog URL required"}), 400
+    if not re.match(r"^https?://", url, re.I):
+        url = "https://" + url
+    target_pages = [ln.strip() for ln in (data.get("target_pages") or "").splitlines() if ln.strip()]
+    target_keywords = [k.strip() for k in (data.get("target_keywords") or "").split(",") if k.strip()]
+    no_capture = bool(data.get("no_capture"))
+    t = threading.Thread(target=_run_blogopt_report, args=(url,
+                         {"target_pages": target_pages, "target_keywords": target_keywords}, no_capture),
+                         daemon=True)
+    t.start()
+    return jsonify({"started": True})
+
+
+@app.route("/api/blogopt/status")
+def api_blogopt_status():
+    with blogopt_lock:
+        return jsonify(dict(blogopt_state))
+
+
+@app.route("/api/blogopt/stop", methods=["POST"])
+def api_blogopt_stop():
+    blogopt_stop.set()
+    return jsonify({"stopped": True})
+
+
+@app.route("/api/blogopt/download")
+def api_blogopt_download():
+    with blogopt_lock:
+        fpath = blogopt_state.get("output_file", "")
+    if not fpath or not os.path.exists(fpath):
+        return jsonify({"error": "No report available"}), 404
+    return send_file(fpath, as_attachment=True, download_name=os.path.basename(fpath))
+
 
 # --------------------------------------------------------------------------- #
 # On-Page parse targets
