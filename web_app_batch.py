@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.11.4"
+APP_VERSION = "4.11.5"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -6492,7 +6492,7 @@ def api_blogopt_start():
     url = (data.get("url") or "").strip()
     if not url:
         return jsonify({"error": "Blog URL required"}), 400
-    if not re.match(r"^https?://", url, re.I):
+    if not _re.match(r"^https?://", url, _re.I):
         url = "https://" + url
     target_pages = [ln.strip() for ln in (data.get("target_pages") or "").splitlines() if ln.strip()]
     target_keywords = [k.strip() for k in (data.get("target_keywords") or "").split(",") if k.strip()]
