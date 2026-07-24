@@ -26,6 +26,17 @@ DisableProgramGroupPage=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UsePreviousAppDir=no
+; Inno Setup's built-in Restart Manager integration flags ANY running
+; process whose generic product name is "Python" (that's the literal
+; embedded metadata on every python.exe, regardless of which app installed
+; it) - "Automatically close the applications" would kill unrelated
+; Python-based tools having nothing to do with this app (confirmed real
+; concern: could crash another running Python process, e.g. a coding
+; assistant). The app's own [Code] section below already does a targeted
+; taskkill of its own python.exe/msedgedriver.exe/chromedriver.exe before
+; install - this generic prompt is redundant on top of that and riskier.
+CloseApplications=no
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
