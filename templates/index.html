@@ -3525,20 +3525,25 @@ https://example.com/page-2"></textarea>
               <div style="overflow-x:auto">
                 <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed">
                   <colgroup>
-                    <col style="width:40%">
-                    <col style="width:60%">
+                    <col style="width:34%">
+                    <col style="width:18%">
+                    <col style="width:28%">
+                    <col style="width:20%">
                   </colgroup>
                   <thead>
                     <tr style="text-align:left;border-bottom:2px solid var(--border)">
                       <th style="padding:6px">URL</th>
                       <th style="padding:6px">Status</th>
+                      <th style="padding:6px">Account</th>
+                      <th style="padding:6px">Time</th>
                     </tr>
                   </thead>
                   <tbody id="idx-results-body"></tbody>
                 </table>
               </div>
-              <div style="margin-top:14px">
+              <div style="margin-top:14px;display:flex;gap:10px">
                 <button class="btn btn-tonal" onclick="copyLogText('idx-log')">Copy Log</button>
+                <button class="btn btn-tonal" onclick="idxDownloadCsv()">Download CSV</button>
               </div>
             </div>
           </div>
@@ -6413,6 +6418,7 @@ https://example.com/page-2"></textarea>
         idxLoadFallbackAccounts();
       }
       let _idxLastLeftover = [];
+      let _idxLastResults = [];
       function _idxLog(line) {
         const el = $('idx-log');
         el.textContent += (el.textContent ? '\n' : '') + line;
@@ -6451,6 +6457,7 @@ https://example.com/page-2"></textarea>
             return;
           }
           _idxLastLeftover = (d.results || []).filter(x => !x.ok && (x.message === 'user_daily_cap_reached' || x.message === 'pool_exhausted' || x.message === 'no_owner_access')).map(x => x.url);
+          _idxLastResults = d.results || [];
           let rows = (d.results || []).map(x => {
             const noOwner = !x.ok && x.message === 'no_owner_access';
             const statusHtml = x.ok ? 'Submitted' : (noOwner
@@ -6459,7 +6466,9 @@ https://example.com/page-2"></textarea>
               + '<b>Fix:</b> use the <b>Request Indexing</b> fallback below with an owning account, or ask an admin to run <b>Bulk Add Owner</b>.</div>'
               : '<span style="color:var(--err,#c00);white-space:normal;overflow-wrap:anywhere;word-break:break-word">' + esc(x.message) + '</span>');
             return '<tr><td style="padding:3px 6px;word-break:break-word;overflow-wrap:break-word">' + esc(x.url) + '</td>'
-              + '<td style="padding:3px 6px;word-break:break-word;overflow-wrap:break-word;' + (x.ok ? 'color:var(--ok)' : '') + '">' + statusHtml + '</td></tr>';
+              + '<td style="padding:3px 6px;word-break:break-word;overflow-wrap:break-word;' + (x.ok ? 'color:var(--ok)' : '') + '">' + statusHtml + '</td>'
+              + '<td style="padding:3px 6px;word-break:break-word;overflow-wrap:break-word;color:var(--text-3)">' + esc(x.account || '–') + '</td>'
+              + '<td style="padding:3px 6px;white-space:nowrap;color:var(--text-3)">' + esc(x.time || '–') + '</td></tr>';
           }).join('');
           $('idx-results-body').innerHTML = rows;
           $('idx-progress').textContent = 'Submitted ' + (d.submitted || 0) + '/' + urls.length;
@@ -6481,6 +6490,16 @@ https://example.com/page-2"></textarea>
         } finally {
           btn.disabled = false;
         }
+      }
+      function idxDownloadCsv() {
+        if (!_idxLastResults.length) { toast('No results yet', 'err'); return; }
+        const header = ['URL', 'Status', 'Account', 'Time'];
+        const rows = _idxLastResults.map(x => [x.url || '', x.ok ? 'Submitted' : (x.message || ''), x.account || '', x.time || '']);
+        const csv = [header, ...rows].map(row => row.map(c => '"' + String(c || '').replace(/"/g, '""') + '"').join(',')).join('\r\n');
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }));
+        a.download = 'submit_for_indexing_' + new Date().toISOString().split('T')[0] + '.csv';
+        a.click();
       }
       let _idxFbDomTimer = null;
       function idxFbDomainChanged() {
@@ -6522,7 +6541,10 @@ https://example.com/page-2"></textarea>
         const box = $('idx-fallback-results');
         box.innerHTML = '<div class="note">Opening a real browser window - log in if prompted, then wait...</div>';
         try {
-          const r = await fetch('/api/indexing/fallback-submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, session_id, domain, urls }) });
+          // Include the sidebar Proxy/VPN fields (if set) - this fallback
+          // previously always ran with no proxy at all, so there was no way
+          // to route around an IP-based block for it specifically.
+          const r = await fetch('/api/indexing/fallback-submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, session_id, domain, urls, ...proxyPayload() }) });
           const d = await r.json();
           if (d.error) { box.innerHTML = '<div class="note" style="color:var(--err,#c00)">' + esc(d.error) + '</div>'; return; }
           let rows = (d.results || []).map(x => '<tr><td style="font-size:11px;padding:3px 6px;word-break:break-all">' + esc(x.url) + '</td>'

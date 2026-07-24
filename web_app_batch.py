@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.11.1"
+APP_VERSION = "4.11.2"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -5565,8 +5565,17 @@ def api_indexing_fallback_submit():
     def _log(msg):
         activity(f"[indexing fallback] {msg}")
 
+    # Previously always launched this fallback browser session with no proxy
+    # at all, regardless of what the user had configured - no way to route
+    # around an IP-based block/rate-limit for this specific path. Reuses the
+    # same proxy-resolution helper every other browser-driven tool already
+    # uses, so the sidebar Proxy/VPN fields (or a shared pool proxy) apply
+    # here too if the caller includes them in the request body.
+    proxy_pool = _proxies_from_request(data)
+    proxy = proxy_pool[0] if proxy_pool else None
+
     results = gsc_audit.request_indexing_via_session(
-        session_id, property_url, email, urls, domain=domain, log_fn=_log)
+        session_id, property_url, email, urls, domain=domain, log_fn=_log, proxy=proxy)
     results = skipped + results
     submitted = sum(1 for r in results if r["ok"])
     activity(f"GSC Request-Indexing fallback: {submitted}/{len(raw_urls)} submitted via {email} "

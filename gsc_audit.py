@@ -580,13 +580,21 @@ _INDEXING_SUCCESS_MARKERS = (
 
 
 def request_indexing_via_session(session_id, property_url, email, urls,
-                                  domain=None, browser_pref="edge", log_fn=None):
+                                  domain=None, browser_pref="edge", log_fn=None, proxy=None):
     """Click "Request Indexing" in the real GSC URL Inspection UI for each
     URL, via an already-logged-in GSC Browser Session. Stops early (without
     burning the rest of the day's clicks) if either this domain's own
     local 10/day tracker or Google's own quota message is hit. Returns a
     list of {"url", "ok", "message"} dicts, one per URL passed in (URLs
-    beyond whichever cap is hit first are marked, not silently dropped)."""
+    beyond whichever cap is hit first are marked, not silently dropped).
+
+    proxy: optional {"type","host","port","user","pass"} dict - previously
+    this always launched with proxy=None regardless of what the user had
+    configured, so there was no way to route this specific fallback through
+    a proxy when the office/server IP itself was the reason submissions
+    were failing (confirmed real ask: the API-pool submit tier failing
+    outright, wanting the manual fallback to at least have a shot via a
+    different exit IP)."""
     if log_fn is None:
         log_fn = print
     # Cap is per DOMAIN (how Google throttles it); fall back to the account
@@ -614,7 +622,7 @@ def request_indexing_via_session(session_id, property_url, email, urls,
     quota_hit = False
     try:
         driver = engine.build_driver(
-            profile_dir, proxy=None, headless=False,
+            profile_dir, proxy=proxy, headless=False,
             country="us", extra_extensions=[],
             logger=log_fn, browser_pref=browser_pref,
         )
