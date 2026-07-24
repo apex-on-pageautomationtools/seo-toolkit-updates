@@ -1335,6 +1335,20 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
                     pass
         except Exception as e:
             log_fn(f"  [warn] capture '{key}' failed: {e}")
+            # A hung/crashed renderer (confirmed real case: a Wayback Machine
+            # "layout" snapshot timed out mid-render - archived pages can be
+            # huge/broken and hang far longer than a normal page) can leave
+            # the shared driver session wedged for every screenshot captured
+            # AFTER this one too, since they all reuse the same driver -
+            # each subsequent driver.get() then also fails, which is exactly
+            # why one bad checkpoint was reported as "most of the screenshots
+            # were missing" even though nothing else was actually wrong.
+            # Force the browser back to a known-good blank page before
+            # continuing so a wedged renderer can't poison the rest of the run.
+            try:
+                driver.get("about:blank")
+            except Exception:
+                pass
 
     return captured
 
@@ -2463,7 +2477,36 @@ def run_health_audit(domain, fmt="james", target_pages=None, out_dir=None,
                 import gsc_audit
                 accounts = gsc_audit.list_accounts()
                 connected = [a for a in accounts if a.get("has_refresh")]
-                gsc_email = connected[0]["email"] if connected else None
+                # Previously just used connected[0] - the FIRST connected
+                # account, regardless of whether it actually has access to
+                # THIS domain. Confirmed real case: graceperfumes.ae's
+                # manual_action/security_issues screenshots both failed with
+                # "the signed-in account doesn't have access to this
+                # property", even though the pre-run "GSC Connected" check
+                # (a separate, correct code path - api_gsc_check_for_domain
+                # in web_app_batch.py) had already confirmed
+                # seo.digitall12@gmail.com genuinely has Full access - this
+                # function was silently picking whichever connected account
+                # happened to be first instead of the one already confirmed
+                # to own this domain. Now checks each connected account's
+                # real properties the same way that pre-run check does, and
+                # only picks one actually covering this domain.
+                gsc_email = None
+                for _acct in connected:
+                    try:
+                        _tok0 = gsc_audit.get_access_token(_acct["email"])
+                        _props = gsc_audit.list_properties(_tok0)
+                        if any(domain in (p.get("siteUrl") or "").lower() for p in _props):
+                            gsc_email = _acct["email"]
+                            break
+                    except Exception:
+                        continue
+                if not gsc_email and connected:
+                    # No connected account was confirmed to actually own this
+                    # domain - fall back to the first one rather than skipping
+                    # entirely; resolve_property() below still surfaces the
+                    # real "no access" reason if this guess is wrong too.
+                    gsc_email = connected[0]["email"]
                 # Resolve the REAL property (URL-prefix vs sc-domain) via the API so
                 # the manual-actions / security pages load the correct property —
                 # hardcoding sc-domain broke it for URL-prefix properties.
