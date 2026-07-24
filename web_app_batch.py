@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.11.2"
+APP_VERSION = "4.11.3"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -3698,11 +3698,18 @@ def _wayback_proxy_url(p):
     return f"{p.get('type', 'http')}://{auth}{p['host']}:{p['port']}"
 
 
-def _submit_wayback_url(url, max_tries=3, timeout=45):
+def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None):
     """Submit `url` to the Wayback Machine's Save Page Now, rotating through a
     different proxy each attempt (archive.org blocks/limits by IP, so retrying on
     the SAME IP would just fail the same way). Capped at max_tries so a slow/blocked
     archive.org can never hang the job - returns None on exhausted retries.
+
+    extra_proxy: a one-off proxy from the sidebar Proxy/VPN fields for THIS
+    run specifically - previously the frontend already sent these fields
+    (every tool's start request includes them via proxyPayload()), but the
+    Wayback route never read them, so a proxy typed in for one retry attempt
+    was silently ignored and only the saved Settings/shared-pool proxies
+    ever got used. Tried FIRST, ahead of the random pool sample below.
 
     Uses the authenticated SPN2 API (POST + Authorization: LOW key:secret) when
     an archive.org S3 API key is configured (Admin -> API Keys -
@@ -3719,6 +3726,9 @@ def _submit_wayback_url(url, max_tries=3, timeout=45):
     proxies_pool = list(CONFIG.get("proxies", [])) + _shared_proxies()
     attempts = (random.sample(proxies_pool, min(max_tries, len(proxies_pool)))
                 if proxies_pool else [None] * max_tries)
+    if extra_proxy:
+        attempts = [extra_proxy] + attempts
+        attempts = attempts[:max(max_tries, 1)]
 
     if access_key and secret_key:
         auth_headers = {"User-Agent": "Mozilla/5.0 SEOToolkitPro",
@@ -3817,7 +3827,7 @@ def _parse_wayback_snapshot_time(archived_url):
         return None
 
 
-def _run_wayback_submit(urls):
+def _run_wayback_submit(urls, extra_proxy=None):
     with wayback_lock:
         wayback_state.update({"status": "running", "log": [], "results": [], "error_msg": "",
                               "progress": "Starting..."})
@@ -3837,7 +3847,7 @@ def _run_wayback_submit(urls):
             return
         with wayback_lock:
             _wblog(f"[{i+1}/{len(urls)}] Submitting {u}...")
-        archived = _submit_wayback_url(u)
+        archived = _submit_wayback_url(u, extra_proxy=extra_proxy)
         now = datetime.now()
         snapshot_time = _parse_wayback_snapshot_time(archived) if archived else None
         # Within 5 min of the request = a genuinely fresh capture; anything
@@ -3893,7 +3903,13 @@ def api_wayback_start():
     if len(urls) > 20:
         return jsonify({"error": "Max 20 URLs per batch - archive.org blocks bulk submissions. "
                                   "Split into smaller batches."}), 400
-    t = threading.Thread(target=_run_wayback_submit, args=(urls,), daemon=True)
+    # The frontend already sends the sidebar Proxy/VPN fields for every tool
+    # (proxyPayload(), included in doStart()'s shared `p` object) - this
+    # route just never read them before, so a proxy typed in for this run
+    # specifically was silently ignored.
+    proxy_pool = _proxies_from_request(data)
+    extra_proxy = proxy_pool[0] if proxy_pool else None
+    t = threading.Thread(target=_run_wayback_submit, args=(urls,), kwargs={"extra_proxy": extra_proxy}, daemon=True)
     t.start()
     return jsonify({"status": "started", "count": len(urls)})
 
