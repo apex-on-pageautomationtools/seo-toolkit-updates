@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.11.6"
+APP_VERSION = "4.11.7"
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -974,7 +974,26 @@ class Session:
             if proxy is None and self.pool:
                 proxy = self.pool.next()
             if proxy:
-                add_log(f"Using proxy {proxy.get('host')}:{proxy.get('port')}")
+                # Validate the proxy at the system level (same raw requests-through-proxy
+                # check "Check All Proxies" uses) BEFORE the browser ever launches or
+                # touches Google - a dead/blocked proxy would otherwise only be discovered
+                # after Google has already served a CAPTCHA to it. Rotates through the
+                # pool on failure instead of handing a known-bad proxy to the browser.
+                check = _check_one_proxy(proxy)
+                tries = 1
+                while check.get("status") != "working" and tries < len(self.pool.proxies):
+                    add_log(f"Proxy {proxy.get('host')}:{proxy.get('port')} failed pre-flight "
+                            f"check ({check.get('error') or 'no response'}) - trying next proxy in pool...")
+                    proxy = self.pool.next()
+                    check = _check_one_proxy(proxy)
+                    tries += 1
+                if check.get("status") == "working":
+                    add_log(f"Using proxy {proxy.get('host')}:{proxy.get('port')} "
+                            f"(verified working, exit IP {check.get('exit_ip')})")
+                else:
+                    add_log(f"Using proxy {proxy.get('host')}:{proxy.get('port')} "
+                            f"(pre-flight check failed: {check.get('error') or 'no response'} - "
+                            f"continuing anyway, browser may still succeed)")
         self.driver = engine.build_driver(
             self.profile, proxy=proxy, headless=self.headless,
             country=self.country, extra_extensions=self._extensions(),
