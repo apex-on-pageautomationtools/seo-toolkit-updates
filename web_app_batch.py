@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.9"
+APP_VERSION = "4.12.10"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1020,9 +1020,16 @@ class Session:
                     add_log(f"Using proxy {proxy.get('host')}:{proxy.get('port')} "
                             f"(verified working, exit IP {check.get('exit_ip')})")
                 else:
-                    add_log(f"Using proxy {proxy.get('host')}:{proxy.get('port')} "
-                            f"(pre-flight check failed: {check.get('error') or 'no response'} - "
-                            f"continuing anyway, browser may still succeed)")
+                    # Every proxy in the pool failed pre-flight - confirmed real case: handing
+                    # the browser a proxy already PROVEN dead here reliably produced a fully
+                    # broken session (blank/unloadable Google pages, 0 results on every
+                    # keyword) rather than the hoped-for "browser may still succeed" recovery.
+                    # A direct connection has a real chance of working; a proxy we just
+                    # verified can't even complete a plain HTTP request has none.
+                    add_log(f"Entire proxy pool failed pre-flight checks (last: "
+                            f"{proxy.get('host')}:{proxy.get('port')} - {check.get('error') or 'no response'}) "
+                            f"- going direct for this run instead of using a known-dead proxy.")
+                    proxy = None
         self.driver = engine.build_driver(
             self.profile, proxy=proxy, headless=self.headless,
             country=self.country, extra_extensions=self._extensions(),
@@ -1536,6 +1543,15 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
         if not links_page1 and _try < CONFIG.get("max_block_retries", 3):
             add_log(f"'{keyword}': page 1 still has 0 organic links after retry - "
                     f"restarting keyword from page 1 (retry {_try + 1}/{CONFIG.get('max_block_retries', 3)})")
+            # Just re-navigating in the SAME session/proxy was a no-op retry whenever
+            # the real cause was a dead proxy connection (confirmed live: a proxy that
+            # failed its own pre-flight check produced 0 links on every retry, since
+            # the browser could never actually reach Google through it in the first
+            # place) - route through the same recovery path a recognized block uses,
+            # which does a full restart with cooldown + a rotated/fresh proxy, giving
+            # this an actual chance to succeed instead of repeating a doomed attempt.
+            if not _recover(sess, "soft_block"):
+                return {"status": "captcha", "matches": match_domain([], domain_clean)}
             _reanchor_locale(sess, country, lang)
             continue
         if links_page1:
