@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.8"
+APP_VERSION = "4.12.9"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -971,10 +971,33 @@ class Session:
         self.quit()
         self.profile = mode_profile(self.profile_key) if self.profile_key else pick_profile()
         add_log(f"Using profile: {os.path.basename(self.profile)}")
+
+        # Every install is based in India - if the system's own current exit IP is
+        # already OUTSIDE India, the user has their own VPN connected. Proxies are a
+        # limited shared resource (rate-limited, finite pool), so there's no reason
+        # to also spend one when a VPN is already providing a different location -
+        # for ranking specifically, the system's own IP/location doesn't matter at
+        # all (the target country/city is set via Google's gl= param and a
+        # geolocation override, not by where the request physically comes from).
+        vpn_loc = None
+        if not force_no_proxy and self.pool:
+            try:
+                vpn_loc = check_ip_location(logger=lambda *a: None)
+            except Exception:
+                vpn_loc = None
+            if not (vpn_loc and vpn_loc.get("country") and vpn_loc.get("country") != "IN"):
+                vpn_loc = None
+
         if force_no_proxy:
             proxy = None
             add_log("Proxy skipped for this attempt (going direct) - the configured "
                     "proxy pool kept failing to even connect.")
+        elif vpn_loc:
+            proxy = None
+            add_log(f"System IP is already outside India ({vpn_loc.get('location', '')}) - "
+                    f"a VPN looks connected, so the shared proxy pool is being skipped for "
+                    f"this run (proxies are a limited resource - no need to spend one when a "
+                    f"VPN is already giving a different exit location).")
         else:
             proxy = self.pool.next() if rotate else self.pool.current()
             if proxy is None and self.pool:
@@ -1007,16 +1030,6 @@ class Session:
             latitude=self.latitude, longitude=self.longitude, lang=self.lang)
         with state_lock:
             state["driver"] = self.driver
-        if proxy and proxy.get("user") and proxy.get("pass"):
-            # The auto-auth extension's background script needs a moment to actually
-            # run and register its webRequest.onAuthRequired listener after the
-            # browser process starts - if the very first navigation (the CDP calls
-            # below, or warm_up right after) fires before that listener is live,
-            # Chromium's native proxy login dialog can still slip through even
-            # though the extension IS loaded and correctly configured. A short
-            # settle delay here closes that race instead of only reacting to it
-            # after warm_up has already hung on an unanswerable login prompt.
-            time.sleep(1.5)
         # Always fetch FRESH rankings: a rank check must reflect the live SERP, never a
         # page served from disk cache or personalised by a prior session's cookies.
         # Disable the HTTP cache for the whole session and wipe any saved cache + cookies

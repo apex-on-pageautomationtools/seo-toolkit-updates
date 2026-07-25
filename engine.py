@@ -39,11 +39,8 @@ except Exception:
 
 import os
 import re
-import json
 import time
 import random
-import tempfile
-import zipfile
 import logging
 
 log = logging.getLogger("grc.engine")
@@ -1148,9 +1145,14 @@ class ProxyPool:
         return len(self.proxies) > 0
 
     def next(self):
+        # Random, not sequential rotation - a fixed round-robin order means every
+        # install with the same shared pool hits proxies in the same predictable
+        # sequence, and a proxy that just got flagged/rate-limited comes back up
+        # again on a fixed schedule instead of just being one of many equally
+        # likely picks next time.
         if not self.proxies:
             return None
-        self._i = (self._i + 1) % len(self.proxies)
+        self._i = random.randrange(len(self.proxies))
         return self.proxies[self._i]
 
     def current(self):
@@ -1160,60 +1162,131 @@ class ProxyPool:
 
 
 # --------------------------------------------------------------------------- #
-# Proxy-auth extension (Chrome can't take user:pass on the CLI)
+# Local unauthenticated proxy relay - the reliable fix for the proxy login popup
 # --------------------------------------------------------------------------- #
-def _build_proxy_auth_extension(proxy, logger=print) -> str | None:
-    """Create a tiny MV2 extension that answers the proxy auth challenge.
-    Returns the extension dir path, or None if no auth needed."""
+def start_local_proxy_relay(proxy, logger=print):
+    """Start a tiny local TCP relay on 127.0.0.1 that forwards every connection
+    to the real upstream proxy, injecting Proxy-Authorization itself. The
+    browser is then pointed at THIS local, credential-free proxy via
+    --proxy-server - Chromium never has to answer a real auth challenge, so its
+    native "Sign in to access this site" dialog becomes structurally impossible,
+    not just less likely.
+
+    Why this exists instead of relying only on the auto-auth extension: that
+    extension needs Chromium to treat its webRequestBlocking listener as
+    authoritative for the proxy's 407 challenge, which depends on MV2
+    extension support that's been getting steadily restricted across Chromium
+    versions - confirmed live (two rounds of extension-timing fixes, v4.12.1
+    and v4.12.7) that the popup still appeared on a fully up-to-date install.
+    This relay sidesteps that dependency entirely: Chromium only ever sees an
+    ordinary, unauthenticated local proxy, so there's nothing for it to prompt
+    about regardless of extension/browser-version behavior.
+
+    Returns the local port to use, or None if proxy has no user/pass (nothing
+    to relay - the caller should just use the real proxy directly)."""
     if not (proxy and proxy.get("user") and proxy.get("pass")):
-        if proxy and proxy.get("host"):
-            # A proxy is configured but has no user/pass - if it actually needs auth,
-            # the browser will show its native login prompt with no way to answer it
-            # automatically, since this is the ONLY mechanism that can. Logged so a
-            # future "proxy keeps asking to log in" report can be diagnosed from this
-            # line alone instead of re-investigated from scratch.
-            logger(f"[proxy-auth] Proxy {proxy.get('host')}:{proxy.get('port')} has no "
-                   f"user/pass configured - skipping auto-auth extension")
         return None
-    scheme = proxy.get("type", "http")
-    host = proxy["host"]
-    port = int(proxy["port"])
-    user = proxy["user"]
-    pwd = proxy["pass"]
+    import socket
+    import threading
+    import base64
 
-    manifest = {
-        "version": "1.0.0",
-        "manifest_version": 2,
-        "name": "GRC Proxy Auth",
-        "permissions": ["proxy", "tabs", "unlimitedStorage", "storage",
-                         "<all_urls>", "webRequest", "webRequestBlocking"],
-        "background": {"scripts": ["background.js"]},
-        "minimum_chrome_version": "76.0.0",
-    }
-    background = """
-var config = {
-  mode: "fixed_servers",
-  rules: { singleProxy: { scheme: "%s", host: "%s", port: %d }, bypassList: ["localhost"] }
-};
-chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
-chrome.webRequest.onAuthRequired.addListener(
-  function(details) {
-    return { authCredentials: { username: "%s", password: "%s" } };
-  },
-  { urls: ["<all_urls>"] }, ["blocking"]
-);
-""" % (scheme, host, port, user, pwd)
+    upstream_host = proxy["host"]
+    upstream_port = int(proxy["port"])
+    token = base64.b64encode(f"{proxy['user']}:{proxy['pass']}".encode()).decode()
+    auth_header = f"Proxy-Authorization: Basic {token}\r\n".encode()
 
-    try:
-        d = tempfile.mkdtemp(prefix="grc_proxy_")
-        path = os.path.join(d, "proxy_auth.zip")
-        with zipfile.ZipFile(path, "w") as zf:
-            zf.writestr("manifest.json", json.dumps(manifest))
-            zf.writestr("background.js", background)
-        return path
-    except Exception as e:
-        logger(f"[proxy-auth] Could not build the auto-auth extension: {e}")
-        return None
+    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_sock.bind(("127.0.0.1", 0))
+    server_sock.listen(50)
+    local_port = server_sock.getsockname()[1]
+
+    def _pipe(src, dst):
+        try:
+            while True:
+                data = src.recv(65536)
+                if not data:
+                    break
+                dst.sendall(data)
+        except Exception:
+            pass
+        finally:
+            try:
+                dst.shutdown(socket.SHUT_WR)
+            except Exception:
+                pass
+
+    def _handle(client_sock):
+        upstream_sock = None
+        try:
+            client_sock.settimeout(30)
+            buf = b""
+            while b"\r\n\r\n" not in buf:
+                chunk = client_sock.recv(65536)
+                if not chunk:
+                    return
+                buf += chunk
+                if len(buf) > 65536:   # a request line + headers this large is not real traffic
+                    return
+            head, _, rest = buf.partition(b"\r\n\r\n")
+            lines = head.split(b"\r\n")
+            request_line = lines[0]
+            # Drop any Proxy-Authorization the client sent (there shouldn't be one,
+            # since it never saw real credentials) so ours is the only one forwarded.
+            hdr_lines = [l for l in lines[1:] if not l.lower().startswith(b"proxy-authorization:")]
+
+            upstream_sock = socket.create_connection((upstream_host, upstream_port), timeout=30)
+            out = request_line + b"\r\n" + b"\r\n".join(hdr_lines)
+            out += b"\r\n" if hdr_lines else b""
+            out += auth_header + b"\r\n"
+            upstream_sock.sendall(out)
+            if rest:
+                upstream_sock.sendall(rest)
+
+            if request_line.startswith(b"CONNECT"):
+                # Relay the upstream's response headers back to the client first (the
+                # "200 Connection Established" the browser is waiting for) before
+                # switching to raw bidirectional piping for the TLS-tunneled traffic.
+                resp = b""
+                upstream_sock.settimeout(30)
+                while b"\r\n\r\n" not in resp:
+                    chunk = upstream_sock.recv(65536)
+                    if not chunk:
+                        break
+                    resp += chunk
+                client_sock.sendall(resp)
+
+            client_sock.settimeout(None)
+            upstream_sock.settimeout(None)
+            t1 = threading.Thread(target=_pipe, args=(client_sock, upstream_sock), daemon=True)
+            t2 = threading.Thread(target=_pipe, args=(upstream_sock, client_sock), daemon=True)
+            t1.start(); t2.start()
+            t1.join(); t2.join()
+        except Exception:
+            pass
+        finally:
+            try:
+                client_sock.close()
+            except Exception:
+                pass
+            if upstream_sock:
+                try:
+                    upstream_sock.close()
+                except Exception:
+                    pass
+
+    def _accept_loop():
+        while True:
+            try:
+                client_sock, _ = server_sock.accept()
+            except Exception:
+                break
+            threading.Thread(target=_handle, args=(client_sock,), daemon=True).start()
+
+    threading.Thread(target=_accept_loop, daemon=True).start()
+    logger(f"[proxy-relay] Local relay ready on 127.0.0.1:{local_port} -> "
+           f"{upstream_host}:{upstream_port} (browser never sees real credentials)")
+    return local_port
 
 
 # --------------------------------------------------------------------------- #
@@ -1441,28 +1514,14 @@ def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logg
         "--disable-background-timer-throttling",
     ]
 
-    # Extensions (Buster, VPN) + proxy-auth helper need a visible browser.
+    # Extensions (Buster, VPN) load normally - proxy auth no longer depends on one
+    # (see start_local_proxy_relay above), so this is unconditional on proxy state.
     ext_dirs = []
-    auth_ext_loaded = False
     if not headless:
-        auth_ext = _build_proxy_auth_extension(proxy, logger)
-        if auth_ext:
-            outdir = auth_ext[:-4] + "_unpacked"
-            try:
-                with zipfile.ZipFile(auth_ext) as zf:
-                    zf.extractall(outdir)
-                ext_dirs.append(outdir)
-                auth_ext_loaded = True
-            except Exception as e:
-                logger(f"[proxy-auth] Could not unpack the auto-auth extension: {e}")
-        elif proxy and proxy.get("user") and proxy.get("pass"):
-            logger("[proxy-auth] Auto-auth extension build failed - proxy login prompt may appear")
         for e in (extra_extensions or []):
             if e and os.path.isdir(e):
                 ext_dirs.append(e)
     if ext_dirs:
-        if proxy and proxy.get("user") and proxy.get("pass"):
-            logger(f"[proxy-auth] Loading {len(ext_dirs)} extension(s) incl. auto-auth helper")
         args.append("--load-extension=" + ",".join(ext_dirs))
 
     if headless:
@@ -1470,19 +1529,25 @@ def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logg
         # the (rare) Buster solve still works.
         args.append("--window-position=-32000,-32000")
 
-    # When the auth extension is loaded, it is the ONLY thing that sets the proxy
-    # (via chrome.proxy.settings.set in its own background script) - it must stay
-    # that way. Also passing --proxy-server here race-installs the proxy before the
-    # extension's background script has loaded and registered its onAuthRequired
-    # listener, so the very first proxied request can trip Chromium's native
-    # "Sign in to access this site" login dialog before the extension ever gets a
-    # chance to answer it automatically - confirmed real case: this dialog appearing
-    # despite the auto-auth extension being loaded and correctly configured.
-    # --proxy-server is only needed as a fallback when there's no extension to do
-    # the job (headless, or an anonymous proxy with no credentials to auto-fill).
-    if proxy and proxy.get("host") and proxy.get("port") and not auth_ext_loaded:
-        ptype = proxy.get("type", "http")
-        args.append(f"--proxy-server={ptype}://{proxy['host']}:{proxy['port']}")
+    # Authenticated proxies go through a local relay (start_local_proxy_relay) that
+    # holds the real credentials itself - Chromium is only ever pointed at this
+    # unauthenticated local address, so it never gets a real 407 challenge and the
+    # native "Sign in to access this site" dialog can't appear, regardless of
+    # extension/MV2 support. This also fixes proxy auth in HEADLESS mode, which the
+    # old extension-based approach could never support at all (extensions don't
+    # run headless). Anonymous proxies (no user/pass) skip the relay - there's
+    # nothing to authenticate, so --proxy-server alone is already reliable.
+    if proxy and proxy.get("host") and proxy.get("port"):
+        if proxy.get("user") and proxy.get("pass"):
+            local_port = start_local_proxy_relay(proxy, logger)
+            if local_port:
+                args.append(f"--proxy-server=http://127.0.0.1:{local_port}")
+            else:
+                ptype = proxy.get("type", "http")
+                args.append(f"--proxy-server={ptype}://{proxy['host']}:{proxy['port']}")
+        else:
+            ptype = proxy.get("type", "http")
+            args.append(f"--proxy-server={ptype}://{proxy['host']}:{proxy['port']}")
     return args
 
 
