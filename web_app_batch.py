@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.3"
+APP_VERSION = "4.12.4"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4628,7 +4628,12 @@ def api_ha_start():
     target_pages = []
     targets_raw = (data.get("targets") or "").strip()
     if targets_raw:
-        target_pages = [l.strip() for l in targets_raw.splitlines() if l.strip()]
+        seen_pages = set()
+        for l in targets_raw.splitlines():
+            page = l.strip()
+            if page and page not in seen_pages:
+                seen_pages.add(page)
+                target_pages.append(page)
 
     include_psi = bool(data.get("include_psi", False))
     psi_key = CONFIG.get("psi_api_key", "").strip() or None
@@ -6367,7 +6372,14 @@ def api_brief_start():
     # Pass the format through as-is; the generator builds exactly it or errors.
     fmt = (data.get("format") or "james").strip().lower()
     _targets_raw = (data.get("targets") or "").strip()
-    target_pages = [ln.strip() for ln in _targets_raw.splitlines() if ln.strip()] or None
+    _seen_pages = set()
+    target_pages = []
+    for ln in _targets_raw.splitlines():
+        page = ln.strip()
+        if page and page not in _seen_pages:
+            _seen_pages.add(page)
+            target_pages.append(page)
+    target_pages = target_pages or None
     def _run():
         try:
             def prog(msg):
