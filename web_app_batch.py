@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.7"
+APP_VERSION = "4.12.8"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -3771,7 +3771,7 @@ def _wayback_proxy_url(p):
     return f"{p.get('type', 'http')}://{auth}{p['host']}:{p['port']}"
 
 
-def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None):
+def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=None):
     """Submit `url` to the Wayback Machine's Save Page Now, rotating through a
     different proxy each attempt (archive.org blocks/limits by IP, so retrying on
     the SAME IP would just fail the same way). Capped at max_tries so a slow/blocked
@@ -3794,6 +3794,12 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None):
     trusts the snapshot timestamp Wayback's own response embeds - see
     _parse_wayback_snapshot_time - never assumes success means "fresh"."""
     import re as _re
+    def _log(msg):
+        if logger:
+            try:
+                logger(msg)
+            except Exception:
+                pass
     access_key = CONFIG.get("archive_org_access_key", "").strip()
     secret_key = CONFIG.get("archive_org_secret_key", "").strip()
     proxies_pool = list(CONFIG.get("proxies", [])) + _shared_proxies()
@@ -3852,7 +3858,8 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None):
         return None
 
     save_url = "https://web.archive.org/save/" + url
-    for proxy in attempts:
+    for i, proxy in enumerate(attempts):
+        proxy_label = f"{proxy.get('host')}:{proxy.get('port')}" if proxy else "direct connection"
         try:
             kwargs = {}
             if proxy:
@@ -3860,6 +3867,35 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None):
                 kwargs["proxies"] = {"http": pu, "https": pu}
             r = http_requests.get(save_url, headers={"User-Agent": "Mozilla/5.0 SEOToolkitPro"},
                                   timeout=timeout, allow_redirects=True, **kwargs)
+            # archive.org rate-limits per IP - this fallback (no API key) endpoint
+            # never checked for it, unlike the authenticated SPN2 path just above,
+            # so a 429 silently fell through to the "no match found" case with zero
+            # indication of why, indistinguishable from a genuine parsing failure.
+            # A short backoff before the NEXT (different) proxy gives archive.org's
+            # limiter a moment to reset instead of hammering straight through it.
+            if r.status_code == 429:
+                _log(f"  Wayback attempt {i+1}/{len(attempts)} via {proxy_label}: "
+                     f"rate limited (429) - backing off")
+                time.sleep(4)
+                continue
+            if r.status_code != 200:
+                _log(f"  Wayback attempt {i+1}/{len(attempts)} via {proxy_label}: "
+                     f"HTTP {r.status_code}")
+                continue
+            # requests' allow_redirects=True already followed the save endpoint's
+            # redirect all the way to the archived snapshot itself, so r.url IS the
+            # answer directly - archive.org confirmed live to no longer set
+            # Content-Location on this response at all (the header check below is
+            # now dead for current archive.org, kept only in case that varies), and
+            # the HTML-body regex fallback was scanning the ARCHIVED PAGE'S OWN
+            # rewritten content (since r.text at this point is the snapshot, not a
+            # "submission successful" listing page) for a self-referencing link
+            # that was never actually part of that content - a 200 OK, fully
+            # successful submission was being reported as "failed" 100% of the
+            # time on this endpoint until this was added.
+            if r.url and _re.search(r"/web/\d{10,}/https?://", r.url):
+                return r.url
+
             # Content-Location is Wayback's own redirect header for exactly the page
             # just requested - authoritative, prefer it over scraping the HTML.
             loc = r.headers.get("Content-Location", "")
@@ -3876,7 +3912,11 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None):
                 archived_target = m.group(1).rstrip("/")
                 if archived_target == url.rstrip("/"):
                     return "https://web.archive.org" + m.group(0)
-        except Exception:
+            _log(f"  Wayback attempt {i+1}/{len(attempts)} via {proxy_label}: "
+                 f"200 OK but no archived-URL match found in the response")
+        except Exception as e:
+            _log(f"  Wayback attempt {i+1}/{len(attempts)} via {proxy_label}: "
+                 f"{type(e).__name__}: {e}")
             continue
     return None
 
@@ -3920,7 +3960,7 @@ def _run_wayback_submit(urls, extra_proxy=None):
             return
         with wayback_lock:
             _wblog(f"[{i+1}/{len(urls)}] Submitting {u}...")
-        archived = _submit_wayback_url(u, extra_proxy=extra_proxy)
+        archived = _submit_wayback_url(u, extra_proxy=extra_proxy, logger=_wblog)
         now = datetime.now()
         snapshot_time = _parse_wayback_snapshot_time(archived) if archived else None
         # Within 5 min of the request = a genuinely fresh capture; anything
