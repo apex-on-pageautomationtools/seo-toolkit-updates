@@ -1069,6 +1069,10 @@
       font-size: 14px
     }
 
+    #alert-tool {
+      font-weight: 600
+    }
+
     .alert .msg {
       font-size: 13px;
       color: var(--text-2);
@@ -3367,7 +3371,7 @@ https://example.com/page-2"></textarea>
               <line x1="12" y1="9" x2="12" y2="13" />
               <line x1="12" y1="17" x2="12.01" y2="17" />
             </svg>
-            Action needed
+            Action needed<span id="alert-tool"></span>
           </div>
           <div class="msg" id="alert-msg"></div>
           <button class="btn btn-ok btn-w" id="alert-btn" onclick="doResume()">Resume</button>
@@ -4959,6 +4963,14 @@ https://example.com/page-2"></textarea>
     <script>
       /* ===================== state ===================== */
       let mode = 'ranking';
+      // Shared display-name lookup - used by switchTab() for the page header AND by
+      // showAlert() to say which tool a paused/needs-attention browser belongs to.
+      // The alert card lives in the left column (not inside any panel-X), so it's
+      // never hidden by switchTab()'s per-panel display toggling - a background
+      // tool's paused session stays visible (correctly) while browsing other tabs,
+      // but with no tool name it read as an unexplained, possibly stuck "Action
+      // needed" no matter which tab you were actually looking at.
+      const TOOL_TITLES = { overview: 'Dashboard', ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Website Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SEranking/SEMrush Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GA4)', admin: 'Admin Panel' };
       // The four browser tools run in parallel, so each keeps its OWN poll timer, its own
       // running count, and its own last-seen status. The shared status bar / log / result
       // count reflect only the ACTIVE tab; every tool's table keeps filling in the background.
@@ -5093,7 +5105,6 @@ https://example.com/page-2"></textarea>
         $('tbl-performance').style.display = m === 'performance' ? '' : 'none';
         $('tbl-indexing').style.display = m === 'indexing' ? '' : 'none';
         $('tbl-keywordvolume').style.display = m === 'keywordvolume' ? '' : 'none';
-        const titles = { overview: 'Dashboard', ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Website Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SEranking/SEMrush Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GA4)', admin: 'Admin Panel' };
         const subs = {
           overview: 'An overview of every tool in SEO Toolkit Pro - pick one to get started.',
           ranking: 'Find where your domain ranks on Google - across regions. It can have captcha so please use VPN on system as much possible.',
@@ -5115,7 +5126,7 @@ https://example.com/page-2"></textarea>
           gscaccounts: 'Connect Google accounts and manage browser sessions - shared across GSC Audit, Submit for Indexing\'s fallback, and other tools that need one.',
           admin: 'Manage users, cities, and app configuration.'
         };
-        $('page-title').textContent = titles[m];
+        $('page-title').textContent = TOOL_TITLES[m];
         $('page-sub').textContent = subs[m];
         // The bottom Activity History bar is a cross-tool feed (every tool's actions,
         // not just the current one) - only useful/shown on the Admin tab, so each tool's
@@ -5885,6 +5896,12 @@ https://example.com/page-2"></textarea>
       function showAlert(show, msg, resumable) {
         $('alert').classList.toggle('show', !!show);
         if (msg) $('alert-msg').textContent = msg;
+        // Named per the tool active at the moment this was raised - this card lives
+        // outside every panel-X, so it stays on screen across tab switches (a
+        // background tool's paused browser still needs attention) and without a
+        // name it looked like an unexplained alert stuck on whatever tab you'd
+        // since navigated to.
+        if (show) $('alert-tool').textContent = ' in ' + (TOOL_TITLES[mode] || '');
         // A terminal "error" status can't actually be resumed - the run's thread
         // has already exited, so /api/resume is a silent no-op there. Previously
         // this alert always showed a "Resume" button regardless, which looked
