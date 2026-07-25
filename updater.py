@@ -26,6 +26,23 @@ UPDATE_LOG = os.path.join(BUNDLE_DIR, ".update_log")
 # domain on our own VPS starts with no such filter-category reputation, so it
 # sidesteps that specific failure mode; GitHub stays as the fallback in case
 # the VPS itself is ever down, so there's still a working path either way.
+GITHUB_FILE_BASE = "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/"
+VPS_FILE_BASE = "https://indexing.weblinkbuzz.com/ota-updates/"
+
+
+def _swap_source(url):
+    """Return the same file's URL at the OTHER mirror (VPS <-> GitHub), or None if
+    url doesn't match either known base. Used for per-file fallback when whichever
+    source answered the manifest fetch turns out to be the one a network is
+    intercepting - previously the whole update just gave up once any file came
+    back intercepted, even though the other mirror (confirmed reachable moments
+    earlier, or not yet tried at all) might work fine for the exact same files."""
+    for base, other in ((GITHUB_FILE_BASE, VPS_FILE_BASE), (VPS_FILE_BASE, GITHUB_FILE_BASE)):
+        if url.startswith(base):
+            return other + url[len(base):]
+    return None
+
+
 UPDATE_MANIFEST_URLS = [
     "https://indexing.weblinkbuzz.com/ota-updates/update_manifest.json",
     "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/update_manifest.json",
@@ -196,6 +213,13 @@ def check_and_update(log_fn=None):
     failed_reasons = {}
     intercepted = False
 
+    # Once a file confirms one mirror is intercepted and the other isn't, remember
+    # that winning base and use it FIRST for every remaining file - otherwise each
+    # subsequent file would independently rediscover the same interception before
+    # falling back, burning a full retry cycle per file for no reason.
+    switched_base = None
+    both_sources_blocked = False
+
     for entry in files:
         rel_path = entry.get("path", "")
         remote_hash = entry.get("hash", "")
@@ -203,6 +227,11 @@ def check_and_update(log_fn=None):
 
         if not rel_path or not download_url:
             continue
+
+        if switched_base:
+            _alt = _swap_source(download_url)
+            if _alt:
+                download_url = _alt
 
         # Protected files that should never be auto-updated
         if rel_path in (".auth_token", "config.json", ".update_log"):
@@ -239,22 +268,35 @@ def check_and_update(log_fn=None):
                     ok = True
                     break
                 if _looks_intercepted(local_path):
-                    last_err = ("network is intercepting this download (a proxy/antivirus web "
-                                "filter is substituting a block or login page for the real file) "
-                                "- ask IT to allow raw.githubusercontent.com, a normal retry won't help")
+                    _blocked_domain = download_url.split("/")[2] if "/" in download_url else download_url
                     _log_update(f"Hash mismatch (try {_attempt + 1}): {rel_path} - looks INTERCEPTED "
-                                f"(downloaded content is an HTML page, not the real file) - "
-                                f"expected {remote_hash[:8]}..., got {got_hash[:8]}...")
-                    # Confirmed interception, not a fluke - retrying THIS file won't
-                    # help (the block page is a deterministic response, not a
-                    # transient failure), and it's near-certain every other file
-                    # from the same source will hit the same wall. Stop burning
-                    # up to 90s-per-attempt retries on a lost cause: bail out of
-                    # this file's retry loop immediately, and the outer loop right
-                    # after it - previously this ground through all 3 retries per
-                    # file THEN repeated that for every remaining file in the
-                    # manifest, which could silently hang the "Check Updates"
-                    # button for the better part of an hour with zero feedback.
+                                f"via {_blocked_domain} (downloaded content is an HTML page, not the "
+                                f"real file) - expected {remote_hash[:8]}..., got {got_hash[:8]}...")
+                    # Confirmed interception, not a fluke - retrying the SAME url won't
+                    # help (the block page is a deterministic response). Before giving
+                    # up on this file, try the other mirror (VPS <-> GitHub) for this
+                    # exact file - the interception is specific to whichever domain
+                    # the network filter has flagged, not the file itself, so the other
+                    # mirror is often still reachable.
+                    _alt_url = _swap_source(download_url)
+                    if _alt_url:
+                        _alt_domain = _alt_url.split("/")[2]
+                        _log_update(f"{rel_path}: retrying via {_alt_domain} instead of {_blocked_domain}")
+                        dl_ok2, _ = _download_file(_alt_url, local_path)
+                        if dl_ok2:
+                            got_hash2 = _file_hash(local_path)
+                            if not remote_hash or got_hash2 == remote_hash:
+                                ok = True
+                                switched_base = _alt_url.rsplit(rel_path, 1)[0] if rel_path in _alt_url else None
+                                _log_update(f"{rel_path}: succeeded via {_alt_domain} - using it for remaining files too")
+                                break
+                            if _looks_intercepted(local_path):
+                                _log_update(f"{rel_path}: ALSO intercepted via {_alt_domain} - both mirrors blocked")
+                                both_sources_blocked = True
+                    last_err = (f"network is intercepting this download (a proxy/antivirus web filter is "
+                                f"substituting a block or login page for the real file) - ask IT to allow "
+                                f"{_blocked_domain}" + (f" and {_alt_url.split('/')[2]}" if _alt_url else "") +
+                                ", a normal retry won't help")
                     file_intercepted = True
                     break
                 else:
@@ -295,7 +337,11 @@ def check_and_update(log_fn=None):
                 except Exception:
                     pass
 
-        if file_intercepted:
+        # Only abort the whole batch when BOTH mirrors are confirmed blocked - a
+        # single-source interception that the per-file fallback above already
+        # recovered from (ok is True) should just continue to the next file, now
+        # using switched_base for the rest of this run.
+        if both_sources_blocked:
             intercepted = True
             break
 
@@ -309,9 +355,10 @@ def check_and_update(log_fn=None):
     }
     if intercepted:
         result["reason"] = ("Network is intercepting the update download (a proxy/antivirus web filter is "
-                            "substituting a block or login page for the real file) - ask IT to allow "
-                            "raw.githubusercontent.com. Stopped early instead of retrying every remaining "
-                            "file the same way.")
+                            "substituting a block or login page for the real file) - both mirrors "
+                            "(GitHub and our own VPS) came back blocked for at least one file, so this "
+                            "isn't one specific domain to allowlist. Stopped early instead of retrying "
+                            "every remaining file the same way.")
 
     if updated_files:
         log_fn(f"[update] {len(updated_files)} file(s) updated to v{remote_version}")
