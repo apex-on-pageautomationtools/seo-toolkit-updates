@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.6"
+APP_VERSION = "4.12.7"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1007,6 +1007,16 @@ class Session:
             latitude=self.latitude, longitude=self.longitude, lang=self.lang)
         with state_lock:
             state["driver"] = self.driver
+        if proxy and proxy.get("user") and proxy.get("pass"):
+            # The auto-auth extension's background script needs a moment to actually
+            # run and register its webRequest.onAuthRequired listener after the
+            # browser process starts - if the very first navigation (the CDP calls
+            # below, or warm_up right after) fires before that listener is live,
+            # Chromium's native proxy login dialog can still slip through even
+            # though the extension IS loaded and correctly configured. A short
+            # settle delay here closes that race instead of only reacting to it
+            # after warm_up has already hung on an unanswerable login prompt.
+            time.sleep(1.5)
         # Always fetch FRESH rankings: a rank check must reflect the live SERP, never a
         # page served from disk cache or personalised by a prior session's cookies.
         # Disable the HTTP cache for the whole session and wipe any saved cache + cookies
@@ -1501,6 +1511,20 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
             engine.accept_google_consent(sess.driver, add_log)
             time.sleep(1)
             links_page1, dbg = extract_organic(sess.driver, debug=True)
+        # A page-1 load that STILL comes back with zero organic links after that
+        # retry means classify_page() likely mis-called this "ok" on a weak/generic
+        # marker (e.g. a bare id="search" div present on non-SERP variants too),
+        # even though the real results container (#rso) never rendered - confirmed
+        # live case: h3=0 jsname=0 zReHs=0 rso=False, yet classify_page still
+        # returned "ok" and this search was reported as a confident "not found"
+        # when Google never actually served real results at all. Retry the whole
+        # keyword from scratch first (same as a recognized block/captcha does)
+        # rather than trusting a page that produced nothing.
+        if not links_page1 and _try < CONFIG.get("max_block_retries", 3):
+            add_log(f"'{keyword}': page 1 still has 0 organic links after retry - "
+                    f"restarting keyword from page 1 (retry {_try + 1}/{CONFIG.get('max_block_retries', 3)})")
+            _reanchor_locale(sess, country, lang)
+            continue
         if links_page1:
             add_log(f"Page 1: {len(links_page1)} organic links:")
             for idx, l in enumerate(links_page1[:20], 1):
@@ -1711,6 +1735,16 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     f"ranking may exist deeper ({total_links} results seen)")
             return {"status": f"not_found (incomplete - {incomplete_reason} at page {page_num})",
                     "matches": [], "pages": page_num, "incomplete": True}
+        if page_num == 1 and total_links == 0:
+            # Every retry (including the whole-keyword restarts above) still came
+            # back with zero organic links on page 1 - Google never actually
+            # served a real, parseable SERP for this keyword, so "not found" would
+            # be reporting a search that never genuinely happened as if it were a
+            # confident negative. Flag it the same way an unrecoverable block does.
+            add_log(f"'{keyword}': page 1 never returned real results after all retries - "
+                    f"reporting as inconclusive, not a confident not-found")
+            return {"status": "not_found (incomplete - page 1 never loaded real results)",
+                    "matches": [], "pages": page_num, "incomplete": True}
         add_log(f"'{keyword}': not in top {page_num} pages ({total_links} results)")
         return {"status": f"not_found in {page_num} pages", "matches": [], "pages": page_num}
 
@@ -1819,6 +1853,8 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
                    "status": result.get("status", "not_found")}
             if kw_target:
                 row["target_page"] = kw_target
+            if result.get("incomplete"):
+                row["incomplete"] = True
             return row
 
         for i, kw in enumerate(keywords):

@@ -6000,12 +6000,25 @@ https://example.com/page-2"></textarea>
           const tp = row.target_page || '';
           const tpCell = tp ? '<a class="lnk" href="' + esc(tp) + '" target="_blank" rel="noopener" title="' + esc(tp) + '">' + esc(tp.replace(/https?:\/\/(www\.)?/, '')) + '</a>' : '<span style="color:var(--text-3)">N/A</span>';
           if (tp) { document.querySelectorAll('.col-target').forEach(el => el.classList.remove('hidden')); }
+          // A run that never actually got real results (a page 1 that failed to
+          // load, an unrecoverable block deep in pagination, etc.) is marked
+          // incomplete:true by the backend - show that as an amber "inconclusive"
+          // state, not the same red "Not Found" a genuine, fully-checked negative
+          // gets. Confirmed real case: a failed search was silently reported
+          // identically to a confident not-ranking result, which is wrong data
+          // in a client-facing report.
+          const isIncomplete = !!row.incomplete || (row.status || '').includes('incomplete');
+          const posBadgeCls = isIncomplete ? 'r-none' : (isNum ? rankClass(n) : 'r-none');
+          const posBadgeTxt = isIncomplete ? '?' : (isNum ? n : 'N/F');
+          const statusCls = isIncomplete ? 't-unknown'
+            : ((row.status || '').startsWith('not_found') ? 't-not_found' : 't-' + (row.status || 'unknown'));
+          const statusTxt = isIncomplete ? 'Check failed - retry' : (row.status || '').replace(/_/g, ' ');
           tr.innerHTML = '<td style="color:var(--text-3)">' + num + '</td>' +
             '<td class="cell-kw" style="font-weight:600">' + esc(row.keyword) + '</td>' +
             '<td class="col-target cell-url' + (document.querySelector('.col-target.hidden') ? ' hidden' : '') + '">' + tpCell + '</td>' +
-            '<td style="text-align:center"><span class="rank-pill ' + (isNum ? rankClass(n) : 'r-none') + '">' + (isNum ? n : 'N/F') + '</span></td>' +
+            '<td style="text-align:center"><span class="rank-pill ' + posBadgeCls + '" title="' + (isIncomplete ? 'The search never returned real results - not a confirmed ranking' : '') + '">' + posBadgeTxt + '</span></td>' +
             '<td class="cell-url">' + serp + '</td>' +
-            '<td><span class="tag ' + ((row.status || '').startsWith('not_found') ? 't-not_found' : 't-' + (row.status || 'unknown')) + '">' + esc((row.status || '').replace(/_/g, ' ')) + '</span></td>' +
+            '<td><span class="tag ' + statusCls + '" title="' + esc(row.status || '') + '">' + esc(statusTxt) + '</span></td>' +
             '<td style="text-align:center">' + ssCell + '</td>';
           tbody_r.appendChild(tr);
           $('tbl-r').classList.remove('hidden'); $('empty-ranking').style.display = 'none';
