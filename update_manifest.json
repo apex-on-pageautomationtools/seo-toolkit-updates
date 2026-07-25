@@ -1,5 +1,5 @@
 {
-  "version": "4.12.5",
+  "version": "4.12.6",
   "files": [
     {
       "path": "da_checker.py",
@@ -8,22 +8,22 @@
     },
     {
       "path": "auth.py",
-      "hash": "99b04c71830851d6229393453e0348cda743197aba65cf4c9842c9ebd3fe3533",
+      "hash": "60c70e781413e7b560aa1e68bd84bd8f8c33815a97d326d96e1f0e66fc8cc20a",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/auth.py"
     },
     {
       "path": "engine.py",
-      "hash": "853e676dee7f7e3a872642546141f418d0e10d410cff512aa83785e384f79926",
+      "hash": "8b05eefadc8b846d425db5e34b3157ee711edceec4aa1f1d71225385ef45e940",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/engine.py"
     },
     {
       "path": "gsc_audit.py",
-      "hash": "4f1771412b8fbd59d33374896c4c4260ea6e97bfd094af8ef44beadbd61ec00c",
+      "hash": "a157c846ced37aa5dd4760f2adc5293d1766471aeb90c63fe700f11ab7402a2f",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/gsc_audit.py"
     },
     {
       "path": "health_audit.py",
-      "hash": "1e333830570e9fe767b09d4012d163b2609c963237066b0977498b9af9faa2b2",
+      "hash": "bdafc885823245080783aa4eb45d0c9a469efe929a61573f058fa2a64ee90674",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/health_audit.py"
     },
     {
@@ -33,7 +33,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "be637e86e2a861f06984c7f821f0a28f9f0dfd97314edc8320bdd2de81fd192a",
+      "hash": "a683bb7b42263ce7d965868f55daa1d927793f36774943d4158888798bc3fe03",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -93,12 +93,12 @@
     },
     {
       "path": "static/icons/google.png",
-      "hash": "121e000cb67429bfeb6942a5b9ec9ae716035b2dd763daf4ceb418d197b5ada6",
+      "hash": "d4f97499c116b77608db3327047b0a2cd4121328b92352f2f7ccb2f153a94d36",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/icons/google.png"
     },
     {
       "path": "static/icons/gsc.png",
-      "hash": "e430c401f7a3054234b89a29638b6f31b1445770230a14c7a8deb67f82f72596",
+      "hash": "eae5f25e7868fc4597ea9ec4279e0713a49ac358b221abf7378786c05c621c53",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/icons/gsc.png"
     },
     {
@@ -123,7 +123,7 @@
     },
     {
       "path": "scripts/generate_seo_onpage_phase2.py",
-      "hash": "a9671d6737c20bfa7234828038a3c1ff4e3fe8a3195298eac6915599dc8fc3ec",
+      "hash": "53c0dfdcc65f1275a24d371f22050fca6d10cc5a16dae09b23b7e81537a6300d",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seo_onpage_phase2.py"
     },
     {
@@ -153,7 +153,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "87806a45c93b387bfbe5617f4fd5375692e25c5cbb3362a2b2b813f62ea3d6ed",
+      "hash": "e5ae769d2c8b7b1939aab857f202a8c21453d4836e3674050022da6f305594a5",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {
@@ -163,7 +163,7 @@
     },
     {
       "path": "site_audit.py",
-      "hash": "52b4736e90cb2dcabfb36e66fc95961f7a95ef2d7eb4e5efa24aec4234cafdf4",
+      "hash": "c3bfe4c50a55bbdf94a947385dfb32d8480cb61deec116966dfb532116df8e2f",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/site_audit.py"
     },
     {
@@ -198,7 +198,7 @@
     },
     {
       "path": "scripts/generate_seranking_audit.py",
-      "hash": "82239917f10807dd1b075c288d388282935bbf2b8f130780a2de533df14bd56d",
+      "hash": "9d33fefab020340468d50aea253e52cf6337ac4351480d3dce45b8389d7e4b9c",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seranking_audit.py"
     },
     {
