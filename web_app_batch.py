@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.11.8"
+APP_VERSION = "4.12.0"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -6697,13 +6697,18 @@ def _open_app_window(url):
         for _p in _glob.glob(os.path.join(profile, "Default", "Favicons*")):
             try: os.remove(_p)
             except OSError: pass
-        _icons_dir = os.path.join(profile, "Default", "Web Applications", "Manifest Resources")
-        if os.path.isdir(_icons_dir):
+        # Wipe the whole "Web Applications" tree, not just the nested Icons
+        # subfolder - Chromium writes the actual .ico file the Windows shell reads
+        # for the taskbar icon somewhere else in this tree (not just the raw source
+        # images), and only clearing Icons/ left that stale generated file behind,
+        # so the taskbar kept showing Edge's own icon instead of ours. This folder
+        # is entirely inside our own dedicated edge_app profile (never the user's
+        # real browsing profile), so it's safe to remove wholesale - Chromium just
+        # regenerates it fresh from the manifest/favicon on next launch.
+        _webapps_dir = os.path.join(profile, "Default", "Web Applications")
+        if os.path.isdir(_webapps_dir):
             import shutil
-            for _d in os.listdir(_icons_dir):
-                _ic = os.path.join(_icons_dir, _d, "Icons")
-                if os.path.isdir(_ic):
-                    shutil.rmtree(_ic, ignore_errors=True)
+            shutil.rmtree(_webapps_dir, ignore_errors=True)
         icon_path = os.path.join(BUNDLE_DIR, "rank-checker-search-bars.ico")
         cmd = [edge, f"--app={url}",
                f"--user-data-dir={profile}",

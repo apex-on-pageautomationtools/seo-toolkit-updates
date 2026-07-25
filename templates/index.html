@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#3391ff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#ff5a1f" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0d0f12" media="(prefers-color-scheme: dark)">
   <meta name="description" content="Track Google keyword rankings and index status - hardened, CAPTCHA-resistant.">
   <link rel="manifest" href="/manifest.webmanifest">
@@ -16,24 +16,28 @@
   <style>
     /* ===================== One UI design tokens ===================== */
     :root {
-      --accent: #3391ff;
-      --accent-2: #4a56e2;
-      --accent-grad: linear-gradient(135deg, #3391ff, #4a56e2);
+      /* Primary accent: apexwebcube.com's orange-red (buttons, active states, links) */
+      --accent: #ff5a1f;
+      --accent-2: #d43f14;
+      --accent-grad: linear-gradient(135deg, #ff6a35, #ff5a1f);
+      /* Brand blue: eliteinformationtech.com's exact brand colors (sidebar header) */
+      --brand-dark: #0c59a5;
+      --brand-light: #166dc3;
       --ok: #1ea672;
       --warn: #f0a020;
       --err: #f0453a;
       --gold: #f5a623;
       /* light */
-      --bg: #eef1f7;
+      --bg: #f4f6fa;
       --surface: #ffffff;
-      --surface-2: #f5f7fc;
-      --surface-3: #eaeef6;
-      --text: #16181d;
-      --text-2: #5b616e;
-      --text-3: #8a909c;
-      --border: #e3e7ef;
-      --shadow: 0 6px 24px rgba(20, 30, 60, .08);
-      --shadow-sm: 0 2px 10px rgba(20, 30, 60, .06);
+      --surface-2: #eef1f6;
+      --surface-3: #e6eaf2;
+      --text: #12151b;
+      --text-2: #475569;
+      --text-3: #94a3b8;
+      --border: #e2e8f0;
+      --shadow: 0 6px 24px rgba(15, 23, 42, .08);
+      --shadow-sm: 0 2px 10px rgba(15, 23, 42, .06);
       --r-xl: 30px;
       --r-lg: 24px;
       --r-md: 18px;
@@ -45,28 +49,28 @@
     }
 
     html[data-theme="dark"] {
-      --bg: #0c0e12;
-      --surface: #16191f;
-      --surface-2: #1d212a;
-      --surface-3: #252a35;
-      --text: #eef0f4;
-      --text-2: #a8aebb;
-      --text-3: #727987;
-      --border: #272c36;
+      --bg: #0b1220;
+      --surface: #101b2e;
+      --surface-2: #16233a;
+      --surface-3: #1c2c47;
+      --text: #eaf1fb;
+      --text-2: #a7b7cf;
+      --text-3: #6d7f9c;
+      --border: #1f2f4a;
       --shadow: 0 8px 30px rgba(0, 0, 0, .45);
       --shadow-sm: 0 2px 12px rgba(0, 0, 0, .35);
     }
 
     @media (prefers-color-scheme:dark) {
       html[data-theme="system"] {
-        --bg: #0c0e12;
-        --surface: #16191f;
-        --surface-2: #1d212a;
-        --surface-3: #252a35;
-        --text: #eef0f4;
-        --text-2: #a8aebb;
-        --text-3: #727987;
-        --border: #272c36;
+        --bg: #0b1220;
+        --surface: #101b2e;
+        --surface-2: #16233a;
+        --surface-3: #1c2c47;
+        --text: #eaf1fb;
+        --text-2: #a7b7cf;
+        --text-3: #6d7f9c;
+        --border: #1f2f4a;
         --shadow: 0 8px 30px rgba(0, 0, 0, .45);
         --shadow-sm: 0 2px 12px rgba(0, 0, 0, .35);
       }
@@ -96,7 +100,7 @@
     }
 
     ::selection {
-      background: rgba(51, 145, 255, .25)
+      background: rgba(255, 90, 31, .25)
     }
 
     /* scrollbars */
@@ -145,7 +149,7 @@
       background: var(--accent-grad);
       display: grid;
       place-items: center;
-      box-shadow: 0 4px 14px rgba(51, 145, 255, .4);
+      box-shadow: 0 4px 14px rgba(255, 90, 31, .4);
       flex-shrink: 0
     }
 
@@ -159,7 +163,7 @@
       font-size: 11px;
       font-weight: 700;
       color: var(--accent);
-      background: rgba(51, 145, 255, .12);
+      background: rgba(255, 90, 31, .12);
       padding: 3px 9px;
       border-radius: var(--r-pill)
     }
@@ -252,7 +256,9 @@
       align-items: center;
       gap: 10px;
       padding: 14px 14px 10px;
-      min-height: 60px
+      min-height: 60px;
+      background: linear-gradient(135deg, var(--brand-dark), var(--brand-light));
+      border-bottom: 1px solid var(--border)
     }
 
     .sidebar.collapsed .sb-head {
@@ -279,10 +285,10 @@
       width: 32px;
       height: 32px;
       border-radius: 10px;
-      background: var(--accent-grad);
+      background: var(--accent);
       display: grid;
       place-items: center;
-      box-shadow: 0 3px 10px rgba(51, 145, 255, .35);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, .3);
       flex-shrink: 0
     }
 
@@ -291,7 +297,8 @@
       font-weight: 800;
       white-space: nowrap;
       overflow: hidden;
-      transition: opacity .2s var(--ease)
+      transition: opacity .2s var(--ease);
+      color: #fff
     }
 
     .sidebar.collapsed .sb-name {
@@ -303,18 +310,18 @@
       width: 28px;
       height: 28px;
       border-radius: 8px;
-      border: none;
+      border: 1px solid rgba(255, 255, 255, .3);
       cursor: pointer;
       flex-shrink: 0;
-      background: var(--surface-2);
-      color: var(--text-3);
+      background: rgba(255, 255, 255, .12);
+      color: #fff;
       display: grid;
       place-items: center;
       transition: transform .3s var(--ease), background .2s
     }
 
     .sb-toggle:hover {
-      background: var(--surface-3)
+      background: rgba(255, 255, 255, .22)
     }
 
     .sidebar.collapsed .sb-toggle {
@@ -351,7 +358,7 @@
     }
 
     .sb-item.active {
-      background: rgba(51, 145, 255, .12);
+      background: rgba(255, 90, 31, .12);
       color: var(--accent)
     }
 
@@ -359,6 +366,13 @@
       flex-shrink: 0;
       width: 18px;
       height: 18px
+    }
+
+    .sb-item img {
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      object-fit: contain
     }
 
     .sb-item .sb-label {
@@ -595,7 +609,7 @@
       outline: none;
       border-color: var(--accent);
       background: var(--surface);
-      box-shadow: 0 0 0 4px rgba(51, 145, 255, .14)
+      box-shadow: 0 0 0 4px rgba(255, 90, 31, .14)
     }
 
     textarea {
@@ -734,7 +748,7 @@
     }
 
     .note.accent {
-      background: rgba(51, 145, 255, .10);
+      background: rgba(255, 90, 31, .10);
       color: var(--text-2)
     }
 
@@ -766,7 +780,7 @@
     .btn-primary {
       background: var(--accent-grad);
       color: #fff;
-      box-shadow: 0 4px 16px rgba(51, 145, 255, .4)
+      box-shadow: 0 4px 16px rgba(255, 90, 31, .4)
     }
 
     .btn-tonal {
@@ -836,7 +850,7 @@
 
     .b-running,
     .b-starting {
-      background: rgba(51, 145, 255, .14);
+      background: rgba(255, 90, 31, .14);
       color: var(--accent)
     }
 
@@ -1041,7 +1055,7 @@
     }
 
     .r-blue {
-      background: rgba(51, 145, 255, .16);
+      background: rgba(255, 90, 31, .16);
       color: var(--accent)
     }
 
@@ -1085,7 +1099,7 @@
     .geo-chip:hover {
       border-color: var(--accent);
       color: var(--accent);
-      background: rgba(51, 145, 255, .08)
+      background: rgba(255, 90, 31, .08)
     }
 
     .geo-chip .hint {
@@ -1098,7 +1112,7 @@
       gap: 8px;
       padding: 6px 6px 6px 13px;
       border-radius: var(--r-pill);
-      background: rgba(51, 145, 255, .12);
+      background: rgba(255, 90, 31, .12);
       color: var(--accent);
       font-size: 12.5px;
       font-weight: 700
@@ -1111,7 +1125,7 @@
       width: 18px;
       height: 18px;
       border-radius: 50%;
-      background: rgba(51, 145, 255, .18);
+      background: rgba(255, 90, 31, .18);
       cursor: pointer;
       font-weight: 800;
       line-height: 1;
@@ -1553,7 +1567,7 @@
       font-weight: 800;
       text-transform: uppercase;
       color: var(--accent);
-      background: rgba(51, 145, 255, .12);
+      background: rgba(255, 90, 31, .12);
       padding: 3px 9px;
       border-radius: var(--r-pill);
       flex-shrink: 0
@@ -1639,6 +1653,17 @@
 <body class="auth-pending">
 
   <div id="boot-spinner">
+    <div class="boot-mark">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"
+        stroke-linecap="round" stroke-linejoin="round">
+        <line x1="6" y1="20" x2="6" y2="14" />
+        <line x1="11" y1="20" x2="11" y2="9" />
+        <line x1="16" y1="20" x2="16" y2="13" />
+        <circle cx="17.5" cy="6.5" r="3" />
+        <line x1="20" y1="9" x2="22" y2="11" />
+      </svg>
+    </div>
+    <div class="boot-title">SEO Toolkit Pro</div>
     <div class="boot-spin-circle"></div>
   </div>
 
@@ -1665,28 +1690,17 @@
       </button>
     </div>
     <div class="sb-nav">
+      <div class="sb-section-label">Rank &amp; Visibility</div>
       <button class="sb-item active" id="tab-ranking" data-tip="Google Rank Checker" onclick="switchTab('ranking')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <line x1="6" y1="20" x2="6" y2="14" />
-          <line x1="12" y1="20" x2="12" y2="4" />
-          <line x1="18" y1="20" x2="18" y2="10" />
-        </svg>
+        <img src="/static/icons/google.png" alt="">
         <span class="sb-label">Google Rank Checker</span>
       </button>
       <button class="sb-item" id="tab-index" data-tip="Google Index Checker (site:)" onclick="switchTab('index')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <path d="M9 12l2 2 4-4" />
-          <path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9c1.66 0 3.21.45 4.55 1.23" />
-        </svg>
+        <img src="/static/icons/google.png" alt="">
         <span class="sb-label">Google Index Checker (site:)</span>
       </button>
       <button class="sb-item" id="tab-count" data-tip="Google Search Results Count" onclick="switchTab('count')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <line x1="4" y1="9" x2="20" y2="9" />
-          <line x1="4" y1="15" x2="20" y2="15" />
-          <line x1="10" y1="3" x2="8" y2="21" />
-          <line x1="16" y1="3" x2="14" y2="21" />
-        </svg>
+        <img src="/static/icons/google.png" alt="">
         <span class="sb-label">Google Search Results Count</span>
       </button>
       <button class="sb-item" id="tab-backlink" data-tip="Backlink Status Checker" onclick="switchTab('backlink')">
@@ -1698,20 +1712,11 @@
       </button>
       <div class="sb-sep"></div>
       <button class="sb-item" id="tab-crawl" data-tip="Crawl Date Tracker (by GSC)" onclick="switchTab('crawl')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <rect x="3" y="4" width="18" height="18" rx="2" />
-          <line x1="16" y1="2" x2="16" y2="6" />
-          <line x1="8" y1="2" x2="8" y2="6" />
-          <line x1="3" y1="10" x2="21" y2="10" />
-        </svg>
+        <img src="/static/icons/gsc.png" alt="">
         <span class="sb-label">Crawl Date Tracker (by GSC)</span>
       </button>
       <button class="sb-item" id="tab-indexing" data-tip="Submit for Indexing (by GSC)" onclick="switchTab('indexing')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <path d="M12 2L2 7l10 5 10-5-10-5z" />
-          <path d="M2 17l10 5 10-5" />
-          <path d="M2 12l10 5 10-5" />
-        </svg>
+        <img src="/static/icons/gsc.png" alt="">
         <span class="sb-label">Submit for Indexing (by GSC)</span>
       </button>
       <button class="sb-item" id="tab-wayback" data-tip="Wayback Submission" onclick="switchTab('wayback')">
@@ -1722,7 +1727,7 @@
         <span class="sb-label">Wayback Submission</span>
       </button>
       <div class="sb-sep"></div>
-      <div class="sb-section-label">Report Creation tools</div>
+      <div class="sb-section-label">Audits &amp; Reports</div>
       <button class="sb-item" id="tab-brief" data-tip="Brief Analysis Report" onclick="switchTab('brief')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
@@ -1743,12 +1748,7 @@
         <span class="sb-label">SEO On-Page Report</span>
       </button>
       <button class="sb-item" id="tab-gsc" data-tip="GSC Audit Report" onclick="switchTab('gsc')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-          <circle cx="11" cy="11" r="8" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          <line x1="11" y1="8" x2="11" y2="14" />
-          <line x1="8" y1="11" x2="14" y2="11" />
-        </svg>
+        <img src="/static/icons/gsc.png" alt="">
         <span class="sb-label">GSC Audit Report</span>
       </button>
       <button class="sb-item" id="tab-health" data-tip="Health Audit Report" onclick="switchTab('health')">
@@ -1765,13 +1765,13 @@
         </svg>
         <span class="sb-label">Performance Report</span>
       </button>
-      <button class="sb-item" id="tab-seranking" data-tip="SERanking Audit" onclick="switchTab('seranking')">
+      <button class="sb-item" id="tab-seranking" data-tip="SEranking/SEMrush Audit" onclick="switchTab('seranking')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
           <polyline points="14 2 14 8 20 8" />
           <path d="M9 15l2 2 4-4" />
         </svg>
-        <span class="sb-label">SERanking Audit</span>
+        <span class="sb-label">SEranking/SEMrush Audit</span>
       </button>
       <button class="sb-item" id="tab-geo" data-tip="GEO/AI Optimization Suggestions" onclick="switchTab('geo')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
@@ -1810,6 +1810,7 @@
         <span class="sb-label">Keyword Search Volume</span>
       </button>
       <div class="sb-sep"></div>
+      <div class="sb-section-label">Account</div>
       <button class="sb-item" id="tab-gscaccounts" data-tip="Google Accounts (GSC-GA4)" onclick="switchTab('gscaccounts')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <circle cx="12" cy="8" r="4" />
@@ -2749,7 +2750,7 @@
               <polyline points="14 2 14 8 20 8" />
               <path d="M9 15l2 2 4-4" />
             </svg>
-            SEranking Audit <span class="testing-badge">(testing)</span>
+            SEranking/SEMrush Audit <span class="testing-badge">(testing)</span>
           </div>
           <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Upload a SEranking Site Audit
             .xlsx export (or your own similar issue-list export) and get back the same sheets with suggestion columns
@@ -4523,20 +4524,38 @@ https://example.com/page-2"></textarea>
         position: fixed;
         inset: 0;
         z-index: 10000;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        background: var(--bg)
+        gap: 16px;
+        background: linear-gradient(160deg, var(--brand-dark), var(--brand-light))
       }
 
       body.auth-pending #boot-spinner {
         display: flex
       }
 
+      .boot-mark {
+        width: 56px;
+        height: 56px;
+        border-radius: 16px;
+        background: var(--accent);
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, .3), 0 12px 30px rgba(0, 0, 0, .25);
+        display: grid;
+        place-items: center
+      }
+
+      .boot-title {
+        color: #fff;
+        font: 700 16px var(--font);
+        letter-spacing: .2px
+      }
+
       .boot-spin-circle {
-        width: 44px;
-        height: 44px;
-        border: 4px solid var(--border);
-        border-top-color: var(--accent);
+        width: 32px;
+        height: 32px;
+        border: 3px solid rgba(255, 255, 255, .3);
+        border-top-color: #fff;
         border-radius: 50%;
         animation: authspin .8s linear infinite
       }
@@ -4848,7 +4867,7 @@ https://example.com/page-2"></textarea>
         $('tbl-performance').style.display = m === 'performance' ? '' : 'none';
         $('tbl-indexing').style.display = m === 'indexing' ? '' : 'none';
         $('tbl-keywordvolume').style.display = m === 'keywordvolume' ? '' : 'none';
-        const titles = { ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Website Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SERanking Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GA4)', admin: 'Admin Panel' };
+        const titles = { ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Website Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SEranking/SEMrush Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GA4)', admin: 'Admin Panel' };
         const subs = {
           ranking: 'Find where your domain ranks on Google - across regions. It can have captcha so please use VPN on system as much possible.',
           index: 'Check if pages/backlinks are indexed on Google (it will use site:) - verify indexing status for up to 100 URLs at once.',
@@ -7140,7 +7159,7 @@ https://example.com/page-2"></textarea>
         { key: 'siteaudit', label: 'Website Audit' },
         { key: 'gsc', label: 'GSC Audit' }, { key: 'crawl', label: 'Crawl Tracker' },
         { key: 'brief', label: 'Brief Analysis' }, { key: 'wayback', label: 'Wayback Submitter' },
-        { key: 'seranking', label: 'SEranking Audit' }, { key: 'geo', label: 'GEO / AI Optimization' },
+        { key: 'seranking', label: 'SEranking/SEMrush Audit' }, { key: 'geo', label: 'GEO / AI Optimization' },
         { key: 'blogopt', label: 'Blog Optimization Suggestions' },
         { key: 'keywordvolume', label: 'Keyword Search Volume' }];
 

@@ -1,5 +1,5 @@
 {
-  "version": "4.11.8",
+  "version": "4.12.0",
   "files": [
     {
       "path": "da_checker.py",
@@ -33,7 +33,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "9e66d5816abe4f5de0069b2ce6a1c840628db145a5d49022c26b1e6e000dc037",
+      "hash": "749bc4d505a91e50f25c0ae04ad5bdc49d11aeb6d91a009d2e929acb9ac8a5c2",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -43,7 +43,7 @@
     },
     {
       "path": "static/manifest.webmanifest",
-      "hash": "d174076687c1f7b070782eb6c66bb4b563e94a0a95943d7513771647c9fb92fd",
+      "hash": "8590795157066cf4acd8e5e104ac39f2d263eace8e4d0c1389980d0e2aceaac2",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/manifest.webmanifest"
     },
     {
@@ -90,6 +90,16 @@
       "path": "static/icons/maskable-512.png",
       "hash": "40878d825dec49dca90ce8abb187c1b57127809a193085e37c826b34d961da54",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/icons/maskable-512.png"
+    },
+    {
+      "path": "static/icons/google.png",
+      "hash": "121e000cb67429bfeb6942a5b9ec9ae716035b2dd763daf4ceb418d197b5ada6",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/icons/google.png"
+    },
+    {
+      "path": "static/icons/gsc.png",
+      "hash": "e430c401f7a3054234b89a29638b6f31b1445770230a14c7a8deb67f82f72596",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/static/icons/gsc.png"
     },
     {
       "path": "scripts/capture_gsc.py",
@@ -143,7 +153,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "7484a1f6545591b42de073e8252dc0a8b7e2579c760ca41914cbe765b17be665",
+      "hash": "f8deae2fe3bd2002189ab257b69b3f0a62f205a5a88213fc67620e2ef3ebdc33",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {
