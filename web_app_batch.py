@@ -61,7 +61,13 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.11.7"
+APP_VERSION = "4.11.8"
+# auth.py has its own APP_VERSION constant (used for the version it reports to the
+# central login sheet's App_Version column) - keep it in sync with the real running
+# version here instead of maintaining two separately-bumped copies, which is exactly
+# how that constant went stale at "4.0" for a long stretch of real releases while this
+# one kept climbing through 4.9.x/4.10.x/4.11.x.
+auth.APP_VERSION = APP_VERSION
 
 # --------------------------------------------------------------------------- #
 # Paths

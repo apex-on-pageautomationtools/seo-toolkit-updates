@@ -38,6 +38,9 @@ def _config_file():
     return cf
 
 AUTH_FILE = _auth_file()
+# Default only - web_app_batch.py overwrites this with its own APP_VERSION right
+# after importing this module, so the real running version is always what actually
+# gets reported to the central login sheet's App_Version column.
 APP_VERSION = "4.0"
 SESSION_MAX_HOURS = 12   # a saved login stays valid this long, then re-login is required
 
