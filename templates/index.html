@@ -814,6 +814,119 @@
     }
 
     /* ===================== Status + progress ===================== */
+    /* ===================== Dashboard overview ===================== */
+    .ov-stats {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 22px
+    }
+
+    .ov-stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-md);
+      padding: 10px 18px;
+      min-width: 100px;
+      box-shadow: var(--shadow-sm)
+    }
+
+    .ov-stat-n {
+      font-size: 19px;
+      font-weight: 800;
+      line-height: 1.1
+    }
+
+    .ov-stat-l {
+      font-size: 10.5px;
+      color: var(--text-3);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      margin-top: 3px
+    }
+
+    .ov-group {
+      margin-bottom: 28px
+    }
+
+    .ov-group-t {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--text-3);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px
+    }
+
+    .ov-group-t::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--border)
+    }
+
+    .ov-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+      gap: 12px
+    }
+
+    .ov-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      padding: 16px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      cursor: pointer;
+      transition: border-color .12s, transform .12s, box-shadow .12s
+    }
+
+    .ov-card:hover {
+      border-color: var(--text-3);
+      box-shadow: var(--shadow-md, var(--shadow));
+      transform: translateY(-1px)
+    }
+
+    .ov-ic {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0
+    }
+
+    .ov-ic img {
+      width: 18px;
+      height: 18px
+    }
+
+    .ov-name {
+      font-size: 14px;
+      font-weight: 650;
+      margin-bottom: 3px
+    }
+
+    .ov-desc {
+      font-size: 12px;
+      color: var(--text-2);
+      line-height: 1.45
+    }
+
+    #shared-status-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      box-shadow: var(--shadow-sm);
+      padding: 16px 18px;
+      margin-bottom: 18px
+    }
+
     .statusbar {
       display: flex;
       align-items: center;
@@ -1690,6 +1803,16 @@
       </button>
     </div>
     <div class="sb-nav">
+      <button class="sb-item" id="tab-overview" data-tip="Dashboard" onclick="switchTab('overview')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <rect x="3" y="3" width="7" height="9" rx="1.5" />
+          <rect x="14" y="3" width="7" height="5" rx="1.5" />
+          <rect x="14" y="12" width="7" height="9" rx="1.5" />
+          <rect x="3" y="16" width="7" height="5" rx="1.5" />
+        </svg>
+        <span class="sb-label">Dashboard</span>
+      </button>
+      <div class="sb-sep"></div>
       <div class="sb-section-label">Rank &amp; Visibility</div>
       <button class="sb-item active" id="tab-ranking" data-tip="Google Rank Checker" onclick="switchTab('ranking')">
         <img src="/static/icons/google.png" alt="">
@@ -1880,8 +2003,109 @@
       <p id="page-sub">Find where your domain ranks on Google - across regions. It can have captcha so please use VPN on system as much possible.</p>
     </div>
 
+    <!-- ===================== DASHBOARD OVERVIEW ===================== -->
+    <div id="panel-overview" style="display:none">
+      <div class="ov-stats">
+        <div class="ov-stat"><div class="ov-stat-n">19</div><div class="ov-stat-l">Tools</div></div>
+        <div class="ov-stat"><div class="ov-stat-n">4</div><div class="ov-stat-l">Batch checkers</div></div>
+        <div class="ov-stat"><div class="ov-stat-n">v{{ version }}</div><div class="ov-stat-l">Version</div></div>
+      </div>
+
+      <div class="ov-group">
+        <div class="ov-group-t">Rank &amp; Visibility</div>
+        <div class="ov-grid">
+          <div class="ov-card" onclick="switchTab('ranking')">
+            <div class="ov-ic" style="background:rgba(255,90,31,.12)"><img src="/static/icons/google.png" alt=""></div>
+            <div><div class="ov-name">Google Rank Checker</div><div class="ov-desc">Track keyword positions on Google, with proxy rotation and CAPTCHA recovery.</div></div>
+          </div>
+          <div class="ov-card" onclick="switchTab('index')">
+            <div class="ov-ic" style="background:rgba(255,90,31,.12)"><img src="/static/icons/google.png" alt=""></div>
+            <div><div class="ov-name">Google Index Checker (site:)</div><div class="ov-desc">Verify which URLs are indexed by Google, up to 100 at once.</div></div>
+          </div>
+          <div class="ov-card" onclick="switchTab('count')">
+            <div class="ov-ic" style="background:rgba(255,90,31,.12)"><img src="/static/icons/google.png" alt=""></div>
+            <div><div class="ov-name">Google Search Results Count</div><div class="ov-desc">Get Google's total "About N results" number for each keyword.</div></div>
+          </div>
+          <div class="ov-card" onclick="switchTab('backlink')">
+            <div class="ov-ic" style="background:rgba(255,90,31,.12);color:var(--accent)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg></div>
+            <div><div class="ov-name">Backlink Status Checker</div><div class="ov-desc">Check if backlink pages are indexed and if links are dofollow/nofollow.</div></div>
+          </div>
+          <div class="ov-card" onclick="switchTab('crawl')">
+            <div class="ov-ic" style="background:rgba(255,90,31,.12)"><img src="/static/icons/gsc.png" alt=""></div>
+            <div><div class="ov-name">Crawl Date Tracker (by GSC)</div><div class="ov-desc">Check when Google last crawled your URLs via the URL Inspection API.</div></div>
+          </div>
+          <div class="ov-card" onclick="switchTab('indexing')">
+            <div class="ov-ic" style="background:rgba(255,90,31,.12)"><img src="/static/icons/gsc.png" alt=""></div>
+            <div><div class="ov-name">Submit for Indexing (by GSC)</div><div class="ov-desc">Shared-quota indexing submission with a real Search Console fallback.</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ov-group">
+        <div class="ov-group-t">Audits &amp; Reports</div>
+        <div class="ov-grid">
+          <div class="ov-card" onclick="switchTab('onpage')">
+            <div class="ov-ic" style="background:rgba(245,166,35,.14);color:var(--gold)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg></div>
+            <div><div class="ov-name">SEO On-Page Report</div><div class="ov-desc">Client-ready on-page reports across Hexa, Delta and other formats.</div></div>
+          </div>
+          <div class="ov-card" onclick="switchTab('gsc')">
+            <div class="ov-ic" style="background:rgba(245,166,35,.14)"><img src="/static/icons/gsc.png" alt=""></div>
+            <div><div class="ov-name">GSC Audit Report</div><div class="ov-desc">Search Console audit - sitemaps, indexing, performance, security. PPTX.</div></div>
+          </div>
+          <div class="ov-card" onclick="switchTab('health')">
+            <div class="ov-ic" style="background:rgba(245,166,35,.14);color:var(--gold)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2" /></svg></div>
+            <div><div class="ov-name">Health Audit Report</div><div class="ov-desc">Full website health checkup - Sucuri, robots, sitemap, PageSpeed and more.</div></div>
+          </div>
+          <div class="ov-card" onclick="switchTab('siteaudit')">
+            <div class="ov-ic" style="background:rgba(245,166,35,.14);color:var(--gold)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" /><polyline points="9 12 11 14 15 10" /></svg></div>
+            <div><div class="ov-name">Website Audit</div><div class="ov-desc">Whole-site crawl audit - broken links, thin content, redirect chains.</div></div>
+          </div>
+          <div class="ov-card" onclick="switchTab('performance')">
+            <div class="ov-ic" style="background:rgba(245,166,35,.14);color:var(--gold)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg></div>
+            <div><div class="ov-name">Performance Report</div><div class="ov-desc">Monthly deck from real GSC + GA4 data - real charts, not screenshots.</div></div>
+          </div>
+          <div class="ov-card" onclick="switchTab('seranking')">
+            <div class="ov-ic" style="background:rgba(245,166,35,.14);color:var(--gold)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><path d="M9 15l2 2 4-4" /></svg></div>
+            <div><div class="ov-name">SEranking/SEMrush Audit</div><div class="ov-desc">Turn a site-audit export into a suggestion-filled final workbook.</div></div>
+          </div>
+          <div class="ov-card" onclick="switchTab('brief')">
+            <div class="ov-ic" style="background:rgba(245,166,35,.14);color:var(--gold)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" /><rect x="9" y="3" width="6" height="4" rx="1" /></svg></div>
+            <div><div class="ov-name">Brief Analysis Report</div><div class="ov-desc">Quick SEO analysis - indexing, domain age, titles, meta, headers, images.</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ov-group">
+        <div class="ov-group-t">Content &amp; AI</div>
+        <div class="ov-grid">
+          <div class="ov-card" onclick="switchTab('geo')">
+            <div class="ov-ic" style="background:var(--surface-3);color:var(--text-2)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" /></svg></div>
+            <div><div class="ov-name">GEO/AI Optimization Suggestions</div><div class="ov-desc">Optimize content for citation by ChatGPT, Perplexity, AI Overviews.</div></div>
+          </div>
+          <div class="ov-card" onclick="switchTab('blogopt')">
+            <div class="ov-ic" style="background:var(--surface-3);color:var(--text-2)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z" /></svg></div>
+            <div><div class="ov-name">Blog Optimization Suggestions</div><div class="ov-desc">AI-generated internal links, alt text and JSON-LD for a live post.</div></div>
+          </div>
+          <div class="ov-card" onclick="switchTab('wayback')">
+            <div class="ov-ic" style="background:var(--surface-3);color:var(--text-2)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15.5 14" /></svg></div>
+            <div><div class="ov-name">Wayback Submission</div><div class="ov-desc">Submit URLs to the Wayback Machine for a fresh, dated archive snapshot.</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ov-group">
+        <div class="ov-group-t">Account</div>
+        <div class="ov-grid">
+          <div class="ov-card" onclick="switchTab('gscaccounts')">
+            <div class="ov-ic" style="background:var(--surface-3);color:var(--text-2)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4" /><path d="M4 21v-1a8 8 0 0 1 16 0v1" /></svg></div>
+            <div><div class="ov-name">Google Accounts (GSC-GA4)</div><div class="ov-desc">Connect Google accounts and manage sessions used across GSC-backed tools.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ===================== MAIN ===================== -->
-    <main class="wrap">
+    <main class="wrap" id="main-wrap">
 
       <!-- LEFT COLUMN -->
       <div class="col">
@@ -4830,6 +5054,8 @@ https://example.com/page-2"></textarea>
         document.querySelectorAll('.sb-item').forEach(t => t.classList.remove('active'));
         const tab = $('tab-' + m);
         if (tab) tab.classList.add('active');
+        $('panel-overview').style.display = m === 'overview' ? '' : 'none';
+        $('main-wrap').style.display = m === 'overview' ? 'none' : '';
         $('panel-ranking').style.display = m === 'ranking' ? '' : 'none';
         $('panel-index').style.display = m === 'index' ? '' : 'none';
         $('panel-count').style.display = m === 'count' ? '' : 'none';
@@ -4867,8 +5093,9 @@ https://example.com/page-2"></textarea>
         $('tbl-performance').style.display = m === 'performance' ? '' : 'none';
         $('tbl-indexing').style.display = m === 'indexing' ? '' : 'none';
         $('tbl-keywordvolume').style.display = m === 'keywordvolume' ? '' : 'none';
-        const titles = { ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Website Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SEranking/SEMrush Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GA4)', admin: 'Admin Panel' };
+        const titles = { overview: 'Dashboard', ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Website Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SEranking/SEMrush Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GA4)', admin: 'Admin Panel' };
         const subs = {
+          overview: 'An overview of every tool in SEO Toolkit Pro - pick one to get started.',
           ranking: 'Find where your domain ranks on Google - across regions. It can have captcha so please use VPN on system as much possible.',
           index: 'Check if pages/backlinks are indexed on Google (it will use site:) - verify indexing status for up to 100 URLs at once.',
           count: 'Get Google\'s total "About N results" number for each keyword - regional, CAPTCHA-resistant.',
@@ -4907,7 +5134,7 @@ https://example.com/page-2"></textarea>
         // report to show - the right-hand Results column has nothing to display
         // for it, so hide the whole column instead of showing an empty "Results"
         // header with nothing under it.
-        document.querySelector('.actionbar').style.display = (m === 'indexing' || m === 'gscaccounts') ? 'none' : '';
+        document.querySelector('.actionbar').style.display = (m === 'indexing' || m === 'gscaccounts' || m === 'overview') ? 'none' : '';
         $('right-col').style.display = m === 'gscaccounts' ? 'none' : '';
         if (m === 'admin') { admLoadUsers(); admLoadBuildings(); admLoadProxies(); admLoadCities(); admLoadConfig(); admLoadKeysStatus(); fetchActivityLog(); }
         if (m === 'crawl') { crawlLoadUrls(); }

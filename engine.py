@@ -1443,6 +1443,7 @@ def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logg
 
     # Extensions (Buster, VPN) + proxy-auth helper need a visible browser.
     ext_dirs = []
+    auth_ext_loaded = False
     if not headless:
         auth_ext = _build_proxy_auth_extension(proxy, logger)
         if auth_ext:
@@ -1451,6 +1452,7 @@ def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logg
                 with zipfile.ZipFile(auth_ext) as zf:
                     zf.extractall(outdir)
                 ext_dirs.append(outdir)
+                auth_ext_loaded = True
             except Exception as e:
                 logger(f"[proxy-auth] Could not unpack the auto-auth extension: {e}")
         elif proxy and proxy.get("user") and proxy.get("pass"):
@@ -1468,7 +1470,17 @@ def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logg
         # the (rare) Buster solve still works.
         args.append("--window-position=-32000,-32000")
 
-    if proxy and proxy.get("host") and proxy.get("port"):
+    # When the auth extension is loaded, it is the ONLY thing that sets the proxy
+    # (via chrome.proxy.settings.set in its own background script) - it must stay
+    # that way. Also passing --proxy-server here race-installs the proxy before the
+    # extension's background script has loaded and registered its onAuthRequired
+    # listener, so the very first proxied request can trip Chromium's native
+    # "Sign in to access this site" login dialog before the extension ever gets a
+    # chance to answer it automatically - confirmed real case: this dialog appearing
+    # despite the auto-auth extension being loaded and correctly configured.
+    # --proxy-server is only needed as a fallback when there's no extension to do
+    # the job (headless, or an anonymous proxy with no credentials to auto-fill).
+    if proxy and proxy.get("host") and proxy.get("port") and not auth_ext_loaded:
         ptype = proxy.get("type", "http")
         args.append(f"--proxy-server={ptype}://{proxy['host']}:{proxy['port']}")
     return args
