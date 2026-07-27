@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.15"
+APP_VERSION = "4.12.16"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1586,37 +1586,37 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
             _reanchor_locale(sess, country, lang)
             continue
 
-        # Small wait then log what's on page 1
-        time.sleep(2.5)
+        # Poll the SAME already-loaded page for organic links to appear, instead of
+        # gambling on a fixed sleep duration then giving up. A fixed wait (tried at
+        # 1s, then 2.5s+2.5s+4s) still produced false "0 links" reads live, on a
+        # page later screenshotted showing real, fully-rendered results - render
+        # time after a CAPTCHA-solve-and-resubmit cycle specifically varies too
+        # much to guess correctly with a static sleep. Polling adapts to however
+        # long THIS page actually takes, up to a generous ceiling, and - critically
+        # - never retypes/resubmits the query while polling, unlike the retry
+        # path below: repeatedly resubmitting the same search in quick succession
+        # is exactly the kind of traffic pattern that makes Google MORE likely to
+        # flag the session with a CAPTCHA, so avoiding that here (not just here for
+        # speed) directly reduces CAPTCHA risk rather than adding to it.
         links_page1, dbg = extract_organic(sess.driver, debug=True)
-
-        # If no links found, might be consent or empty - try accepting consent and retry
-        if not links_page1 and _try < CONFIG.get("max_block_retries", 3):
-            engine.accept_consent(sess.driver, add_log)
-            engine.accept_google_consent(sess.driver, add_log)
-            time.sleep(2.5)
+        poll_deadline = time.time() + 12.0
+        consent_tried = False
+        while not links_page1 and time.time() < poll_deadline:
+            time.sleep(1.5)
+            if not consent_tried:
+                engine.accept_consent(sess.driver, add_log)
+                engine.accept_google_consent(sess.driver, add_log)
+                consent_tried = True
             links_page1, dbg = extract_organic(sess.driver, debug=True)
-        # One more grace check with a longer wait before treating this as a real
-        # failure - confirmed live: right after a CAPTCHA-solve-and-resubmit cycle
-        # specifically, the page can take noticeably longer than a normal fresh
-        # load to render (an extra redirect/reload from the solve itself), and the
-        # two quick checks above came back empty on a page screenshotted moments
-        # later showing real, fully-loaded results - the checks were just too
-        # early, not evidence of an actual block. Costly to skip this: the
-        # alternative is a full retry+recovery cycle (cooldown, proxy rotation)
-        # for a keyword that never actually failed.
-        if not links_page1 and _try < CONFIG.get("max_block_retries", 3):
-            time.sleep(4.0)
-            links_page1, dbg = extract_organic(sess.driver, debug=True)
-        # A page-1 load that STILL comes back with zero organic links after that
-        # retry means classify_page() likely mis-called this "ok" on a weak/generic
-        # marker (e.g. a bare id="search" div present on non-SERP variants too),
-        # even though the real results container (#rso) never rendered - confirmed
-        # live case: h3=0 jsname=0 zReHs=0 rso=False, yet classify_page still
-        # returned "ok" and this search was reported as a confident "not found"
-        # when Google never actually served real results at all. Retry the whole
-        # keyword from scratch first (same as a recognized block/captcha does)
-        # rather than trusting a page that produced nothing.
+        # A page-1 load that STILL comes back with zero organic links after a full
+        # 12-second poll means classify_page() likely mis-called this "ok" on a
+        # weak/generic marker (e.g. a bare id="search" div present on non-SERP
+        # variants too), even though the real results container (#rso) never
+        # rendered - confirmed live case: h3=0 jsname=0 zReHs=0 rso=False, yet
+        # classify_page still returned "ok" and this search was reported as a
+        # confident "not found" when Google never actually served real results at
+        # all. Restart the whole keyword from scratch first (same as a recognized
+        # block/captcha does) rather than trusting a page that produced nothing.
         if not links_page1 and _try < CONFIG.get("max_block_retries", 3):
             add_log(f"'{keyword}': page 1 still has 0 organic links after retry - "
                     f"restarting keyword from page 1 (retry {_try + 1}/{CONFIG.get('max_block_retries', 3)})")
