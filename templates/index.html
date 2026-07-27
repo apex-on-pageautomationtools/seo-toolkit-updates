@@ -3454,6 +3454,7 @@ https://example.com/page-2"></textarea>
               <span class="badge b-idle" id="badge"><span class="dot d-idle" id="dot"></span><span
                   id="status-txt">Idle</span></span>
               <span class="count-chip" id="count">0 results</span>
+              <span class="count-chip" id="top-elapsed" style="display:none"></span>
               <button class="btn btn-tonal btn-sm" id="btn-export" onclick="exportCSV()" disabled
                 style="margin-left:auto">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
@@ -5208,6 +5209,7 @@ https://example.com/page-2"></textarea>
           $('badge').className = 'badge b-idle'; $('dot').className = 'dot d-idle';
           $('status-txt').textContent = 'Idle';
           $('prog').style.width = '0%'; $('prog-lbl').innerHTML = '0 / 0<span id="prog-elapsed" style="opacity:.65;margin-left:8px"></span>';
+          $('top-elapsed').style.display = 'none';
         }
         // The shared #log box is written into directly by several tools (Crawl Tracker,
         // the 4 batch checkers) - clear it on every switch, not just for batch tools, or
@@ -5894,6 +5896,9 @@ https://example.com/page-2"></textarea>
         $('prog').style.width = pct + '%';
         $('prog-lbl').firstChild.textContent = cur + ' / ' + tot;
         $('prog-elapsed').textContent = elapsed ? ('· ' + _fmtElapsed(elapsed)) : '';
+        const topEl = $('top-elapsed');
+        if (elapsed) { topEl.textContent = 'Elapsed: ' + _fmtElapsed(elapsed); topEl.style.display = ''; }
+        else { topEl.style.display = 'none'; }
         $('cur-kw').textContent = (kw && cur > 0 && cur <= tot) ? 'Checking: "' + kw + '"' : '';
       }
       const _modeState = { ranking: 'idle', index: 'idle', count: 'idle', backlink: 'idle', onpage: 'idle', health: 'idle', gsc: 'idle', crawl: 'idle', brief: 'idle', wayback: 'idle', seranking: 'idle', geo: 'idle', performance: 'idle', keywordvolume: 'idle', admin: 'idle' };

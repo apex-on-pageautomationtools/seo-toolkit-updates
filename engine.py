@@ -2129,9 +2129,22 @@ def _get_organic_links(src):
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(src, "html.parser")
 
-    # Remove ads and non-organic blocks
+    # Remove ads and non-organic blocks. NOTE: ".kp-wholepage" used to be
+    # decomposed here on the assumption it's always a non-organic side
+    # Knowledge Panel - but for local-business/branded queries (e.g. "313
+    # Movers") Google renders the ENTIRE real organic result list (genuine
+    # .yuRUbf/h3/jsname="UWckNb" cards, same markup as a normal SERP) nested
+    # INSIDE a "kp-wholepage kp-wholepage-osrp" wrapper. Decomposing it wiped
+    # out real #1 rankings outright (confirmed live: a page with a real,
+    # fully-rendered position-1 result was reported as "0 organic links",
+    # and on a later run the same page's genuine position-1/2/3 entries were
+    # skipped entirely, causing a deeper unrelated page to be misreported as
+    # position 4). The existing _near_h3() requirement on strategies 1-2
+    # already filters out true non-organic Knowledge Panel widgets (info
+    # card, map, "People also search for" chips etc. don't sit on/near an
+    # <h3>), so it's safe to stop blanket-removing this container.
     for sel in ["#tads", "#tadsb", ".ads-ad", "#botstuff", "#rhs",
-                ".kp-wholepage", ".kp-blk", "g-scrolling-carousel"]:
+                ".kp-blk", "g-scrolling-carousel"]:
         for el in soup.select(sel):
             el.decompose()
 
