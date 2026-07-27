@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.13"
+APP_VERSION = "4.12.14"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -2890,7 +2890,7 @@ def _mark_proxy_used_async(pick):
 
 
 def _proxies_from_request(data, country=None):
-    proxies = list(CONFIG.get("proxies", []))
+    proxies = []
     ph = (data.get("proxy_host") or "").strip()
     pp = (data.get("proxy_port") or "").strip()
     if ph and pp:
@@ -2898,15 +2898,17 @@ def _proxies_from_request(data, country=None):
             "type": data.get("proxy_type", "http"), "host": ph, "port": pp,
             "user": (data.get("proxy_user") or "").strip(),
             "pass": (data.get("proxy_pass") or "").strip()})
-    # Silent auto-pick from the shared proxy pool is disabled for now - the proxy
-    # login popup issue has not been resolved despite three separate fix attempts
-    # (auto-auth extension, --proxy-server/extension conflict fix, local relay),
-    # and a proxy being silently swapped in behind the scenes (with no explicit
-    # user action for that specific run) made failures hard to correlate with a
-    # cause. Per explicit instruction: disable it until proxy auth is confirmed
-    # reliably working, rather than keep shipping unverified fixes. Proxies
-    # explicitly entered in a tool's own Proxy/VPN field, or configured directly
-    # in CONFIG["proxies"], still work as before - only this silent auto-pick is off.
+    # Every automatic/silent proxy source is disabled for now, per explicit
+    # instruction - a proxy should only ever be used when someone explicitly
+    # types one into a tool's own Proxy/VPN field for that specific run.
+    # Previously this ALSO silently included CONFIG["proxies"] (a persistent
+    # admin-set list) unconditionally on every request - confirmed live: a run
+    # used a real proxy even with the tool's own Proxy/VPN field completely
+    # empty, traced back to this line, not the (already-disabled) shared-pool
+    # auto-pick. Explicitly configuring a proxy in a tool's own field, per run,
+    # is still fully supported and works correctly (verified live: pre-flight
+    # check, local auth relay, and the real proxied search all worked with no
+    # login popup) - only silent/automatic sources are off.
     return proxies
 
 # --------------------------------------------------------------------------- #
