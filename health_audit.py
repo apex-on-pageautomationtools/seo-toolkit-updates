@@ -639,6 +639,25 @@ def check_robots_txt(domain):
             "has_sitemap_ref": has_sitemap, "has_disallow": has_disallow, "lines": line_count}
 
 
+def _sitemap_loc_urls(content, _depth=0):
+    """All <loc> URLs from a sitemap body - follows <sitemapindex> sub-sitemaps
+    (depth-capped at 2) so target-page coverage checks see the full site, not
+    just the index page itself."""
+    urls = set(re.findall(r'<loc>\s*(.*?)\s*</loc>', content, re.I))
+    if _depth >= 2 or "<sitemapindex" not in content:
+        return urls
+    locs = set()
+    for sub_url in list(urls)[:15]:
+        try:
+            req = _ur.Request(sub_url, headers={"User-Agent": _UA})
+            with _ur.urlopen(req, timeout=15) as r:
+                sub_content = r.read().decode("utf-8", "ignore")
+            locs |= _sitemap_loc_urls(sub_content, _depth + 1)
+        except Exception:
+            continue
+    return locs
+
+
 def check_sitemap(domain, robots_data=None):
     """Fetch and validate the sitemap. Tries /sitemap.xml then /sitemap_index.xml
     (many sites - e.g. Yoast - expose only a sitemap index). `robots_data` is
@@ -702,7 +721,8 @@ def check_sitemap(domain, robots_data=None):
         else:
             summary = f"Sitemap found with {url_count} URL(s)."
         return {"ok": True, "status": code, "summary": summary,
-                "url_count": url_count, "is_index": is_index, "url": url}
+                "url_count": url_count, "is_index": is_index, "url": url,
+                "loc_urls": _sitemap_loc_urls(content)}
     return last
 
 
@@ -1422,6 +1442,18 @@ def prepare_health_data(domain, captured=None, target_pages=None, log_fn=None, p
         robots = fut_robots.result()
         sitemap = fut_sitemap.result()
         s200 = fut_s200.result()
+
+    # Cross-check THIS report's target pages against the sitemap's actual <loc>
+    # list (not just whether a sitemap.xml exists) - mirrors the same check in
+    # the On-Page Phase 2 report generator.
+    if sitemap.get("ok") and target_pages and sitemap.get("loc_urls"):
+        loc_set = {u.rstrip("/") for u in sitemap["loc_urls"]}
+        missing_pages = [p for p in target_pages if p.rstrip("/") not in loc_set]
+        if missing_pages:
+            statuses = captured.setdefault("_statuses", {})
+            statuses["sitemap"] = (
+                f"{len(missing_pages)} of {len(target_pages)} target page(s) for this "
+                f"report are missing from the sitemap: {', '.join(missing_pages)}")
 
     _prog("Running canonical check...")
     canon = check_canonical(target_pages, domain, driver=driver)

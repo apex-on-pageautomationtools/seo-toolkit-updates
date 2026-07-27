@@ -265,7 +265,16 @@ def normalize_url(url, domain):
     if not url:
         return ""
     if not url.startswith("http"):
-        url = site_root(domain) + "/" + url.lstrip("/")
+        bare = url.lstrip("/")
+        dom = safe_domain(domain)
+        # A bare domain (or a domain already followed by its own path) typed with no
+        # scheme, e.g. "hartley88.com" meaning "the homepage" - prepending site_root
+        # on top would double the domain into its own path segment
+        # (".../hartley88.com/hartley88.com"). Just add the scheme instead.
+        if bare == dom or bare.startswith(dom + "/") or bare.startswith("www." + dom):
+            url = "https://" + bare
+        else:
+            url = site_root(domain) + "/" + bare
     return url.rstrip()
 
 
@@ -1930,6 +1939,20 @@ def verify_sitemap_coverage(sitemap_body, target_pages):
     for page in target_pages:
         (covered if page.rstrip("/") in sitemap_urls else missing).append(page)
     return covered, missing
+
+
+def _sitemap_missing_suffix(findings):
+    """Extra sentence to append to a format's 'sitemap found' message when one or
+    more of THIS report's target pages aren't actually listed in it. Empty string
+    when the sitemap wasn't found (that branch already says so) or every target
+    page is covered - so existing fully-covered reports render byte-identical."""
+    missing = findings.get("sitemap_missing_pages") or []
+    if not missing:
+        return ""
+    covered = findings.get("sitemap_covered_pages") or []
+    total = len(covered) + len(missing)
+    return (f" However, {len(missing)} of the {total} target page(s) for this report "
+            f"are missing from the sitemap: {', '.join(missing)}")
 
 
 def _xml_escape(s):
@@ -3796,6 +3819,9 @@ def _build_docx_omega(domain, pages_data, findings, captured, brand, out_path):
              bold=False, color=BLACK, size=12)
         _run(p, "Reference URL: ", bold=True, color=BLACK, size=12)
         _run(p, findings.get("sitemap_url") or (root + "/sitemap.xml"), bold=False, color=BLACK, size=12)
+        _sm_missing = _sitemap_missing_suffix(findings)
+        if _sm_missing:
+            _run(p, _sm_missing, bold=False, color=BLACK, size=12)
         h["shot"]("sitemap", captured)
     else:
         result("Result", ": Sitemap.xml file not found on the website. Please create and upload a "
@@ -4258,6 +4284,9 @@ def _build_docx_neon(domain, pages_data, findings, captured, brand, out_path):
         p.paragraph_format.space_after = Pt(2)
         _run(p, "Reference URL: ", bold=True, color=BLACK, size=12)
         _run(p, findings.get("sitemap_url") or (root + "/sitemap.xml"), bold=False, color=BLACK, size=12)
+        _sm_missing = _sitemap_missing_suffix(findings)
+        if _sm_missing:
+            _run(p, _sm_missing, bold=False, color=BLACK, size=12)
         h["shot"]("sitemap", captured)
     else:
         result("Result:", " Sitemap.xml file not found on the website. Please create and upload a "
@@ -4485,7 +4514,7 @@ def _build_docx_xenon(domain, pages_data, findings, captured, brand, out_path):
          "structure. Crawlers such as Googlebot read this file to crawl the site more intelligently.")
     if findings.get("sitemap_found"):
         badge(True, "The existing sitemap.xml is optimized and contains the target pages. This is good "
-                    "for SEO.")
+                    "for SEO." + _sitemap_missing_suffix(findings))
         h["shot"]("sitemap", captured)
     else:
         badge(False, "No sitemap.xml file was found on the website. Please create one and upload it to "
@@ -4787,7 +4816,7 @@ def _build_docx_gamma(domain, pages_data, findings, captured, brand, out_path):
                 "discover and index your content efficiently. It's crucial for both user navigation "
                 "and SEO.")
     if findings.get("sitemap_found"):
-        conclusion("An optimized sitemap file is found on the website. It's good from an SEO point of view.")
+        conclusion("An optimized sitemap file is found on the website. It's good from an SEO point of view." + _sitemap_missing_suffix(findings))
         h["shot"]("sitemap", captured)
     else:
         conclusion("A sitemap file was not found on the website. Please create and upload a sitemap.xml "
@@ -5246,7 +5275,7 @@ def _build_docx_deltafl(domain, pages_data, findings, captured, brand, out_path)
          "and other search engines about the organization of your site content.")
     if findings.get("sitemap_found"):
         result("Optimized sitemap.xml file found on the website. It's good from a search engine "
-               "point of view.")
+               "point of view." + _sitemap_missing_suffix(findings))
         refurl(findings.get("sitemap_url") or (root + "/sitemap.xml"))
     else:
         result("Sitemap.xml file not found on the website. Please create and upload a sitemap.xml "
@@ -5501,7 +5530,7 @@ def _build_docx_deltafvr(domain, pages_data, findings, captured, brand, out_path
                               "engines) which pages on your site to crawl.")
     if findings.get("sitemap_found"):
         status("Optimized sitemap.xml file found in website. It's good from a search engine point of "
-               "view.")
+               "view." + _sitemap_missing_suffix(findings))
     else:
         status("Sitemap.xml file not found on the website. We recommend creating and submitting one.",
                color=RED)
@@ -5740,7 +5769,7 @@ def _build_docx_deltaup(domain, pages_data, findings, captured, brand, out_path)
     body("Sitemap: A sitemap is a file where you can list the web pages of your site to tell Google "
          "and other search engines about the organization of your site content.")
     if findings.get("sitemap_found"):
-        result("Existing sitemap.xml file is optimized, which is good from an SEO point of view.")
+        result("Existing sitemap.xml file is optimized, which is good from an SEO point of view." + _sitemap_missing_suffix(findings))
         refurl(findings.get("sitemap_url") or (root + "/sitemap.xml"))
     else:
         result("Sitemap.xml file not found on the website. Please create and upload one to the root "
@@ -5992,7 +6021,7 @@ def _build_docx_octal(domain, pages_data, findings, captured, brand, out_path):
     label_arrow("XML Sitemap", "A sitemap is a blueprint of your website that helps search engines "
                                "find, crawl, and index all of its content.")
     if findings.get("sitemap_found"):
-        status("We found a sitemap file on the website, which is good from an SEO point of view.")
+        status("We found a sitemap file on the website, which is good from an SEO point of view." + _sitemap_missing_suffix(findings))
     else:
         status("No sitemap file was found on the website. We recommend creating and submitting one.")
     shot("sitemap")
@@ -6218,7 +6247,7 @@ def _build_docx_camila(domain, pages_data, findings, captured, brand, out_path):
          "engine can use it to find out what content is available and how frequently it's updated.")
     if findings.get("sitemap_found"):
         result("We checked the sitemap file on the website and found it optimized, which is good "
-               "from an SEO point of view.")
+               "from an SEO point of view." + _sitemap_missing_suffix(findings))
     else:
         result("We checked the sitemap file on the website and we couldn't find a sitemap on the "
                "website. Please create and upload one.")
@@ -6461,7 +6490,7 @@ def _build_docx_alpha(domain, pages_data, findings, captured, brand, out_path):
          "engine can use it to find out what content is available.")
     if findings.get("sitemap_found"):
         result("Sitemap.xml file found in the website & it is optimized. It is good from SEO point "
-               "of view.")
+               "of view." + _sitemap_missing_suffix(findings))
     else:
         result("Sitemap.xml file not found on the website. Please create and upload one.")
     shot("sitemap")
@@ -6729,7 +6758,7 @@ def _build_docx_eta(domain, pages_data, findings, captured, brand, out_path):
          "Google and other search engines about the organization of your site content.")
     if findings.get("sitemap_found"):
         result("Optimized sitemap.xml file found in your website. It is good from a search engine "
-               "point of view.")
+               "point of view." + _sitemap_missing_suffix(findings))
     else:
         result("Sitemap.xml file not found on the website. Please create and upload one.")
     shot("sitemap")
@@ -7026,7 +7055,7 @@ def _build_docx_kappa(domain, pages_data, findings, captured, brand, out_path):
     body("Sitemap: An XML sitemap is specifically written for search engine spiders.")
     if findings.get("sitemap_found"):
         result("Sitemap file is present on the website. It is good from search engine point of "
-               "view.")
+               "view." + _sitemap_missing_suffix(findings))
     else:
         result("Sitemap file not found on the website. Please create and upload one.")
     shot("sitemap")
@@ -7346,7 +7375,7 @@ def _build_docx_peta(domain, pages_data, findings, captured, brand, out_path):
          "engines can find and crawl them.")
     if findings.get("sitemap_found"):
         body("Optimized XML Sitemap found on the website. It's good from a search engine point of "
-             f"view. ({findings.get('sitemap_url', '')})")
+             f"view. ({findings.get('sitemap_url', '')})" + _sitemap_missing_suffix(findings))
     else:
         body("We did not find an XML Sitemap on the website. We recommend creating and submitting "
              "one via Google Search Console.")
@@ -7712,6 +7741,9 @@ def _build_docx_sara(domain, pages_data, findings, captured, brand, out_path):
         p.paragraph_format.space_after = Pt(2)
         _run(p, "Reference URL: ", bold=True, color=BLACK, size=12)
         _run(p, findings.get("sitemap_url") or (root + "/sitemap.xml"), bold=False, color=BLACK, size=12)
+        _sm_missing = _sitemap_missing_suffix(findings)
+        if _sm_missing:
+            _run(p, _sm_missing, bold=False, color=BLACK, size=12)
         h["shot"]("sitemap", captured)
     else:
         result("Result:", " Sitemap.xml file not found on the website. Please create and upload a "
@@ -7916,7 +7948,7 @@ def _build_docx_theta(domain, pages_data, findings, captured, brand, out_path):
     banner("Website XML Site Map Optimization")
     if findings.get("sitemap_found"):
         body("sitemap.xml file found in your website. It is good from search engine "
-             "point of view.")
+             "point of view." + _sitemap_missing_suffix(findings))
     else:
         body("sitemap.xml file not found in your website. An optimized sitemap file has "
              "been prepared for your website - please add it to the website's root "
@@ -8115,7 +8147,7 @@ def _build_docx_sigma(domain, pages_data, findings, captured, brand, out_path):
     section("Sitemap.xml Suggestion")
     if findings.get("sitemap_found"):
         label("Sitemap Url", findings.get("sitemap_url") or (root + "/sitemap.xml"))
-        label("Sitemap Status", "Found and accessible.")
+        label("Sitemap Status", "Found and accessible." + _sitemap_missing_suffix(findings))
     else:
         label("Sitemap Url", "Not found.")
         label("Sitemap Status", "Please create and upload a sitemap.xml file.")
@@ -8370,7 +8402,7 @@ def _build_docx_hexaup(domain, pages_data, findings, captured, brand, out_path):
          "performance.")
     if findings.get("sitemap_found"):
         lead("Suggestions– ", "Sitemap file found on the website and appears correctly "
-             "configured. This is good from an SEO point of view.")
+             "configured. This is good from an SEO point of view." + _sitemap_missing_suffix(findings))
         p = doc.add_paragraph()
         _run(p, findings.get("sitemap_url") or (root + "/sitemap.xml"), bold=True)
     else:
@@ -8789,7 +8821,7 @@ def _build_docx_hexafvr(domain, pages_data, findings, captured, brand, out_path)
     findings_heading()
     if findings.get("sitemap_found"):
         body("An optimized XML sitemap file is present on the website. For now, no need changes "
-             "in it.")
+             "in it." + _sitemap_missing_suffix(findings))
         p = doc.add_paragraph()
         _run(p, findings.get("sitemap_url") or (root + "/sitemap.xml"), bold=True)
     else:
