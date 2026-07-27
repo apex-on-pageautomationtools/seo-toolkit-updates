@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.17"
+APP_VERSION = "4.12.18"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -3588,10 +3588,18 @@ def _parse_target_line(line):
         page, kw_fields = parts[0], parts[1:]
 
     # A trailing lone field that's purely a ranking value (e.g. a separate Ranking
-    # column, not a "keyword:12" suffix) applies to the single preceding keyword field.
-    if len(kw_fields) >= 2 and _looks_like_rank(kw_fields[-1]) and "," not in kw_fields[-2]:
+    # column, not a "keyword:12" suffix) applies to the single preceding keyword
+    # field - but when that preceding field is ALREADY a comma-joined list of
+    # several keywords, there's no single keyword to attribute one rank value to,
+    # so just discard it (pop without reattaching) rather than leave it in
+    # kw_fields, where it would otherwise fall through the loop below and get
+    # parsed as its own bogus keyword - confirmed live: a row with keywords
+    # "Jobs In Australia, Casual Aged Care Jobs Australia" plus a trailing
+    # Ranking-column "0" produced a fake third keyword literally named "0".
+    if len(kw_fields) >= 2 and _looks_like_rank(kw_fields[-1]):
         rank_tok = kw_fields.pop()
-        kw_fields[-1] = f"{kw_fields[-1]}:{rank_tok}"
+        if "," not in kw_fields[-1]:
+            kw_fields[-1] = f"{kw_fields[-1]}:{rank_tok}"
 
     keywords, ranks = [], {}
     for kf in kw_fields:
