@@ -2,8 +2,8 @@
 ; Download Inno Setup from: https://jrsoftware.org/isdl.php
 
 #define MyAppName "SEO Toolkit Pro"
-#define MyAppVersion "4.12.10"
-#define MyAppPublisher "Vishal Chhipa"
+#define MyAppVersion "4.12.11"
+#define MyAppPublisher "Vishal Chhipa (Apex Web Cube)"
 #define MyAppExeName "Start Tool.vbs"
 
 [Setup]

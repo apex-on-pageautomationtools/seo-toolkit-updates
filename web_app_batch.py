@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.10"
+APP_VERSION = "4.12.11"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -2833,24 +2833,15 @@ def _proxies_from_request(data, country=None):
             "type": data.get("proxy_type", "http"), "host": ph, "port": pp,
             "user": (data.get("proxy_user") or "").strip(),
             "pass": (data.get("proxy_pass") or "").strip()})
-    if not proxies:
-        shared = _shared_proxies()
-        if shared:
-            matched = [p for p in shared if _region_matches_country(p.get("region", ""), country)]
-            pick = None
-            if matched and random.random() < SHARED_PROXY_USE_CHANCE_MATCHED:
-                pick = _least_recently_used(matched)
-                add_log(f"Using a shared {(country or '').upper()}-region proxy for this run "
-                        f"(geo-matched, least-recently-used - protects the office IP, keeps results "
-                        f"consistent, and spreads load across the pool so no single static-IP proxy "
-                        f"gets hit by everyone at once).")
-            elif random.random() < SHARED_PROXY_USE_CHANCE:
-                pick = _least_recently_used(shared)
-                add_log("Using a shared proxy for this run (occasional rotation to protect the office IP).")
-            if pick:
-                proxies = [{"type": pick.get("type", "http"), "host": pick["host"], "port": pick["port"],
-                            "user": pick.get("user", ""), "pass": pick.get("pass", "")}]
-                _mark_proxy_used_async(pick)
+    # Silent auto-pick from the shared proxy pool is disabled for now - the proxy
+    # login popup issue has not been resolved despite three separate fix attempts
+    # (auto-auth extension, --proxy-server/extension conflict fix, local relay),
+    # and a proxy being silently swapped in behind the scenes (with no explicit
+    # user action for that specific run) made failures hard to correlate with a
+    # cause. Per explicit instruction: disable it until proxy auth is confirmed
+    # reliably working, rather than keep shipping unverified fixes. Proxies
+    # explicitly entered in a tool's own Proxy/VPN field, or configured directly
+    # in CONFIG["proxies"], still work as before - only this silent auto-pick is off.
     return proxies
 
 # --------------------------------------------------------------------------- #
