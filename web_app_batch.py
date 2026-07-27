@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.14"
+APP_VERSION = "4.12.15"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1587,14 +1587,26 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
             continue
 
         # Small wait then log what's on page 1
-        time.sleep(1.0)
+        time.sleep(2.5)
         links_page1, dbg = extract_organic(sess.driver, debug=True)
 
         # If no links found, might be consent or empty - try accepting consent and retry
         if not links_page1 and _try < CONFIG.get("max_block_retries", 3):
             engine.accept_consent(sess.driver, add_log)
             engine.accept_google_consent(sess.driver, add_log)
-            time.sleep(1)
+            time.sleep(2.5)
+            links_page1, dbg = extract_organic(sess.driver, debug=True)
+        # One more grace check with a longer wait before treating this as a real
+        # failure - confirmed live: right after a CAPTCHA-solve-and-resubmit cycle
+        # specifically, the page can take noticeably longer than a normal fresh
+        # load to render (an extra redirect/reload from the solve itself), and the
+        # two quick checks above came back empty on a page screenshotted moments
+        # later showing real, fully-loaded results - the checks were just too
+        # early, not evidence of an actual block. Costly to skip this: the
+        # alternative is a full retry+recovery cycle (cooldown, proxy rotation)
+        # for a keyword that never actually failed.
+        if not links_page1 and _try < CONFIG.get("max_block_retries", 3):
+            time.sleep(4.0)
             links_page1, dbg = extract_organic(sess.driver, debug=True)
         # A page-1 load that STILL comes back with zero organic links after that
         # retry means classify_page() likely mis-called this "ok" on a weak/generic
