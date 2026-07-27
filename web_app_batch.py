@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.11"
+APP_VERSION = "4.12.12"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -930,6 +930,32 @@ def solve_with_buster(driver, max_attempts=1):
     add_log("Buster could not solve.")
     return False
 
+def _kill_stale_profile_processes(profile_dir):
+    """Kill any msedge.exe/msedgedriver.exe/chrome.exe/chromedriver.exe process
+    already running against this exact profile directory before launching a new
+    one. Chromium's SingletonLock means a new launch against a profile that's
+    still held open by an orphaned process (one that never reached driver.quit()
+    - e.g. a crashed run, or the app being force-closed mid-session) silently
+    ATTACHES to that existing process/window instead of starting fresh, which
+    means brand new command-line flags (like --proxy-server pointing at the
+    local auth relay) are never actually applied - the stale window just keeps
+    using whatever it was originally launched with. Matches on the profile path
+    specifically (not a blanket kill of every browser process), so this can't
+    touch the user's own separate, unrelated browser windows."""
+    try:
+        norm = os.path.normpath(profile_dir).replace("'", "''")
+        ps = (
+            "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' or Name='msedgedriver.exe' "
+            "or Name='chrome.exe' or Name='chromedriver.exe'\" | "
+            f"Where-Object {{ $_.CommandLine -like '*{norm}*' }} | "
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+        )
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                        capture_output=True, timeout=15)
+    except Exception:
+        pass
+
+
 # --------------------------------------------------------------------------- #
 # Session holder (driver + identity rotation)
 # --------------------------------------------------------------------------- #
@@ -970,6 +996,7 @@ class Session:
     def start(self, rotate=False, force_no_proxy=False):
         self.quit()
         self.profile = mode_profile(self.profile_key) if self.profile_key else pick_profile()
+        _kill_stale_profile_processes(self.profile)
         add_log(f"Using profile: {os.path.basename(self.profile)}")
 
         # Every install is based in India - if the system's own current exit IP is
