@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.12"
+APP_VERSION = "4.12.13"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -956,6 +956,43 @@ def _kill_stale_profile_processes(profile_dir):
         pass
 
 
+def _clear_stale_proxy_preference(profile_dir):
+    """Strip any leftover "proxy" key from this profile's saved Preferences (and
+    Secure Preferences) files before launch.
+
+    Root cause found live: the OLD proxy-auth extension (replaced by
+    start_local_proxy_relay) called chrome.proxy.settings.set({..., scope:
+    "regular"}), which Chromium writes PERMANENTLY into the profile's own
+    Preferences file - not just for that one session. That setting survives
+    forever afterward, regardless of what --proxy-server flag (or lack of one)
+    a later launch passes, and is completely untouched by clearing cache/
+    cookies (that's browsing data, not saved preferences) or by any app/OTA
+    update (profile directories are local browser data, never something an
+    update touches). Confirmed as the actual cause of a proxy login popup
+    persisting on RUNS THAT PASSED NO PROXY AT ALL - live process-inspection
+    proved the launched browser's command line had no --proxy-server flag,
+    yet the popup still appeared, which only a preference baked into the
+    profile itself (from an EARLIER session, back when the old extension
+    was still in use) can explain. Confirmed happening across multiple
+    users' machines, consistent with everyone who ran a Rank Checker session
+    during that older code's lifetime having it silently written into their
+    own local profile - something no code update could ever retroactively
+    clear on its own."""
+    for fname in ("Preferences", "Secure Preferences"):
+        path = os.path.join(profile_dir, "Default", fname)
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                prefs = json.load(f)
+            if "proxy" in prefs:
+                del prefs["proxy"]
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(prefs, f)
+        except Exception:
+            pass
+
+
 # --------------------------------------------------------------------------- #
 # Session holder (driver + identity rotation)
 # --------------------------------------------------------------------------- #
@@ -997,6 +1034,7 @@ class Session:
         self.quit()
         self.profile = mode_profile(self.profile_key) if self.profile_key else pick_profile()
         _kill_stale_profile_processes(self.profile)
+        _clear_stale_proxy_preference(self.profile)
         add_log(f"Using profile: {os.path.basename(self.profile)}")
 
         # Every install is based in India - if the system's own current exit IP is
