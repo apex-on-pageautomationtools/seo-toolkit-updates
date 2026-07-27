@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.16"
+APP_VERSION = "4.12.17"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -659,11 +659,18 @@ def _click_buster_button(driver):
     return _click_in_bframe(driver, ["#solver-button", ".help-button-holder button",
                                      "[id*='solver']", "[class*='solver']"])
 
-def _click_audio_and_buster(driver):
+def _click_audio_and_buster(driver, skip_image_reload=False):
     """Recovery when Buster/audio keeps failing: FIRST toggle to the IMAGE challenge
     (the image / 'eye' button) and reload it a couple of times - this clears the audio
     'automated queries' rate-limit - THEN switch to a fresh AUDIO challenge and click
-    Buster (which solves audio). Image-reload → audio → Buster is what gets it unstuck."""
+    Buster (which solves audio). Image-reload → audio → Buster is what gets it unstuck.
+
+    skip_image_reload=True skips step 1 and goes straight to switching to audio -
+    used for the first, direct attempt (see solve_with_buster), since the image-
+    reload dance is itself extra interaction with Google's challenge system (2
+    reloads + a challenge-type switch) on every single CAPTCHA if always run
+    unconditionally - reserved as a fallback for when a direct audio attempt
+    genuinely needs the rate-limit reset, not spent on every CAPTCHA regardless."""
     from selenium.webdriver.common.by import By
     from selenium.webdriver.common.action_chains import ActionChains
     try:
@@ -691,15 +698,19 @@ def _click_audio_and_buster(driver):
                 return True
             return False
 
-        # 1) Switch to the IMAGE challenge (the image / "eye" button) and reload it 2x.
-        #    Reloading the image challenge resets the audio rate-limit for the next step.
-        _click(["#recaptcha-image-button", "button[id*='image']", "button[title*='image']"],
-               "Switched to the image challenge (eye)")
-        time.sleep(1.5)
-        for _ in range(2):
-            if _click(["#recaptcha-reload-button", ".reload-button-holder button",
-                       "button[id*='reload']"], "Reloaded the challenge"):
-                time.sleep(1.5)
+        # 1) Switch to the IMAGE challenge (the image / "eye" button) and reload it,
+        #    also trying a verify/skip button if reCAPTCHA offers one instead of a
+        #    plain reload (e.g. when it can't find matching images) - either clears
+        #    the audio rate-limit for the next step.
+        if not skip_image_reload:
+            _click(["#recaptcha-image-button", "button[id*='image']", "button[title*='image']"],
+                   "Switched to the image challenge (eye)")
+            time.sleep(1.5)
+            for _ in range(2):
+                if _click(["#recaptcha-reload-button", ".reload-button-holder button",
+                           "button[id*='reload']", "#recaptcha-verify-button",
+                           "button[id*='verify']", "button[id*='skip']"], "Reloaded the challenge"):
+                    time.sleep(1.5)
 
         # 2) Switch to a FRESH audio challenge (the headphones button).
         _click(["#recaptcha-audio-button", "button[id*='audio']", "button[title*='audio']"],
@@ -751,15 +762,16 @@ def solve_with_buster(driver, max_attempts=1):
             add_log("Solved by checkbox.")
             return True
 
-        # Try the image-challenge-reset -> fresh-audio -> Buster sequence FIRST
-        # (switching to the "eye"/image challenge briefly, then a fresh audio
-        # challenge) - Buster solves audio far more reliably than image, and a
-        # fresh audio challenge avoids the "automated queries" rate-limit that
-        # makes repeated solves on the SAME challenge fail. This used to only run
-        # as a late-stage fallback after 3 reload cycles; trying it immediately
-        # solves most CAPTCHAs faster and with fewer DOM interactions (each one
-        # is a chance for a stale-element error if the page changes mid-click).
-        if _click_audio_and_buster(driver):
+        # Try a DIRECT audio-solve first (skip the image-challenge-reload dance) -
+        # only the 3rd+ attempt falls back to the extra image-reload+switch
+        # sequence. Per explicit instruction: always doing that reload dance
+        # (2 reloads + a challenge-type switch) on EVERY single CAPTCHA was
+        # extra interaction with Google's challenge system that could itself add
+        # to detection risk, on top of the CAPTCHA-triggering resubmission issue
+        # already fixed elsewhere - reserve it for when direct audio has
+        # genuinely failed twice and needs the rate-limit reset, not spend it
+        # up front on every CAPTCHA regardless of whether it's needed.
+        if _click_audio_and_buster(driver, skip_image_reload=(attempt <= 2)):
             for _ in range(10):
                 time.sleep(2)
                 if not is_alive(driver):
