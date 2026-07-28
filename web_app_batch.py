@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.20"
+APP_VERSION = "4.12.21"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -6640,7 +6640,7 @@ def api_brief_formats():
 # as a subprocess (same convention as the On-Page report below), streaming
 # its stdout as live progress.
 # --------------------------------------------------------------------------- #
-blogopt_state = {"status": "idle", "log": [], "url": "", "output_file": "", "error_msg": "", "progress": ""}
+blogopt_state = {"status": "idle", "log": [], "url": "", "output_file": "", "output_file_backup": "", "error_msg": "", "progress": ""}
 blogopt_lock = threading.Lock()
 blogopt_stop = threading.Event()
 
@@ -6707,9 +6707,11 @@ def _run_blogopt_report(url, targets_data, no_capture):
         import glob
         docs = sorted(glob.glob(os.path.join(out_dir, "*.docx")), key=os.path.getmtime, reverse=True)
         if docs:
+            backup_path = _backup_report("blogopt", to_domain(url), docs[0])
             with blogopt_lock:
                 blogopt_state["status"] = "completed"
                 blogopt_state["output_file"] = docs[0]
+                blogopt_state["output_file_backup"] = backup_path or ""
                 blogopt_state["progress"] = "Report ready for download"
             _log(f"Report generated: {os.path.basename(docs[0])}")
         else:
@@ -6764,7 +6766,17 @@ def api_blogopt_stop():
 def api_blogopt_download():
     with blogopt_lock:
         fpath = blogopt_state.get("output_file", "")
+        backup_path = blogopt_state.get("output_file_backup", "")
+        url = blogopt_state.get("url", "")
     if not fpath or not os.path.exists(fpath):
+        # Falls back to the durable backup copy (REPORT_BACKUPS_DIR) if the user
+        # deleted/moved the folder the report was originally saved into.
+        fpath = backup_path if backup_path and os.path.exists(backup_path) else ""
+        if not fpath and url:
+            candidate = _backup_report_path("blogopt", to_domain(url), ".docx")
+            if os.path.exists(candidate):
+                fpath = candidate
+    if not fpath:
         return jsonify({"error": "No report available"}), 404
     return send_file(fpath, as_attachment=True, download_name=os.path.basename(fpath))
 
