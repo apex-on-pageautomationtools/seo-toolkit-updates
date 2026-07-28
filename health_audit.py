@@ -421,11 +421,17 @@ def _suggest_redirect_for_broken(url, headers):
     return None
 
 
-def check_broken_links(domain, target_pages=None):
+def check_broken_links(domain, target_pages=None, log_fn=None):
     """Check all links on every target page (or homepage if none given).
     No artificial limit - every link on each page is checked. Each broken link
     records which page(s) it was found on (like brokenlinkcheck.com shows) and,
-    where a working replacement URL can be found, a suggested redirect target."""
+    where a working replacement URL can be found, a suggested redirect target.
+
+    log_fn (optional): called periodically with "checked X/Y links..." while
+    this runs - it's by far the slowest phase of a site audit (hundreds of
+    links, each HEAD/GET with up to a 12s timeout), and previously gave zero
+    visibility for minutes at a time between the phase-start and phase-end
+    log lines."""
     from urllib.parse import urljoin
     headers = {"User-Agent": _UA}
 
@@ -476,9 +482,21 @@ def check_broken_links(domain, target_pages=None):
     import concurrent.futures
     broken = []
     if all_links:
+        total = len(all_links)
+        checked = 0
+        # Report every ~10% (min every 25 links) so a 475-link run logs ~10
+        # updates instead of none - previously this phase gave no feedback
+        # at all between its start and end log lines, which could be several
+        # minutes on a page-heavy site.
+        report_every = max(25, total // 10)
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
             dead = []
-            for u, code in pool.map(_check_one, all_links):
+            futures = {pool.submit(_check_one, u): u for u in all_links}
+            for future in concurrent.futures.as_completed(futures):
+                u, code = future.result()
+                checked += 1
+                if log_fn and (checked % report_every == 0 or checked == total):
+                    log_fn(f"   -> checked {checked}/{total} links...")
                 # Only genuinely dead links count as broken: 404 (Not Found) / 410 (Gone).
                 # 429 (rate-limited), 403/401/405 (bot-blocked), 5xx (temporary server
                 # errors) and timeouts are NOT broken links - they're the server

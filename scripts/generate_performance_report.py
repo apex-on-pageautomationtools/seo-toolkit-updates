@@ -50,6 +50,15 @@ GREY = RGBColor(0x59, 0x59, 0x59)
 SLIDE_W = Inches(13.333)
 SLIDE_H = Inches(7.5)
 
+# Channel groups GA4 attributes to non-paid, SEO-relevant traffic. This is an
+# SEO reporting tool - paid ads (Paid Search/Paid Social/Paid Other/Display)
+# are deliberately excluded from the Traffic Acquisition section, per-team
+# decision. GA4 has no dedicated "AI" channel group as of this writing - AI
+# search referrers (chatgpt.com, perplexity.ai, etc.) land in "Referral" or
+# "Organic Search" under GA4's own default channel grouping, so they're
+# already included here rather than broken out separately.
+SEO_CHANNEL_GROUPS = {"Organic Search", "Referral", "Organic Social", "Direct"}
+
 
 def log(msg):
     print(msg, flush=True)
@@ -138,6 +147,34 @@ def compute_ga4_improvements(current, previous):
         if current.get("sessions", 0) > previous["sessions"]:
             improved.add("sessions")
     return improved
+
+
+def fetch_ga4_channel_sessions(token, property_name, start_date, end_date):
+    """Per-channel-group session totals for one period - used both for the
+    Traffic Acquisition chart/screenshot data and for the SEO-channels
+    period-over-period comparison below."""
+    return gsc_audit.run_ga4_report(
+        token, property_name, start_date, end_date,
+        dimensions=["sessionDefaultChannelGroup"], metrics=["sessions"], limit=20)
+
+
+def filter_seo_channels(channel_rows):
+    """Non-paid channel rows only - see SEO_CHANNEL_GROUPS."""
+    return [r for r in channel_rows if r.get("sessionDefaultChannelGroup") in SEO_CHANNEL_GROUPS]
+
+
+def sum_seo_sessions(channel_rows):
+    return sum(int(r.get("sessions", 0) or 0) for r in filter_seo_channels(channel_rows))
+
+
+def compute_ga4_seo_improvement(current_channels, previous_channels):
+    """Whether combined Organic Search/Referral/Organic Social/Direct sessions
+    grew vs. the previous period - the signal that gates the Traffic
+    Acquisition screenshot, separate from compute_ga4_improvements' overall
+    (paid-inclusive) 'sessions' flag."""
+    current_seo = sum_seo_sessions(current_channels)
+    previous_seo = sum_seo_sessions(previous_channels)
+    return {"seo_sessions"} if previous_seo and current_seo > previous_seo else set()
 
 
 # --------------------------------------------------------------------------- #
@@ -252,6 +289,172 @@ def capture_ga4_screenshot(driver, ga4_property_name, out_path, log_fn=None):
         return True
     except Exception as e:
         log_fn(f"  [warn] GA4 screenshot save failed: {e}")
+        return False
+
+
+def capture_gsc_dimension_screenshot(driver, property_url, tab_label, out_path, log_fn=None):
+    """Real screenshot of the GSC Performance page's own breakdown table -
+    Queries/Pages/Countries are tabs on the SAME page as the main graph (not
+    separate URLs), so this reuses that URL and clicks the tab by its visible
+    label before capturing, same defensive pattern as the metric chips
+    above (never fabricates - a missing tab just means whatever's on screen
+    gets captured, and a sign-in bounce skips the screenshot entirely)."""
+    import time
+    from selenium.webdriver.common.by import By
+    log_fn = log_fn or log
+    url = gsc_audit.build_gsc_url("performance/search-analytics", property_url)
+    driver.get(url)
+    time.sleep(6)
+    if gsc_audit._looks_like_signin(driver):
+        log_fn(f"  [warn] GSC Performance page bounced to sign-in - skipping {tab_label} screenshot.")
+        return False
+    if gsc_audit._looks_like_no_access(driver):
+        log_fn(f"  [warn] Signed-in account has no access to this property - skipping {tab_label} screenshot.")
+        return False
+    try:
+        tabs = driver.find_elements(By.XPATH, f"//*[contains(text(), '{tab_label}')]")
+        if tabs:
+            tabs[0].click()
+            time.sleep(2)
+        else:
+            log_fn(f"  [warn] Could not find the '{tab_label}' tab - screenshot will show whatever tab is default.")
+    except Exception as e:
+        log_fn(f"  [warn] Could not switch to '{tab_label}' tab: {e}")
+    try:
+        driver.save_screenshot(out_path)
+        log_fn(f"  GSC {tab_label} screenshot saved.")
+        return True
+    except Exception as e:
+        log_fn(f"  [warn] GSC {tab_label} screenshot save failed: {e}")
+        return False
+
+
+def _expand_ga4_nav_if_collapsed(driver, log_fn=None):
+    """GA4's left rail can be in icon-only collapsed mode with no visible
+    text at all (confirmed real case - the report labels below can't be
+    found by text until this runs). The toggle button is stable regardless
+    of state: <button aria-label="Nav toggle" aria-expanded="true|false">.
+    Only clicks it when aria-expanded is false, since it's a real toggle -
+    clicking it while already open would collapse it instead."""
+    import time
+    from selenium.webdriver.common.by import By
+    log_fn = log_fn or log
+    try:
+        toggles = driver.find_elements(By.XPATH, "//button[@aria-label='Nav toggle']")
+        if toggles and toggles[0].get_attribute("aria-expanded") == "false":
+            toggles[0].click()
+            time.sleep(1.5)
+    except Exception as e:
+        log_fn(f"  [warn] Could not confirm/expand the GA4 nav rail: {e}")
+
+
+def _navigate_ga4_report(driver, ga4_property_name, nav_labels, log_fn=None):
+    """Reaches a specific GA4 standard report by clicking through GA4's own
+    left-nav labels from the Reports Snapshot overview, rather than a
+    hand-built deep link, since GA4's internal report-routing params are
+    undocumented and liable to change; clicking the real UI by visible text
+    is the same approach already proven for GSC's tab/chip clicks. Top-level
+    groups (Life cycle, User) are already expanded by default once the rail
+    itself is open, so nav_labels should start at the sub-group that's
+    actually collapsed (e.g. "Acquisition", "User attributes"), not the
+    top-level group name - clicking an already-expanded group would
+    collapse it instead. Returns True if the sign-in check passed
+    (navigation itself is always best-effort - a missing nav label just
+    leaves the driver wherever it got to, which the caller still
+    screenshots rather than failing outright)."""
+    import time
+    from selenium.webdriver.common.by import By
+    log_fn = log_fn or log
+    property_id = ga4_property_name.split("/")[-1]
+    url = f"https://analytics.google.com/analytics/web/#/p{property_id}/reports/reportinghub"
+    driver.get(url)
+    time.sleep(10)
+    cur = (driver.current_url or "").lower()
+    if "accounts.google.com" in cur or "/signin" in cur:
+        log_fn(f"  [warn] GA4 bounced to sign-in - skipping {nav_labels[-1]} screenshot.")
+        return False
+    _expand_ga4_nav_if_collapsed(driver, log_fn)
+    try:
+        for label in nav_labels:
+            els = driver.find_elements(By.XPATH, f"//span[@class='item-text' and text()='{label}']")
+            if not els:
+                els = driver.find_elements(By.XPATH, f"//*[contains(text(), '{label}')]")
+            if not els:
+                log_fn(f"  [warn] Could not find GA4 nav item '{label}' - capturing whatever page was reached so far.")
+                break
+            els[0].click()
+            time.sleep(3)
+    except Exception as e:
+        log_fn(f"  [warn] Could not navigate to GA4 '{nav_labels[-1]}' report: {e}")
+    return True
+
+
+def capture_ga4_nav_screenshot(driver, ga4_property_name, nav_labels, out_path, log_fn=None):
+    """Real screenshot of a specific GA4 standard report (e.g. Demographic
+    details) - see _navigate_ga4_report for how it gets there."""
+    log_fn = log_fn or log
+    if not _navigate_ga4_report(driver, ga4_property_name, nav_labels, log_fn):
+        return False
+    try:
+        driver.save_screenshot(out_path)
+        log_fn(f"  GA4 {nav_labels[-1]} screenshot saved.")
+        return True
+    except Exception as e:
+        log_fn(f"  [warn] GA4 {nav_labels[-1]} screenshot save failed: {e}")
+        return False
+
+
+def capture_ga4_seo_channels_screenshot(driver, ga4_property_name, out_path, log_fn=None):
+    """Real screenshot of GA4's Traffic acquisition report, filtered down to
+    non-paid/SEO channels (see SEO_CHANNEL_GROUPS) via GA4's own "Add filter"
+    UI - an SEO report shouldn't spotlight paid ad spend. UNVERIFIED against
+    a live GA4 account as of when this was written (GA4's filter-builder
+    click path is our best guess at the real UI, not confirmed) - if the
+    filter can't be applied for any reason, this still captures the
+    unfiltered Traffic acquisition report rather than failing the slide
+    outright, and logs a warning so it's visible in the run log which
+    happened."""
+    import time
+    from selenium.webdriver.common.by import By
+    log_fn = log_fn or log
+    if not _navigate_ga4_report(driver, ga4_property_name,
+                                ["Acquisition", "Traffic acquisition"], log_fn):
+        return False
+    try:
+        add_filter = driver.find_elements(By.XPATH, "//*[contains(text(), 'Add filter')]")
+        if add_filter:
+            add_filter[0].click()
+            time.sleep(1.5)
+            dim_search = driver.find_elements(
+                By.XPATH, "//input[contains(@placeholder, 'dimensions') or contains(@placeholder, 'Search')]")
+            if dim_search:
+                dim_search[0].send_keys("Session default channel group")
+                time.sleep(1)
+            dim_option = driver.find_elements(By.XPATH, "//*[contains(text(), 'Session default channel group')]")
+            if dim_option:
+                dim_option[-1].click()
+                time.sleep(1)
+            for group in SEO_CHANNEL_GROUPS:
+                opts = driver.find_elements(By.XPATH, f"//*[contains(text(), '{group}')]")
+                if opts:
+                    opts[-1].click()
+                    time.sleep(0.3)
+            apply_btn = driver.find_elements(By.XPATH, "//*[contains(text(), 'Apply')]")
+            if apply_btn:
+                apply_btn[-1].click()
+                time.sleep(2)
+            else:
+                log_fn("  [warn] Could not find GA4 filter 'Apply' button - screenshot may be unfiltered.")
+        else:
+            log_fn("  [warn] Could not find GA4 'Add filter' control - screenshot will be unfiltered (includes paid channels).")
+    except Exception as e:
+        log_fn(f"  [warn] Could not apply SEO-channels filter on GA4 Traffic acquisition: {e} - capturing unfiltered.")
+    try:
+        driver.save_screenshot(out_path)
+        log_fn("  GA4 Traffic acquisition (SEO channels) screenshot saved.")
+        return True
+    except Exception as e:
+        log_fn(f"  [warn] GA4 Traffic acquisition screenshot save failed: {e}")
         return False
 
 
@@ -441,7 +644,9 @@ def build_summary_slide(prs, domain):
 # Report assembly
 # --------------------------------------------------------------------------- #
 def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None, end_date=None,
-                 gsc_improved=None, ga4_improved=None, gsc_screenshot=None, ga4_screenshot=None):
+                 gsc_improved=None, ga4_improved=None, gsc_screenshot=None, ga4_screenshot=None,
+                 gsc_queries_screenshot=None, gsc_pages_screenshot=None, gsc_countries_screenshot=None,
+                 ga4_acquisition_screenshot=None, ga4_demographics_screenshot=None):
     prs = Presentation()
     prs.slide_width = SLIDE_W
     prs.slide_height = SLIDE_H
@@ -475,20 +680,32 @@ def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None
             _stat_box(slide, SLIDE_W - Inches(1.6), Inches(0.4), Inches(1.5), f"{total_impr:,}", "Total Impressions")
 
         queries = gsc_data["queries"]
-        if queries:
+        if gsc_queries_screenshot and "clicks" in gsc_improved:
+            _screenshot_slide(prs, "Top Searches by Keywords",
+                             "Clicks improved vs. the previous period - real GSC Queries view",
+                             gsc_queries_screenshot)
+        elif queries:
             _bar_chart_slide(
                 prs, "Top Searches by Keywords", "Top 10 queries by clicks in this period",
                 [r["keys"][0] for r in queries], "Clicks", [r.get("clicks", 0) for r in queries],
                 headline=(str(len(queries)), "Keywords Shown"))
 
         pages = gsc_data["pages"]
-        if pages:
+        if gsc_pages_screenshot and "clicks" in gsc_improved:
+            _screenshot_slide(prs, "Top Searches by Pages",
+                             "Clicks improved vs. the previous period - real GSC Pages view",
+                             gsc_pages_screenshot)
+        elif pages:
             _bar_chart_slide(
                 prs, "Top Searches by Pages", "Top 10 pages by clicks in this period",
                 [r["keys"][0] for r in pages], "Clicks", [r.get("clicks", 0) for r in pages])
 
         countries = gsc_data["countries"]
-        if countries:
+        if gsc_countries_screenshot and "clicks" in gsc_improved:
+            _screenshot_slide(prs, "Top Searches by Country",
+                             "Clicks improved vs. the previous period - real GSC Countries view",
+                             gsc_countries_screenshot)
+        elif countries:
             _bar_chart_slide(
                 prs, "Top Searches by Country", "Top 10 countries by clicks in this period",
                 [r["keys"][0].upper() for r in countries], "Clicks", [r.get("clicks", 0) for r in countries])
@@ -514,15 +731,24 @@ def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None
             _stat_box(slide, SLIDE_W - Inches(3.2), Inches(0.4), Inches(1.5), f"{sum(users):,}", "Total Active Users")
             _stat_box(slide, SLIDE_W - Inches(1.6), Inches(0.4), Inches(1.5), f"{sum(sessions):,}", "Total Sessions")
 
-        channels = ga4_data["channels"]
-        if channels:
+        seo_channels = filter_seo_channels(ga4_data["channels"])
+        if ga4_acquisition_screenshot and "seo_sessions" in ga4_improved:
+            _screenshot_slide(prs, "Traffic Acquisition",
+                             "Organic/referral sessions improved vs. the previous period - real GA4 "
+                             "Traffic acquisition view (paid channels excluded)",
+                             ga4_acquisition_screenshot)
+        elif seo_channels:
             _pie_chart_slide(
-                prs, "Traffic Acquisition", "Sessions by channel in this period",
-                [r.get("sessionDefaultChannelGroup", "Unknown") for r in channels],
-                [int(r.get("sessions", 0) or 0) for r in channels])
+                prs, "Traffic Acquisition", "Non-paid sessions by channel in this period",
+                [r.get("sessionDefaultChannelGroup", "Unknown") for r in seo_channels],
+                [int(r.get("sessions", 0) or 0) for r in seo_channels])
 
         devices = ga4_data["devices"]
-        if devices:
+        if ga4_demographics_screenshot and "activeUsers" in ga4_improved:
+            _screenshot_slide(prs, "Demographic Details",
+                             "Active users improved vs. the previous period - real GA4 Demographic details view",
+                             ga4_demographics_screenshot)
+        elif devices:
             _pie_chart_slide(
                 prs, "Demographic Details", "Active users by device category",
                 [r.get("deviceCategory", "Unknown").title() for r in devices],
@@ -591,6 +817,8 @@ def main():
             current_ga4 = fetch_ga4_totals(token, args.ga4_property, start_s, end_s)
             previous_ga4 = fetch_ga4_totals(token, args.ga4_property, prev_start_s, prev_end_s)
             ga4_improved = compute_ga4_improvements(current_ga4, previous_ga4)
+            previous_channels = fetch_ga4_channel_sessions(token, args.ga4_property, prev_start_s, prev_end_s)
+            ga4_improved |= compute_ga4_seo_improvement(ga4_data["channels"], previous_channels)
             log(f"   -> Improved vs. previous {args.days} days: {sorted(ga4_improved) or 'none'}")
         except Exception as e:
             log(f"   [warn] GA4 data skipped: {type(e).__name__}: {e}")
@@ -600,6 +828,8 @@ def main():
         sys.exit(2)
 
     gsc_screenshot, ga4_screenshot = None, None
+    gsc_queries_screenshot, gsc_pages_screenshot, gsc_countries_screenshot = None, None, None
+    ga4_acquisition_screenshot, ga4_demographics_screenshot = None, None
     if args.session_id and (gsc_improved or ga4_improved):
         log("[3/4] Capturing real dashboard screenshots for improved metrics...")
         driver = None
@@ -610,10 +840,29 @@ def main():
                 path = os.path.join(shot_dir, "_gsc_perf_screenshot.png")
                 if capture_gsc_performance_screenshot(driver, property_url, gsc_improved, path):
                     gsc_screenshot = path
+            if "clicks" in gsc_improved and property_url:
+                path = os.path.join(shot_dir, "_gsc_queries_screenshot.png")
+                if capture_gsc_dimension_screenshot(driver, property_url, "Queries", path):
+                    gsc_queries_screenshot = path
+                path = os.path.join(shot_dir, "_gsc_pages_screenshot.png")
+                if capture_gsc_dimension_screenshot(driver, property_url, "Pages", path):
+                    gsc_pages_screenshot = path
+                path = os.path.join(shot_dir, "_gsc_countries_screenshot.png")
+                if capture_gsc_dimension_screenshot(driver, property_url, "Countries", path):
+                    gsc_countries_screenshot = path
             if ga4_improved and args.ga4_property:
                 path = os.path.join(shot_dir, "_ga4_screenshot.png")
                 if capture_ga4_screenshot(driver, args.ga4_property, path):
                     ga4_screenshot = path
+            if "seo_sessions" in ga4_improved and args.ga4_property:
+                path = os.path.join(shot_dir, "_ga4_acquisition_screenshot.png")
+                if capture_ga4_seo_channels_screenshot(driver, args.ga4_property, path):
+                    ga4_acquisition_screenshot = path
+            if "activeUsers" in ga4_improved and args.ga4_property:
+                path = os.path.join(shot_dir, "_ga4_demographics_screenshot.png")
+                if capture_ga4_nav_screenshot(driver, args.ga4_property,
+                                              ["User attributes", "Demographic details"], path):
+                    ga4_demographics_screenshot = path
         except Exception as e:
             log(f"   [warn] Screenshot capture skipped: {type(e).__name__}: {e}")
         finally:
@@ -628,9 +877,14 @@ def main():
     log("[4/4] Building report...")
     build_report(args.domain, args.out, gsc_data=gsc_data, ga4_data=ga4_data, start_date=start_s, end_date=end_s,
                 gsc_improved=gsc_improved, ga4_improved=ga4_improved,
-                gsc_screenshot=gsc_screenshot, ga4_screenshot=ga4_screenshot)
+                gsc_screenshot=gsc_screenshot, ga4_screenshot=ga4_screenshot,
+                gsc_queries_screenshot=gsc_queries_screenshot, gsc_pages_screenshot=gsc_pages_screenshot,
+                gsc_countries_screenshot=gsc_countries_screenshot,
+                ga4_acquisition_screenshot=ga4_acquisition_screenshot,
+                ga4_demographics_screenshot=ga4_demographics_screenshot)
 
-    for p in (gsc_screenshot, ga4_screenshot):
+    for p in (gsc_screenshot, ga4_screenshot, gsc_queries_screenshot, gsc_pages_screenshot,
+              gsc_countries_screenshot, ga4_acquisition_screenshot, ga4_demographics_screenshot):
         if p and os.path.exists(p):
             try:
                 os.remove(p)

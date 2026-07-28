@@ -1001,12 +1001,25 @@ def _sa_summary_only_sheet(items, page_lookup, brand, cache):
     return headers, [[it.get("summary", "")] for it in items]
 
 
+def _sa_unverifiable_sheet(items, page_lookup, brand, cache):
+    """Pages the crawl could NOT genuinely verify (blocked/empty response),
+    kept separate from Broken Links (real 404/410s) - see site_audit.py's
+    _BLOCKED_CODES/_CHALLENGE_MARKERS. Never claims these pages are actually
+    broken; the suggestion is always a manual-check note, not a fix."""
+    headers = ["Page URL", "Reason", "Suggestion"]
+    return headers, [[it.get("url", ""), str(it.get("code", "")),
+                      "Could not be genuinely fetched - likely blocked by the site's bot/WAF "
+                      "protection, not necessarily broken. Check manually in a real browser."]
+                     for it in items]
+
+
 # (sheet display name, issues-dict key, row-builder). Order controls sheet
 # order in the output workbook. Only issue types Site Audit actually reports
 # something equivalent to an SE Ranking Audit sheet for are included here -
 # see build_report_from_site_audit()'s docstring for the ones that aren't.
 _SA_SHEET_SPECS = [
     ("Broken Links", "broken_links", _sa_broken_links_sheet),
+    ("Unverifiable Pages", "unverifiable_pages", _sa_unverifiable_sheet),
     ("Missing Titles", "missing_titles", _sa_missing_titles_sheet),
     ("Duplicate Titles", "duplicate_titles", _sa_duplicate_titles_sheet),
     ("Missing Meta Descriptions", "missing_meta", _sa_missing_meta_sheet),

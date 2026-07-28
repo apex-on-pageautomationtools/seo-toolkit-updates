@@ -39,6 +39,24 @@ import generate_geo_report as _geo                 # reuse sitemap discovery (ge
 _UA = "Mozilla/5.0 (compatible; SEOToolkitPro-SiteAuditBot/1.0)"
 THIN_CONTENT_WORDS = 200
 
+# Status codes that mean "the server refused this specific automated request",
+# not "this page is broken" - same distinction health_audit.check_broken_links
+# already makes for individual links. Applied here to whole-page fetches too,
+# so a WAF/bot-protection block doesn't get reported as 50 pages each missing
+# a title/H1/meta description.
+_BLOCKED_CODES = {401, 403, 405, 429}
+
+# Some WAFs (Cloudflare etc.) return a real HTTP 200 to a plain GET but with a
+# JS-challenge/interstitial shell instead of the actual page - confirmed real
+# case: a site returning 403 to HEAD/GET for link-checking, but 200-with-empty-
+# content here, which silently counted as "missing title/H1/meta" for every
+# page instead of "could not verify - likely bot-blocked".
+_CHALLENGE_MARKERS = (
+    "checking your browser", "just a moment", "cf-browser-verification",
+    "attention required", "please enable javascript", "access denied",
+    "verify you are human", "ddos protection by",
+)
+
 
 # --------------------------------------------------------------------------- #
 # Page discovery - reuses existing sitemap-parsing / homepage-crawl logic
@@ -170,6 +188,11 @@ def _analyze_pages(urls, log_fn=print, max_workers=10, stop_event=None):
             page = fut.result()
             if page["html"]:
                 page.update(_extract_page_data(page["html"], page_url=page["url"]))
+                html_lower = page["html"].lower()
+                looks_empty = not any([page.get("title_count"), page.get("h1_count"),
+                                       page.get("image_count"), page.get("word_count")])
+                if looks_empty or any(m in html_lower for m in _CHALLENGE_MARKERS):
+                    page["likely_blocked"] = True
             results.append(page)
             done += 1
             if done % 20 == 0 or done == total:
@@ -183,7 +206,7 @@ def _analyze_pages(urls, log_fn=print, max_workers=10, stop_event=None):
 # Aggregation
 # --------------------------------------------------------------------------- #
 _SUMMARY_KEYS = (
-    "broken_links", "missing_titles", "duplicate_titles", "missing_meta",
+    "broken_links", "unverifiable_pages", "missing_titles", "duplicate_titles", "missing_meta",
     "duplicate_meta", "missing_h1", "multiple_h1", "missing_alt_images",
     "thin_content_pages", "redirect_chains", "noindex_pages",
     "sitemap_issues", "robots_issues",
@@ -194,17 +217,28 @@ def _aggregate(pages, status_results, broken_links, robots_check, sitemap_check)
     issues = {k: [] for k in _SUMMARY_KEYS}
 
     # Pages that are themselves unreachable/erroring (checked via the existing
-    # check_status200), plus links found on pages that lead nowhere - both are
-    # "broken" from a site-audit point of view, so they share one bucket.
+    # check_status200). Only 404/410 mean the page is actually gone - anything
+    # else non-200 (403/401/429/405, 5xx, timeouts) means the request itself
+    # was refused/failed, which is NOT the same claim as "this page is broken"
+    # (same distinction health_audit.check_broken_links already makes for
+    # individual links - applied here to whole-page fetches too).
     for r in status_results:
-        if not r["ok"]:
-            issues["broken_links"].append({"url": r["url"], "code": r["status"],
+        if r["ok"]:
+            continue
+        code = int(r["status"]) if str(r["status"]).lstrip("-").isdigit() else 0
+        if code in (404, 410):
+            issues["broken_links"].append({"url": r["url"], "code": code,
                                             "found_on": ["(page itself)"], "suggested_redirect": None})
+        else:
+            issues["unverifiable_pages"].append({"url": r["url"], "code": code or "unreachable"})
     issues["broken_links"].extend(broken_links)
 
     title_map, desc_map = {}, {}
     for p in pages:
         if p.get("error") or not p.get("status") or not (200 <= p["status"] < 300):
+            continue
+        if p.get("likely_blocked"):
+            issues["unverifiable_pages"].append({"url": p["url"], "code": "blocked (empty/challenge response)"})
             continue
         url = p["url"]
         title = p.get("title", "")
@@ -249,6 +283,17 @@ def _aggregate(pages, status_results, broken_links, robots_check, sitemap_check)
     if not sitemap_check.get("ok", True):
         issues["sitemap_issues"].append({"summary": sitemap_check.get("summary", "")})
 
+    # A URL can get flagged as unverifiable by both the status-code check and
+    # the empty/challenge-content heuristic above - dedupe so the count means
+    # "N distinct pages", not "N signals".
+    seen_urls = set()
+    deduped = []
+    for item in issues["unverifiable_pages"]:
+        if item["url"] not in seen_urls:
+            seen_urls.add(item["url"])
+            deduped.append(item)
+    issues["unverifiable_pages"] = deduped
+
     summary = {k: len(v) for k, v in issues.items()}
     return summary, issues
 
@@ -274,7 +319,7 @@ def run_site_audit(domain, cap=300, log_fn=print, stop_event=None):
 
     log_fn(f"[3/4] Checking status codes and broken links across {len(urls)} page(s)...")
     status_results = health_audit.check_status200(urls, domain)
-    total_links, broken_links = health_audit.check_broken_links(domain, target_pages=urls)
+    total_links, broken_links = health_audit.check_broken_links(domain, target_pages=urls, log_fn=log_fn)
     log_fn(f"   -> {len(broken_links)} broken link(s) found out of {total_links} link(s) checked")
 
     log_fn(f"[4/4] Analyzing {len(urls)} page(s) for title/meta/H1/alt/content issues...")
@@ -292,6 +337,16 @@ def run_site_audit(domain, cap=300, log_fn=print, stop_event=None):
     # gets serialized to JSON on every status poll while a run is in progress.
     pages_out = [{k: v for k, v in p.items() if k != "html"} for p in pages]
 
+    access_warning = None
+    unverifiable = summary.get("unverifiable_pages", 0)
+    if urls and unverifiable / len(urls) >= 0.5:
+        access_warning = (
+            f"{unverifiable} of {len(urls)} page(s) could not be genuinely verified (blocked/empty response, "
+            f"not a real 404) - this site likely blocks automated requests. Findings below other than "
+            f"'Unverifiable page' may be incomplete; check manually in a real browser."
+        )
+        log_fn(f"   [warn] {access_warning}")
+
     log_fn("Done.")
     return {
         "domain": domain,
@@ -303,5 +358,6 @@ def run_site_audit(domain, cap=300, log_fn=print, stop_event=None):
         "pages": pages_out,
         "robots": robots_check,
         "sitemap": sitemap_check,
+        "access_warning": access_warning,
         "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
