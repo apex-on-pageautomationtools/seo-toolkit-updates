@@ -525,7 +525,14 @@ def build_docx(out_path, scraped, suggestions, link_pairs, image_url, image_miss
     link_target = link_pairs[0]["target_url"] if link_pairs else ""
     doc.add_paragraph(f"Clickable Button: Create a clickable button below the image with the "
                       f"text \u201c{cta}\u201d and link it with this page ")
-    doc.add_paragraph(f"Link: {link_target}")
+    if link_target:
+        doc.add_paragraph(f"Link: {link_target}")
+    else:
+        p = doc.add_paragraph("Link: ")
+        run = p.add_run("No confident internal page found automatically - link manually "
+                        "(e.g. to a relevant product/shop page)")
+        run.font.color.rgb = RGBColor(0xC0, 0x39, 0x2B)
+        run.bold = True
     if screenshot_paths.get("image_placement"):
         doc.add_paragraph("Placement Suggestion (real screenshot, approximate placement):")
         try:

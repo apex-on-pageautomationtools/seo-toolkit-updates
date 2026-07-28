@@ -790,21 +790,40 @@ def _ai_suggest_openai(prompt):
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not key:
         return None
-    try:
-        import urllib.request, urllib.error
-        model = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna")
-        url = "https://api.openai.com/v1/chat/completions"
-        body = json.dumps({
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.7,
-        }).encode("utf-8")
-        req = urllib.request.Request(url, data=body, headers={
+    import urllib.request, urllib.error
+    model = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna")
+    url = "https://api.openai.com/v1/chat/completions"
+
+    def _call(with_temperature):
+        payload = {"model": model, "messages": [{"role": "user", "content": prompt}]}
+        if with_temperature:
+            payload["temperature"] = 0.7
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {key}",
         })
         with urllib.request.urlopen(req, timeout=40) as r:
-            data = json.loads(r.read())
+            return json.loads(r.read())
+
+    try:
+        try:
+            data = _call(True)
+        except urllib.error.HTTPError as e:
+            # Newer reasoning-tier models (this one included) reject any
+            # temperature other than their default (1) with a 400 - confirmed
+            # real case where a paid OPENAI_API_KEY still 400'd on every call
+            # because of this, not a billing/quota issue. Retry once without
+            # the param before giving up on this provider for the request.
+            if e.code == 400:
+                body_snippet = ""
+                try:
+                    body_snippet = e.read().decode("utf-8", "replace")[:300]
+                except Exception:
+                    pass
+                log(f"   [warn] OpenAI 400, retrying without temperature: {body_snippet}")
+                data = _call(False)
+            else:
+                raise
         _ai_note_success("openai")
         return _extract_json(data["choices"][0]["message"]["content"])
     except urllib.error.HTTPError as e:
