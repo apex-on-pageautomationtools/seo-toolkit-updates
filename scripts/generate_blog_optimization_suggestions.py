@@ -50,13 +50,21 @@ def log(msg):
 # --------------------------------------------------------------------------- #
 # Fetching
 # --------------------------------------------------------------------------- #
-def fetch(url, timeout=20):
-    try:
-        r = requests.get(url, headers={"User-Agent": UA}, timeout=timeout)
-        return r
-    except Exception as e:
-        log(f"   [warn] fetch failed for {url}: {type(e).__name__}: {e}")
-        return None
+def fetch(url, timeout=20, retries=2):
+    """Retries on connection/timeout errors before giving up - confirmed real
+    case: a single transient timeout to the target blog's own server used to
+    kill the entire run (exit code 1, no report at all) even though the site
+    was reachable a moment later."""
+    last_err = None
+    for attempt in range(retries):
+        try:
+            return requests.get(url, headers={"User-Agent": UA}, timeout=timeout)
+        except Exception as e:
+            last_err = e
+            if attempt < retries - 1:
+                time.sleep(3)
+    log(f"   [warn] fetch failed for {url}: {type(last_err).__name__}: {last_err}")
+    return None
 
 
 def site_root(url):
@@ -275,7 +283,28 @@ Post content (real, scraped from the live page):
 """
     result = ai_chain(prompt)
     if not result:
-        raise Exception("Every AI provider failed - check API keys (Admin -> Sync API Keys) and try again.")
+        # Every AI provider failed (bad/missing keys, rate limits, etc.) - this
+        # used to hard-crash the whole run (exit code 1, no report at all).
+        # Team ask: give them SOMETHING usable instead of nothing - fall back
+        # to the page's own existing title/meta/H1/category rather than a
+        # fabricated suggestion. Downstream callers already handle empty
+        # tags/h2_list/topic_keywords gracefully (find_reusable_image and
+        # pick_link_sentences both no-op on empty input and flag the gap in
+        # red, same as the existing missing-image/missing-CTA fallback path).
+        log("   [warn] Every AI provider failed - falling back to the page's existing "
+            "title/meta/H1 instead of failing the whole report.")
+        return {
+            "category": scraped.get("existing_category") or "",
+            "tags": [],
+            "title": scraped.get("existing_title") or "",
+            "meta_description": scraped.get("existing_meta") or "",
+            "h1_change": "No Change Required",
+            "h2_list": [],
+            "topic_keywords": [],
+            "image_alt": "",
+            "image_title_attr": "",
+            "cta_text": "",
+        }
     return result
 
 
@@ -593,7 +622,17 @@ def main():
         target_keywords = tdata.get("target_keywords") or []
 
     log(f"[1/6] Fetching {args.url}...")
-    scraped = scrape_blog(args.url)
+    try:
+        scraped = scrape_blog(args.url)
+    except Exception as e:
+        # No real page content was ever fetched, so there's nothing real to
+        # build suggestions from - never fabricate one. Still exits non-zero
+        # (the run genuinely failed), but the error is now specific rather
+        # than a bare traceback, so the team can tell "site unreachable" from
+        # every other possible cause.
+        log(f"[ERROR] Could not fetch the blog URL after retries: {e}")
+        log("   Check the URL is correct and the site is currently reachable, then try again.")
+        raise
 
     log("[2/6] Generating AI suggestions from the real page content...")
     suggestions = ai_suggestions(scraped)

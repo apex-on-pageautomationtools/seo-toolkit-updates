@@ -1977,6 +1977,13 @@
         </svg>
         <span class="sb-label">Google Accounts (GSC-GA4)</span>
       </button>
+      <button class="sb-item" id="tab-history" data-tip="Report History" onclick="switchTab('history')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 3" />
+        </svg>
+        <span class="sb-label">Report History</span>
+      </button>
       <button class="sb-item" id="tab-admin" data-tip="Admin" onclick="switchTab('admin')" style="display:none">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <path
@@ -2938,6 +2945,27 @@
             </div>
             <div id="gsc-sessions-list" style="font-size:12px;color:var(--text-3)">Loading...</div>
           </div>
+        </section>
+
+        <!-- REPORT HISTORY -->
+        <section class="card panel" id="panel-history" style="display:none">
+          <div class="card-t">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v5l3 3" />
+            </svg>
+            Report History
+          </div>
+          <p style="color:var(--text-3);font-size:12px;margin:-4px 0 14px;line-height:1.4">Every report already saved
+            to disk by any tool on this machine, newest first - re-download without running the tool again. This
+            reflects files already in your Downloads folder, not a separate database, so a moved/deleted file
+            disappears from this list too.</p>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px">
+            <input id="history-filter" type="text" placeholder="Filter by domain or tool..."
+              oninput="historyRender()" style="flex:1;max-width:320px" />
+            <button class="btn btn-tonal btn-sm" onclick="historyLoad()">Refresh</button>
+          </div>
+          <div id="history-list" style="font-size:12px;color:var(--text-3)">Loading...</div>
         </section>
 
         <!-- ADMIN PANEL -->
@@ -5001,7 +5029,7 @@ https://example.com/page-2"></textarea>
       // tool's paused session stays visible (correctly) while browsing other tabs,
       // but with no tool name it read as an unexplained, possibly stuck "Action
       // needed" no matter which tab you were actually looking at.
-      const TOOL_TITLES = { overview: 'Dashboard', ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Website Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SEranking/SEMrush Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GA4)', admin: 'Admin Panel' };
+      const TOOL_TITLES = { overview: 'Dashboard', ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Website Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SEranking/SEMrush Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GA4)', history: 'Report History', admin: 'Admin Panel' };
       // The four browser tools run in parallel, so each keeps its OWN poll timer, its own
       // running count, and its own last-seen status. The shared status bar / log / result
       // count reflect only the ACTIVE tab; every tool's table keeps filling in the background.
@@ -5116,6 +5144,8 @@ https://example.com/page-2"></textarea>
         $('panel-siteaudit').style.display = m === 'siteaudit' ? '' : 'none';
         $('panel-gsc').style.display = m === 'gsc' ? '' : 'none';
         $('panel-gscaccounts').style.display = m === 'gscaccounts' ? '' : 'none';
+        $('panel-history').style.display = m === 'history' ? '' : 'none';
+        if (m === 'history') historyLoad();
         $('panel-crawl').style.display = m === 'crawl' ? '' : 'none';
         $('panel-admin').style.display = m === 'admin' ? '' : 'none';
         $('panel-brief').style.display = m === 'brief' ? '' : 'none';
@@ -5163,6 +5193,7 @@ https://example.com/page-2"></textarea>
           indexing: 'Submit URLs to Google for indexing via a shared team quota, with a real-Search-Console fallback once your daily share is used. Testing phase.',
           keywordvolume: 'Real Keyword Planner search volume data from the Google Ads API - avg monthly searches, competition, CPC, filtered by location/language. Testing phase.',
           gscaccounts: 'Connect Google accounts and manage browser sessions - shared across GSC Audit, Submit for Indexing\'s fallback, and other tools that need one.',
+          history: 'Every report already generated on this machine, across every tool - re-download without running the tool again.',
           admin: 'Manage users, cities, and app configuration.'
         };
         $('page-title').textContent = TOOL_TITLES[m];
@@ -7193,6 +7224,55 @@ https://example.com/page-2"></textarea>
           });
           box.innerHTML = html;
         } catch (e) { box.textContent = 'Failed to load sessions.'; }
+      }
+      /* ===================== report history ===================== */
+      // Not a separate database - just lists files already sitting in each
+      // tool's own per-domain Downloads subfolder (e.g. "example.com
+      // performance/"), reusing storage every report-generating tool already
+      // writes to. A file moved/deleted outside the app disappears from here
+      // too, since there's nothing else tracking it.
+      let _historyEntries = [];
+      const HISTORY_TOOL_LABELS = {
+        ranking: 'Google Rank Checker', index_check: 'Google Index Checker', backlink_check: 'Backlink Status Checker',
+        onpage: 'SEO On-Page Report', health_audit: 'Health Audit Report', site_audit: 'Website Audit',
+        gsc_audit: 'GSC Audit Report', brief: 'Brief Analysis Report', seranking: 'SEranking/SEMrush Audit',
+        geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', blogopt: 'Blog Optimization Suggestions',
+      };
+      function _historyFmtSize(bytes) {
+        if (!bytes) return '';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      }
+      async function historyLoad() {
+        const el = $('history-list');
+        el.textContent = 'Loading...';
+        try {
+          const r = await fetch('/api/report-history');
+          _historyEntries = await r.json();
+          if (!Array.isArray(_historyEntries)) _historyEntries = [];
+          historyRender();
+        } catch (e) {
+          el.textContent = 'Could not load report history.';
+        }
+      }
+      function historyRender() {
+        const el = $('history-list');
+        const q = ($('history-filter').value || '').toLowerCase().trim();
+        const rows = _historyEntries.filter(it => !q ||
+          (it.domain || '').toLowerCase().includes(q) ||
+          (HISTORY_TOOL_LABELS[it.tool] || it.tool || '').toLowerCase().includes(q));
+        if (!rows.length) { el.innerHTML = '<p>No saved reports found' + (q ? ' matching that filter.' : ' yet - run any report tool first.') + '</p>'; return; }
+        el.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+          + '<thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px">Tool</th><th style="padding:6px">Domain</th><th style="padding:6px">File</th><th style="padding:6px">Date</th><th style="padding:6px">Size</th><th style="padding:6px"></th></tr></thead>'
+          + '<tbody>' + rows.map(it => '<tr style="border-bottom:1px solid var(--border)">'
+            + '<td style="padding:6px">' + esc(HISTORY_TOOL_LABELS[it.tool] || it.tool) + '</td>'
+            + '<td style="padding:6px">' + esc(it.domain) + '</td>'
+            + '<td style="padding:6px;word-break:break-all">' + esc(it.filename) + '</td>'
+            + '<td style="padding:6px;white-space:nowrap">' + esc(new Date(it.modified * 1000).toLocaleString()) + '</td>'
+            + '<td style="padding:6px;white-space:nowrap">' + esc(_historyFmtSize(it.size)) + '</td>'
+            + '<td style="padding:6px"><a class="btn btn-tonal btn-sm" href="/api/report-history/download?path=' + encodeURIComponent(it.path) + '">Download</a></td>'
+            + '</tr>').join('') + '</tbody></table></div>';
       }
       async function gscSessionCreate() {
         const label = prompt('Session label (optional):');

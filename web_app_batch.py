@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.23"
+APP_VERSION = "4.12.24"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1595,8 +1595,25 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
         if kind in ("captcha", "soft_block", "http_403", "network_error"):
             if not _recover(sess, kind):
                 return {"status": "captcha", "matches": match_domain([], domain_clean)}
-            _reanchor_locale(sess, country, lang)
-            continue
+            # Google's own captcha/"sorry" page redirects back to the EXACT
+            # search URL that triggered it once solved (confirmed live:
+            # /sorry/index?continue=<the exact original search URL>&...) -
+            # the real results are already loaded at this point for a
+            # same-session captcha solve (Buster or manual), so re-anchoring
+            # to the homepage and re-typing/resubmitting the identical query
+            # was pure waste, discarding a page already solved for. Worse,
+            # it's exactly the kind of repeated-automated-resubmission
+            # traffic pattern that makes Google MORE likely to serve another
+            # CAPTCHA right back - so this isn't just slower, it was actively
+            # counterproductive. soft_block/http_403/network_error still
+            # restart the browser via _recover() above, so locale can
+            # genuinely drift for those - only skip the restart for a
+            # same-session captcha solve that already left us on real results.
+            if kind == "captcha" and classify_page(page_source(sess.driver)) == "ok":
+                pass
+            else:
+                _reanchor_locale(sess, country, lang)
+                continue
 
         # Poll the SAME already-loaded page for organic links to appear, instead of
         # gambling on a fixed sleep duration then giving up. A fixed wait (tried at
@@ -3467,6 +3484,71 @@ def api_export_csv():
 @app.route("/api/health")
 def api_health():
     return jsonify({"ok": True, "version": APP_VERSION})
+
+
+# --------------------------------------------------------------------------- #
+# Report History - not a database, just a listing of files every report tool
+# already writes to its own "<domain slug> <tool suffix>" subfolder of
+# DOWNLOADS_DIR (see _domain_folder above). Team ask: "no way to view a
+# report generated yesterday without regenerating it" - every report tool
+# already keeps the file on disk, this just surfaces what's already there.
+# --------------------------------------------------------------------------- #
+_HISTORY_SKIP_PREFIXES = ("_", "~$")   # internal temp/screenshot files, Office lock files
+
+
+@app.route("/api/report-history")
+def api_report_history():
+    entries = []
+    try:
+        for folder_name in os.listdir(DOWNLOADS_DIR):
+            folder_path = os.path.join(DOWNLOADS_DIR, folder_name)
+            if not os.path.isdir(folder_path):
+                continue
+            # Convention: "<domain slug> <tool suffix>" (see _domain_folder) -
+            # a folder with no space isn't one of ours, skip it rather than
+            # guessing at a domain/tool split.
+            if " " not in folder_name:
+                continue
+            domain_slug, suffix = folder_name.rsplit(" ", 1)
+            try:
+                filenames = os.listdir(folder_path)
+            except Exception:
+                continue
+            for fname in filenames:
+                if fname.startswith(_HISTORY_SKIP_PREFIXES):
+                    continue
+                fpath = os.path.join(folder_path, fname)
+                if not os.path.isfile(fpath):
+                    continue
+                try:
+                    stat = os.stat(fpath)
+                except Exception:
+                    continue
+                entries.append({
+                    "tool": suffix,
+                    "domain": domain_slug,
+                    "filename": fname,
+                    "path": fpath,
+                    "modified": stat.st_mtime,
+                    "size": stat.st_size,
+                })
+    except Exception as e:
+        logging.warning(f"Report history scan failed: {e}")
+    entries.sort(key=lambda e: e["modified"], reverse=True)
+    return jsonify(entries[:1000])
+
+
+@app.route("/api/report-history/download")
+def api_report_history_download():
+    """Download a file the listing above pointed at - path is trusted only
+    if it resolves inside DOWNLOADS_DIR, so this can't be used to read
+    arbitrary files elsewhere on disk."""
+    raw_path = request.args.get("path", "")
+    real_downloads = os.path.realpath(DOWNLOADS_DIR)
+    real_path = os.path.realpath(raw_path)
+    if not (real_path == real_downloads or real_path.startswith(real_downloads + os.sep)) or not os.path.isfile(real_path):
+        return jsonify({"error": "Invalid path"}), 400
+    return send_file(real_path, as_attachment=True, download_name=os.path.basename(real_path))
 
 
 @app.route("/api/check-updates", methods=["POST"])
