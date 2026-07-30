@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.24"
+APP_VERSION = "4.12.25"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1769,8 +1769,13 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     # Deeper pages are where Google's CAPTCHA triggers most - scale the
                     # pause up with page depth instead of using the same fixed window
                     # every time, so a long pagination run doesn't keep hammering at
-                    # the same cadence that just got it flagged.
-                    depth_mult = 1.0 + 0.35 * page_num
+                    # the same cadence that just got it flagged. Growth is capped at
+                    # depth_mult=2.5 (was unbounded) - the anti-block benefit doesn't
+                    # need to keep growing forever, and an uncapped multiplier made a
+                    # full 9-10 page scan (keyword not found) take 3+ minutes, mostly
+                    # from ~30s pauses on pages 6+ alone. Shallow pages (1-3), which
+                    # were never the slow part, keep essentially the same pacing.
+                    depth_mult = min(2.5, 1.0 + 0.22 * page_num)
                     human_pause(1.2 * depth_mult, 2.4 * depth_mult)
                     nxt[0].click()
                     human_pause(2.8 * depth_mult, 5.5 * depth_mult)
