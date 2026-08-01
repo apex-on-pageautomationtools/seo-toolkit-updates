@@ -2123,9 +2123,104 @@ def load_more_results(driver, target_count, max_pages, logger=print):
 # Organic result extraction - JavaScript-based (like Ctrl+F in a real browser)
 # --------------------------------------------------------------------------- #
 
+# Google appends click-tracking params (srsltid for Merchant-linked organic
+# results, gclid/utm_* etc from ad-network tagging) to the real href even
+# though the visible SERP snippet shows the clean URL - strip them so the
+# reported URL matches what a user actually sees/visits. Shared by both the
+# static-HTML parse and the live-DOM JS extraction below.
+_TRACKING_PARAMS = {
+    "srsltid", "gclid", "gclsrc", "fbclid", "msclkid", "mc_cid", "mc_eid",
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+}
+
+
+def _strip_tracking(url):
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    parts = urlsplit(url)
+    if not parts.query:
+        return url
+    kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+            if k.lower() not in _TRACKING_PARAMS]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
+
+
+# "People also ask" accordion cards share the EXACT same .yuRUbf/h3/
+# jsname="UWckNb" markup as real organic results - Google preloads each
+# question's answer snippet (source link + title) into the raw HTML even
+# while collapsed, it's just visually hidden (0 computed height) until the
+# question is expanded. A static-HTML parse (BeautifulSoup) has no layout
+# engine and can't tell a collapsed PAA card apart from a real visible
+# result - confirmed live: 2 phantom entries that never appeared anywhere in
+# the actual rendered SERP got counted as real organic results, pushing a
+# genuine #9 ranking down to a reported #11. The bundled SERPCounter
+# extension (mstcounter.js) already solves this correctly by checking the
+# title's LIVE computed height ("Skip if URL is invisible (PAA box, other
+# search features)") - this replicates that exact same proven approach via
+# the real browser's layout engine instead of guessing at static markup.
+_JS_VISIBLE_ORGANIC_LINKS = """
+var out = [];
+var elems = document.querySelectorAll('#search .yuRUbf');
+for (var i = 0; i < elems.length; i++) {
+    var h3 = elems[i].querySelector('a h3');
+    if (!h3) continue;
+    var height = window.getComputedStyle(h3).height;
+    if (height === 'auto') height = '0';
+    if (parseFloat(height) < 20) continue;
+    var a = elems[i].querySelector('a[href]');
+    if (!a || !a.href) continue;
+    var low = a.href.toLowerCase();
+    if (low.indexOf('google.') !== -1 || low.indexOf('/search?') !== -1) continue;
+    out.push(a.href);
+}
+return out;
+"""
+
+
+def _get_organic_links_via_js(driver):
+    """Ordered list of VISIBLE organic result URLs, read straight from the
+    live rendered DOM. Returns None (not []) on any failure, so callers can
+    fall back to the static-HTML parse - an empty page genuinely has 0
+    organic links, which must stay distinguishable from "the JS call itself
+    failed"."""
+    try:
+        links = driver.execute_script(_JS_VISIBLE_ORGANIC_LINKS)
+    except Exception:
+        return None
+    if links is None:
+        return None
+    seen, out = set(), []
+    for href in links:
+        href = _strip_tracking(href)
+        if href in seen:
+            continue
+        seen.add(href)
+        out.append(href)
+    return out
+
+
+def _get_organic_links_for_driver(driver):
+    """Single source of truth for 'what are the real organic links on this
+    page, in true visual order' - shared by extract_organic() (counting/
+    logging) and find_domain_in_page() (the actual reported position), so
+    the two can never disagree with each other. Prefers the live-DOM
+    visibility check; falls back to the static-HTML heuristic only if the
+    JS call itself fails (e.g. driver mid-navigation)."""
+    js_links = _get_organic_links_via_js(driver)
+    if js_links is not None:
+        return js_links
+    try:
+        src = driver.page_source or ""
+    except Exception:
+        return []
+    return _get_organic_links(src)
+
+
 def _get_organic_links(src):
     """Parse page source and return ordered list of organic result URLs.
-    Like Ctrl+F on the page - only main result title links, no sitelinks or ads."""
+    Like Ctrl+F on the page - only main result title links, no sitelinks or
+    ads. FALLBACK ONLY - _get_organic_links_for_driver() prefers the live-DOM
+    JS check above, which correctly excludes collapsed "People also ask"
+    cards that this static parse cannot distinguish from real results."""
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(src, "html.parser")
 
@@ -2150,23 +2245,8 @@ def _get_organic_links(src):
 
     links, seen = [], set()
 
-    # Google appends click-tracking params (srsltid for Merchant-linked
-    # organic results, gclid/utm_* etc from ad-network tagging) to the real
-    # href even though the visible SERP snippet shows the clean URL - strip
-    # them so the reported URL matches what a user actually sees/visits.
-    _TRACKING_PARAMS = {
-        "srsltid", "gclid", "gclsrc", "fbclid", "msclkid", "mc_cid", "mc_eid",
-        "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-    }
-
-    def _strip_tracking(url):
-        from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-        parts = urlsplit(url)
-        if not parts.query:
-            return url
-        kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
-                if k.lower() not in _TRACKING_PARAMS]
-        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
+    # _strip_tracking/_TRACKING_PARAMS are defined at module level above
+    # (shared with _get_organic_links_via_js).
 
     def add(href):
         if not href:
@@ -2261,7 +2341,7 @@ def extract_organic(driver, debug=False):
             return [], {}
         return []
 
-    links = _get_organic_links(src)
+    links = _get_organic_links_for_driver(driver)
 
     if debug:
         from bs4 import BeautifulSoup
@@ -2302,11 +2382,7 @@ def find_domain_in_page(driver, domain_clean, page_offset=0):
     """Ctrl+F style: find the domain in the current page's organic title links.
     Returns list of {position, serp_url} with cumulative position across pages.
     Matches on the result HOST (or subdomain), not the URL path / title."""
-    try:
-        src = driver.page_source or ""
-    except Exception:
-        return []
-    links = _get_organic_links(src)
+    links = _get_organic_links_for_driver(driver)
     results = []
     for i, link in enumerate(links):
         if _host_is_domain(link, domain_clean):
