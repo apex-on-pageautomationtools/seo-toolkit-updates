@@ -1422,11 +1422,18 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
                 # same-origin fetch of its own URL - the actual bytes the
                 # server sent) and renders a genuine view-source-style widget:
                 # a fake address bar, real line numbers, real surrounding
-                # source lines, with the <title> and meta description lines
-                # highlighted - then the screenshot crops tight to just that
-                # widget instead of a full-viewport shot.
+                # source lines, with the <title>, meta description, and meta
+                # robots lines highlighted - then the screenshot crops tight
+                # to just that widget instead of a full-viewport shot. Meta
+                # robots added alongside title/description on request - the
+                # Meta Robots Check table has no photographic evidence behind
+                # it the way this view-source widget already gives title/
+                # description, so a value like "noindex,nofollow" had
+                # nothing to visually verify it against.
                 highlight_rect = _highlight_source_snippet(
-                    driver, [r'<title\b[^>]*>.*?</title>', r'<meta\b[^>]*name=["\']description["\'][^>]*>'])
+                    driver, [r'<title\b[^>]*>.*?</title>',
+                            r'<meta\b[^>]*name=["\']description["\'][^>]*>',
+                            r'<meta\b[^>]*robots[^>]*>'])
             elif key in ("robots", "sitemap"):
                 # Both are short, content-length-independent pages (a dozen
                 # lines of plain text for robots.txt, a compact table for
