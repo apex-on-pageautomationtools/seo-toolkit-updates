@@ -1461,6 +1461,12 @@ def capture_gsc_screenshots(driver, property_url, email, out_dir, pages=None, lo
             if _looks_like_signin(driver):
                 log_fn(f"  [warn] {p['key']} bounced to sign-in mid-capture - "
                        f"skipping (would be a misleading screenshot).")
+                # Without an explicit status here, the report silently fell back to
+                # its generic static checkpoint text (which reads as a genuine clean
+                # result, e.g. "Status - Not found") even though this check never
+                # actually completed - same class of false-positive as the no-access
+                # branch right below, which already sets one.
+                statuses[p["key"]] = "Could not check - session was signed out mid-capture, please check manually"
                 continue
             if _looks_like_no_access(driver):
                 log_fn(f"  [warn] {p['key']} - the signed-in account doesn't have access to "

@@ -372,6 +372,19 @@ def check_dummy_content(domain, driver=None):
         html = _fetch_html(f"https://www.google.com/search?q=site:{domain}+lorem")
     if html is None:
         return "Could not check Google for dummy content. Please check manually."
+    # A CAPTCHA/"unusual traffic" bot-check page is real HTML (not None), so
+    # the checks below never actually see it as an error - it silently fell
+    # through to the ambiguous "some result(s)... please verify manually"
+    # branch (no <h3> titles on a challenge page, so count stays "some"),
+    # reading exactly like a real, if inconclusive, search result. Team
+    # confirmed live: this text appeared with zero corroborating screenshot,
+    # because the SEPARATE screenshot-capture pass DID correctly detect and
+    # skip the same CAPTCHA. Detect it here the same way (already proven in
+    # that screenshot pass) so the report text honestly says "blocked",
+    # not "ambiguous results found".
+    if driver and engine.classify_page(html) in ("captcha", "soft_block"):
+        return ("Could not check Google for dummy content - blocked by a CAPTCHA/bot-check. "
+                "Please check manually.")
     no_results_markers = ["did not match any documents", "No results found", "no results", "0 results"]
     for marker in no_results_markers:
         if marker.lower() in html.lower():
@@ -754,6 +767,16 @@ def check_serp(domain, driver=None):
         html = _fetch_html(f"https://www.google.com/search?q=site:{domain}&num=30")
     if html is None:
         return {"ok": None, "summary": "Could not check Google SERP. Please check manually.",
+                "result_count": "unknown", "spam_found": []}
+    # A CAPTCHA/"unusual traffic" bot-check page is real HTML (not None), so
+    # without this check it silently fell through to the final "ok" branch
+    # below and reported a FALSE "No spam or hacked content detected" -
+    # actively asserting the site was verified clean when the check never
+    # actually saw real results at all. Same detection already proven in the
+    # separate screenshot-capture pass for this exact checkpoint.
+    if driver and engine.classify_page(html) in ("captcha", "soft_block"):
+        return {"ok": None, "summary": "Could not check Google SERP - blocked by a CAPTCHA/bot-check. "
+                                        "Please check manually.",
                 "result_count": "unknown", "spam_found": []}
 
     count_match = re.search(r'About ([\d,]+) results', html)
