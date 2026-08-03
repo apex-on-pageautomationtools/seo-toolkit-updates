@@ -223,8 +223,6 @@ def capture_gsc_performance_screenshot(driver, property_url, improved_metrics, o
     (signed out, no access, or a chip/control GSC's UI moved)."""
     import time
     log_fn = log_fn or log
-    if not improved_metrics:
-        return False
     url = gsc_audit.build_gsc_url("performance/search-analytics", property_url)
     driver.get(url)
     time.sleep(6)
@@ -238,29 +236,36 @@ def capture_gsc_performance_screenshot(driver, property_url, improved_metrics, o
     # GSC's own metric toggle chips - visible text is the label; clicking
     # toggles that metric's line on/off the graph. Default state usually has
     # Clicks + Impressions on, CTR + Position off - reconcile to exactly
-    # improved_metrics rather than assuming the default.
-    chip_label = {"clicks": "Total clicks", "impressions": "Total impressions",
-                  "ctr": "Average CTR", "position": "Average position"}
-    from selenium.webdriver.common.by import By
-    for metric, label in chip_label.items():
-        wanted_on = metric in improved_metrics
-        try:
-            chips = driver.find_elements(By.XPATH, f"//*[contains(text(), '{label}')]")
-            if not chips:
-                continue
-            chip = chips[0]
-            is_on = "selected" in (chip.get_attribute("class") or "").lower() or \
-                    chip.get_attribute("aria-pressed") == "true"
-            if is_on != wanted_on:
-                chip.click()
-                time.sleep(1)
-        except Exception as e:
-            log_fn(f"  [warn] Could not toggle '{label}' chip: {e}")
+    # improved_metrics when something improved. When NOTHING improved, leave
+    # GSC's own default chip state alone rather than skipping the screenshot
+    # outright - this is just the real current-period dashboard, no
+    # "improved vs. previous period" framing attached to it.
+    if improved_metrics:
+        chip_label = {"clicks": "Total clicks", "impressions": "Total impressions",
+                      "ctr": "Average CTR", "position": "Average position"}
+        from selenium.webdriver.common.by import By
+        for metric, label in chip_label.items():
+            wanted_on = metric in improved_metrics
+            try:
+                chips = driver.find_elements(By.XPATH, f"//*[contains(text(), '{label}')]")
+                if not chips:
+                    continue
+                chip = chips[0]
+                is_on = "selected" in (chip.get_attribute("class") or "").lower() or \
+                        chip.get_attribute("aria-pressed") == "true"
+                if is_on != wanted_on:
+                    chip.click()
+                    time.sleep(1)
+            except Exception as e:
+                log_fn(f"  [warn] Could not toggle '{label}' chip: {e}")
 
     time.sleep(2)
     try:
         driver.save_screenshot(out_path)
-        log_fn(f"  GSC Performance screenshot saved ({', '.join(sorted(improved_metrics))}).")
+        if improved_metrics:
+            log_fn(f"  GSC Performance screenshot saved ({', '.join(sorted(improved_metrics))}).")
+        else:
+            log_fn("  GSC Performance screenshot saved (current period - no improvement to highlight).")
         return True
     except Exception as e:
         log_fn(f"  [warn] GSC screenshot save failed: {e}")
@@ -667,11 +672,13 @@ def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None
         total_clicks = sum(clicks)
         total_impr = sum(impressions)
         metric_label = {"clicks": "Clicks", "impressions": "Impressions", "position": "Position"}
-        if gsc_screenshot and gsc_improved:
-            improved_txt = " & ".join(metric_label[m] for m in ("clicks", "impressions", "position") if m in gsc_improved)
-            _screenshot_slide(prs, "Traffic Status",
-                             f"{improved_txt} improved vs. the previous {(_period_days(start_date, end_date))} days - real GSC dashboard view",
-                             gsc_screenshot)
+        if gsc_screenshot:
+            if gsc_improved:
+                improved_txt = " & ".join(metric_label[m] for m in ("clicks", "impressions", "position") if m in gsc_improved)
+                subtitle = f"{improved_txt} improved vs. the previous {(_period_days(start_date, end_date))} days - real GSC dashboard view"
+            else:
+                subtitle = f"{start_date} to {end_date} - real GSC dashboard view"
+            _screenshot_slide(prs, "Traffic Status", subtitle, gsc_screenshot)
         elif daily:
             slide = _line_chart_slide(
                 prs, "Traffic Status", f"Clicks & impressions, {start_date} to {end_date}",
@@ -680,10 +687,10 @@ def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None
             _stat_box(slide, SLIDE_W - Inches(1.6), Inches(0.4), Inches(1.5), f"{total_impr:,}", "Total Impressions")
 
         queries = gsc_data["queries"]
-        if gsc_queries_screenshot and "clicks" in gsc_improved:
-            _screenshot_slide(prs, "Top Searches by Keywords",
-                             "Clicks improved vs. the previous period - real GSC Queries view",
-                             gsc_queries_screenshot)
+        if gsc_queries_screenshot:
+            subtitle = ("Clicks improved vs. the previous period - real GSC Queries view"
+                        if "clicks" in gsc_improved else f"{start_date} to {end_date} - real GSC Queries view")
+            _screenshot_slide(prs, "Top Searches by Keywords", subtitle, gsc_queries_screenshot)
         elif queries:
             _bar_chart_slide(
                 prs, "Top Searches by Keywords", "Top 10 queries by clicks in this period",
@@ -691,20 +698,20 @@ def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None
                 headline=(str(len(queries)), "Keywords Shown"))
 
         pages = gsc_data["pages"]
-        if gsc_pages_screenshot and "clicks" in gsc_improved:
-            _screenshot_slide(prs, "Top Searches by Pages",
-                             "Clicks improved vs. the previous period - real GSC Pages view",
-                             gsc_pages_screenshot)
+        if gsc_pages_screenshot:
+            subtitle = ("Clicks improved vs. the previous period - real GSC Pages view"
+                        if "clicks" in gsc_improved else f"{start_date} to {end_date} - real GSC Pages view")
+            _screenshot_slide(prs, "Top Searches by Pages", subtitle, gsc_pages_screenshot)
         elif pages:
             _bar_chart_slide(
                 prs, "Top Searches by Pages", "Top 10 pages by clicks in this period",
                 [r["keys"][0] for r in pages], "Clicks", [r.get("clicks", 0) for r in pages])
 
         countries = gsc_data["countries"]
-        if gsc_countries_screenshot and "clicks" in gsc_improved:
-            _screenshot_slide(prs, "Top Searches by Country",
-                             "Clicks improved vs. the previous period - real GSC Countries view",
-                             gsc_countries_screenshot)
+        if gsc_countries_screenshot:
+            subtitle = ("Clicks improved vs. the previous period - real GSC Countries view"
+                        if "clicks" in gsc_improved else f"{start_date} to {end_date} - real GSC Countries view")
+            _screenshot_slide(prs, "Top Searches by Country", subtitle, gsc_countries_screenshot)
         elif countries:
             _bar_chart_slide(
                 prs, "Top Searches by Country", "Top 10 countries by clicks in this period",
@@ -714,12 +721,14 @@ def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None
         build_section_divider(prs, "02", "Google Analytics")
 
         daily = ga4_data["daily"]
-        if ga4_screenshot and ga4_improved:
-            ga4_label = {"activeUsers": "Active Users", "sessions": "Sessions"}
-            improved_txt = " & ".join(ga4_label[m] for m in ("activeUsers", "sessions") if m in ga4_improved)
-            _screenshot_slide(prs, "Audience Trend",
-                             f"{improved_txt} improved vs. the previous period - real GA4 dashboard view",
-                             ga4_screenshot)
+        if ga4_screenshot:
+            if ga4_improved & {"activeUsers", "sessions"}:
+                ga4_label = {"activeUsers": "Active Users", "sessions": "Sessions"}
+                improved_txt = " & ".join(ga4_label[m] for m in ("activeUsers", "sessions") if m in ga4_improved)
+                subtitle = f"{improved_txt} improved vs. the previous period - real GA4 dashboard view"
+            else:
+                subtitle = f"Active users & sessions, {start_date} to {end_date} - real GA4 dashboard view"
+            _screenshot_slide(prs, "Audience Trend", subtitle, ga4_screenshot)
         elif daily:
             daily_sorted = sorted(daily, key=lambda r: r.get("date", ""))
             cats = [r.get("date", "") for r in daily_sorted]
@@ -732,11 +741,13 @@ def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None
             _stat_box(slide, SLIDE_W - Inches(1.6), Inches(0.4), Inches(1.5), f"{sum(sessions):,}", "Total Sessions")
 
         seo_channels = filter_seo_channels(ga4_data["channels"])
-        if ga4_acquisition_screenshot and "seo_sessions" in ga4_improved:
-            _screenshot_slide(prs, "Traffic Acquisition",
-                             "Organic/referral sessions improved vs. the previous period - real GA4 "
-                             "Traffic acquisition view (paid channels excluded)",
-                             ga4_acquisition_screenshot)
+        if ga4_acquisition_screenshot:
+            subtitle = ("Organic/referral sessions improved vs. the previous period - real GA4 "
+                        "Traffic acquisition view (paid channels excluded)"
+                        if "seo_sessions" in ga4_improved else
+                        f"{start_date} to {end_date} - real GA4 Traffic acquisition view "
+                        f"(paid channels excluded)")
+            _screenshot_slide(prs, "Traffic Acquisition", subtitle, ga4_acquisition_screenshot)
         elif seo_channels:
             _pie_chart_slide(
                 prs, "Traffic Acquisition", "Non-paid sessions by channel in this period",
@@ -744,10 +755,11 @@ def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None
                 [int(r.get("sessions", 0) or 0) for r in seo_channels])
 
         devices = ga4_data["devices"]
-        if ga4_demographics_screenshot and "activeUsers" in ga4_improved:
-            _screenshot_slide(prs, "Demographic Details",
-                             "Active users improved vs. the previous period - real GA4 Demographic details view",
-                             ga4_demographics_screenshot)
+        if ga4_demographics_screenshot:
+            subtitle = ("Active users improved vs. the previous period - real GA4 Demographic details view"
+                        if "activeUsers" in ga4_improved else
+                        f"{start_date} to {end_date} - real GA4 Demographic details view")
+            _screenshot_slide(prs, "Demographic Details", subtitle, ga4_demographics_screenshot)
         elif devices:
             _pie_chart_slide(
                 prs, "Demographic Details", "Active users by device category",
@@ -769,9 +781,10 @@ def main():
     ap.add_argument("--days", type=int, default=28, help="How many days back to report on")
     ap.add_argument("--session-id", default=None,
                     help="A GSC 'session' id (logged-in browser profile, see gsc_audit.py) for this "
-                         "account - if given, real GSC/GA4 dashboard screenshots are captured for "
-                         "whichever metrics improved vs. the previous period. Omit to skip screenshots "
-                         "entirely and use native charts only.")
+                         "account - if given, real GSC/GA4 dashboard screenshots are captured for every "
+                         "section regardless of improvement (the caption notes whether it improved vs. "
+                         "the previous period, or is just the current period's real dashboard view when "
+                         "not). Omit to skip screenshots entirely and use native charts only.")
     args = ap.parse_args()
 
     if not args.gsc_account and not args.ga4_property:
@@ -830,17 +843,22 @@ def main():
     gsc_screenshot, ga4_screenshot = None, None
     gsc_queries_screenshot, gsc_pages_screenshot, gsc_countries_screenshot = None, None, None
     ga4_acquisition_screenshot, ga4_demographics_screenshot = None, None
-    if args.session_id and (gsc_improved or ga4_improved):
-        log("[3/4] Capturing real dashboard screenshots for improved metrics...")
+    # Real dashboard screenshots are now attempted for EVERY section whenever a
+    # session is available, not just the ones that improved vs. the previous
+    # period - previously a section with no improvement fell back to a native
+    # (synthetic) chart even though a real screenshot was just as capturable;
+    # the caption below is what actually distinguishes "improved" framing from
+    # a plain current-period view, not whether the screenshot itself exists.
+    if args.session_id and (gsc_data or ga4_data):
+        log("[3/4] Capturing real dashboard screenshots...")
         driver = None
         try:
             driver = launch_screenshot_browser(args.session_id)
             shot_dir = os.path.dirname(os.path.abspath(args.out)) or "."
-            if gsc_improved and property_url:
+            if gsc_data and property_url:
                 path = os.path.join(shot_dir, "_gsc_perf_screenshot.png")
                 if capture_gsc_performance_screenshot(driver, property_url, gsc_improved, path):
                     gsc_screenshot = path
-            if "clicks" in gsc_improved and property_url:
                 path = os.path.join(shot_dir, "_gsc_queries_screenshot.png")
                 if capture_gsc_dimension_screenshot(driver, property_url, "Queries", path):
                     gsc_queries_screenshot = path
@@ -850,15 +868,13 @@ def main():
                 path = os.path.join(shot_dir, "_gsc_countries_screenshot.png")
                 if capture_gsc_dimension_screenshot(driver, property_url, "Countries", path):
                     gsc_countries_screenshot = path
-            if ga4_improved and args.ga4_property:
+            if ga4_data and args.ga4_property:
                 path = os.path.join(shot_dir, "_ga4_screenshot.png")
                 if capture_ga4_screenshot(driver, args.ga4_property, path):
                     ga4_screenshot = path
-            if "seo_sessions" in ga4_improved and args.ga4_property:
                 path = os.path.join(shot_dir, "_ga4_acquisition_screenshot.png")
                 if capture_ga4_seo_channels_screenshot(driver, args.ga4_property, path):
                     ga4_acquisition_screenshot = path
-            if "activeUsers" in ga4_improved and args.ga4_property:
                 path = os.path.join(shot_dir, "_ga4_demographics_screenshot.png")
                 if capture_ga4_nav_screenshot(driver, args.ga4_property,
                                               ["User attributes", "Demographic details"], path):
@@ -871,7 +887,7 @@ def main():
                     driver.quit()
                 except Exception:
                     pass
-    elif gsc_improved or ga4_improved:
+    elif gsc_data or ga4_data:
         log("   No --session-id given - skipping real screenshots, using native charts instead.")
 
     log("[4/4] Building report...")
