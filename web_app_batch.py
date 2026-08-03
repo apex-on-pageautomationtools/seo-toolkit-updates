@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.26"
+APP_VERSION = "4.12.27"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1128,6 +1128,24 @@ class Session:
         try:
             warm_up(self.driver, self.country, add_log, lang=self.lang)
         except Exception as e:
+            err_text = str(e)
+            # A proxy that PASSED its own pre-flight HTTP check moments earlier can
+            # still fail to actually carry browser traffic (upstream proxy dropped
+            # between the check and first use, or the local unauthenticated relay
+            # itself failed to bind/connect) - confirmed live: ERR_PROXY_CONNECTION_FAILED
+            # on the very first warm-up navigation killed the entire run as an
+            # unrecoverable "Fatal error" with zero retry, even though a plain direct
+            # connection had a real chance of working (same principle already applied
+            # to the pre-flight check above - a proxy just proven dead is worse than no
+            # proxy). Retry this session once without the proxy before giving up,
+            # rather than ending the whole batch over one bad connection.
+            if proxy and any(m in err_text for m in (
+                    "ERR_PROXY_CONNECTION_FAILED", "ERR_TUNNEL_CONNECTION_FAILED",
+                    "ERR_CONNECTION_REFUSED", "ERR_CONNECTION_RESET",
+                    "ERR_CONNECTION_TIMED_OUT", "ERR_SOCKS_CONNECTION_FAILED")):
+                add_log(f"Proxy connection failed on warm-up ({e}) - retrying this "
+                        f"session without a proxy instead of ending the run.")
+                return self.start(rotate=True, force_no_proxy=True)
             # The browser hanging on its very first navigation is the exact symptom of
             # an unanswered proxy login prompt (a native browser dialog, not a web page
             # - there's nothing in the DOM for Selenium to click or fill, and no
