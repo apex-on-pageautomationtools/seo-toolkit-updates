@@ -35,10 +35,36 @@ def _fetch_html(url, timeout=15):
 _RENDER_CACHE = {}
 
 
+_CHALLENGE_PAGE_MARKERS = (
+    "checking your browser", "just a moment", "cf-browser-verification",
+    "attention required", "please turn javascript on and reload",
+    "ddos protection by", "please wait while we verify",
+    "enable javascript and cookies to continue", "cf-chl-",
+    "verifying you are human", "unusual traffic",
+)
+
+
+def _looks_like_challenge_page(html):
+    """A bot-protection/WAF interstitial (Cloudflare "Just a moment...", etc.)
+    - these commonly carry their OWN <meta name="robots" content="noindex,
+    nofollow"> (you don't want Google indexing a CAPTCHA page), a real title
+    from the same page, etc. Reading any of that as if it belonged to the
+    actual site produces confidently-wrong findings - confirmed real case:
+    a health audit reported "noindex,nofollow" for a page whose real,
+    directly-fetched robots tag says "index, follow"."""
+    low = (html or "").lower()
+    return any(m in low for m in _CHALLENGE_PAGE_MARKERS)
+
+
 def _render_html(url, driver=None, wait=1.2):
     """Return the page as a real browser renders it (so JS-set title / meta /
     canonical are seen - Google renders JS, so this is the ACTUAL state that
-    matters). Falls back to raw HTTP when no browser/driver is available."""
+    matters). Falls back to raw HTTP when no browser/driver is available.
+    Never trusts a bot-challenge/interstitial page as if it were the real
+    site (see _looks_like_challenge_page) - if both the rendered AND raw
+    fetch look like a challenge, returns None so callers report "could not
+    fetch" instead of confidently reporting the challenge page's own
+    title/meta/robots values as the site's."""
     if url in _RENDER_CACHE:
         return _RENDER_CACHE[url]
     html = None
@@ -55,12 +81,14 @@ def _render_html(url, driver=None, wait=1.2):
                 time.sleep(0.25)
             time.sleep(wait)                          # short settle for hydration
             h = driver.page_source or ""
-            if h and len(h) > 200:
+            if h and len(h) > 200 and not _looks_like_challenge_page(h):
                 html = h
         except Exception:
             html = None
     if not html:
-        html = _fetch_html(url)
+        raw = _fetch_html(url)
+        if raw and not _looks_like_challenge_page(raw):
+            html = raw
     _RENDER_CACHE[url] = html
     return html
 
@@ -457,13 +485,26 @@ def check_broken_links(domain, target_pages=None, log_fn=None):
     all_links = []
     seen = set()
     found_on = {}
+    from bs4 import BeautifulSoup
     for page_url in pages:
         try:
             html = _ur.urlopen(_ur.Request(page_url, headers=headers), timeout=20).read().decode("utf-8", "ignore")
         except Exception:
             continue
-        for m in re.finditer(r'href=["\']([^"\']+)["\']', html):
-            href = m.group(1).strip()
+        # Only real <a href> navigable links - a blind href= regex also matched
+        # <link rel="preconnect"/"dns-prefetch"> performance hints (bare-domain
+        # hrefs like "https://fonts.gstatic.com", "https://www.googletagmanager.com"
+        # with no path at all) and got them checked as if they were real pages.
+        # Those are never meant to be navigated to - they're DNS/connection
+        # warm-up hints - and correctly 404 at their bare root, which was being
+        # reported as a genuine "broken link" even though nothing is broken.
+        # Confirmed real case: fonts.googleapis.com, fonts.gstatic.com,
+        # googletagmanager.com, gstatic.com, redditstatic.com all flagged this
+        # way. Same <a href> methodology already validated for the On-Page
+        # tool's external-link counting.
+        soup = BeautifulSoup(html, "html.parser")
+        for a in soup.find_all("a", href=True):
+            href = a["href"].strip()
             if href.startswith(("mailto:", "tel:", "javascript:", "#", "data:")):
                 continue
             u = urljoin(page_url, href)
@@ -1229,9 +1270,15 @@ def _highlight_source_snippet(driver, patterns):
 
 def _latest_wayback_snapshot_url(domain, log_fn=None):
     """Resolve the actual latest-archived snapshot URL via the Wayback
-    Availability API, instead of guessing a timestamp. Returns None if
-    the domain has never been archived (caller should skip the
-    screenshot rather than capture archive.org's "not found" page)."""
+    Availability API, instead of guessing a timestamp. Returns (url, reason)
+    - url is None if the domain has never been archived OR the lookup itself
+    failed (rate-limited, timeout, etc); reason distinguishes the two so the
+    caller can report an honest "could not check" instead of silently
+    treating a transient lookup failure the same as a genuine no-archive
+    case (confirmed real complaint: a 429-rate-limited lookup produced the
+    exact same "no archived snapshot found" report text as a domain that
+    was never archived at all - misleading either way, but especially so
+    when the check simply never ran)."""
     import json as _json
     log_fn = log_fn or print
     try:
@@ -1243,17 +1290,21 @@ def _latest_wayback_snapshot_url(domain, log_fn=None):
             data = _json.loads(resp.read().decode("utf-8", "replace"))
         snap = (data.get("archived_snapshots") or {}).get("closest") or {}
         if snap.get("available") and snap.get("url"):
-            return snap["url"]
+            return snap["url"], "ok"
+        return None, "not_archived"
     except Exception as e:
         log_fn(f"  [warn] layout: Wayback availability lookup failed ({e})")
-    return None
+        return None, "lookup_failed"
 
 
 # ---------- Selenium screenshot capture ----------
 def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
     """Capture screenshots using an existing Selenium WebDriver via CDP.
-    Returns dict of {key: image_path}."""
+    Returns dict of {key: image_path}, plus a "_statuses" entry (only present
+    if non-empty) for checkpoints whose screenshot couldn't be captured but
+    still have something honest to say about why (see the "layout" key)."""
     captured = {}
+    statuses = {}
     if log_fn is None:
         log_fn = print
 
@@ -1271,9 +1322,25 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
             # caption claims - and if that earliest capture was broken
             # or never completed, the screenshot came out blank.
             # Resolve the real latest snapshot via the Availability API.
-            real_url = _latest_wayback_snapshot_url(domain, log_fn)
+            real_url, reason = _latest_wayback_snapshot_url(domain, log_fn)
             if not real_url:
-                log_fn("  [warn] layout: no archived snapshot found for this domain, skipping screenshot")
+                # The static checkpoint body always reads "The screenshot below
+                # is the latest archived snapshot... compare it with the live
+                # site" - with no screenshot AND no status override, that text
+                # was left standing unexplained, reading as an oversight rather
+                # than "this couldn't be checked." Set an explicit status so the
+                # report is honest either way, and distinguishes a genuine
+                # no-archive-exists case from a transient lookup failure
+                # (rate-limited 429 etc, confirmed real case) - the latter
+                # should never be reported the same as "never archived."
+                if reason == "lookup_failed":
+                    log_fn("  [warn] layout: Wayback lookup failed - skipping screenshot, could not verify")
+                    statuses["layout"] = ("Could not check - the Wayback Machine lookup failed "
+                                          "(rate-limited or unreachable). Please check manually.")
+                else:
+                    log_fn("  [warn] layout: no archived snapshot found for this domain, skipping screenshot")
+                    statuses["layout"] = ("No archived snapshot found on web.archive.org for this "
+                                          "domain - nothing to compare against.")
                 continue
             url = real_url
         path = os.path.join(out_dir, f"{key}.png")
@@ -1365,18 +1432,35 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
                 # lines of plain text for robots.txt, a compact table for
                 # sitemap.xml) - a fixed full-window screenshot left a large
                 # blank area below the real content (confirmed real
-                # complaint: "much blank space" on both). Measure the actual
-                # rendered height/width and crop tight to it, same clip
-                # mechanism meta_source already uses below.
+                # complaint: "much blank space" on both). Measuring
+                # scrollHeight/scrollWidth still wasn't the fix it looked
+                # like: a browser's text/plain viewer wraps robots.txt in a
+                # <pre>, but <body> around it can still report scrollHeight
+                # equal to the full VIEWPORT (not the real text size) when
+                # the content fits on one screen - confirmed real complaint
+                # again, with a screenshot showing the actual text crammed
+                # into a tiny corner and the rest blank white space. Measure
+                # the <pre> element's own real rendered bounding box instead
+                # (falls back to <body> for sitemap.xml, which doesn't
+                # render as a <pre>) - that reflects the true text size,
+                # immune to the body/viewport inflation above. A <pre> is
+                # block-level by default though, so it still STRETCHES to
+                # its container's full width no matter how short its actual
+                # lines are - shrink-wrap it (display: inline-block) before
+                # measuring so the crop is tight on both axes: exactly the
+                # visible rows and columns of real content, not the page's
+                # full available width.
                 driver.execute_script("window.scrollTo(0, 0);")
                 try:
-                    content_h = driver.execute_script(
-                        "return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);")
-                    content_w = driver.execute_script(
-                        "return Math.max(document.body.scrollWidth, document.documentElement.scrollWidth);")
+                    rect = driver.execute_script("""
+                        var pre = document.querySelector('pre') || document.body;
+                        pre.style.display = 'inline-block';
+                        var r = pre.getBoundingClientRect();
+                        return {w: r.width, h: r.height};
+                    """)
                     vp = driver.execute_script("return {w: window.innerWidth, h: window.innerHeight};")
-                    h_capped = max(80, min(int(content_h or 0), vp["h"]))
-                    w_capped = max(200, min(int(content_w or 0), vp["w"]))
+                    h_capped = max(80, min(int(rect.get("h") or 0), vp["h"]))
+                    w_capped = max(200, min(int(rect.get("w") or 0), vp["w"]))
                     highlight_rect = {"x": 0, "y": 0, "width": w_capped, "height": h_capped}
                 except Exception:
                     pass
@@ -1432,6 +1516,8 @@ def capture_screenshots_selenium(driver, domain, out_dir, keys, log_fn=None):
             except Exception:
                 pass
 
+    if statuses:
+        captured["_statuses"] = statuses
     return captured
 
 

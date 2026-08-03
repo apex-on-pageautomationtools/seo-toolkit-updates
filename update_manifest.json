@@ -1,5 +1,5 @@
 {
-  "version": "4.12.29",
+  "version": "4.12.30",
   "files": [
     {
       "path": "da_checker.py",
@@ -23,7 +23,7 @@
     },
     {
       "path": "health_audit.py",
-      "hash": "1c8da8d1a4f8b4e287600341b8fe4f826c516c7141734b2412abf44e7aac35c6",
+      "hash": "5fbf0efb4b01ce71b3db7b77dd2b4394048a89a26f51dc63ecfcfab4f49c19de",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/health_audit.py"
     },
     {
@@ -33,7 +33,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "c5c66e752b6dc1ddf65ecf3ab76b1150a2a403ef99f4be742ffb039216491569",
+      "hash": "e120148b638278755fb899e469a3a56072706d6cddcb5f7adf4e9de935c7b353",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
