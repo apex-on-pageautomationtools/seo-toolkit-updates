@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.32"
+APP_VERSION = "4.12.33"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1548,7 +1548,7 @@ def _upload_ranking_screenshot(path):
             with open(path, "rb") as f:
                 r = http_requests.post("https://api.imgbb.com/1/upload",
                                         params={"key": imgbb_key},
-                                        files={"image": f}, timeout=25)
+                                        files={"image": f}, timeout=10)
             data = r.json()
             url = (data.get("data") or {}).get("url", "")
             if r.status_code == 200 and data.get("success") and url:
@@ -1558,7 +1558,26 @@ def _upload_ranking_screenshot(path):
                 add_log(f"Screenshot upload (ImgBB key {i+1}/{len(imgbb_keys)}) failed: {err} - trying next key.")
             else:
                 add_log(f"Screenshot upload (ImgBB) failed: {err} - trying Pixeldrain instead.")
+        except http_requests.exceptions.RequestException as e:
+            # A network-level failure (timeout/connection error/DNS/etc.) means
+            # api.imgbb.com ITSELF is unreachable right now - that's true no
+            # matter which key is used, so burning through the other 19 keys
+            # (each with its own timeout) was pure wasted time. Confirmed real
+            # case: 20 keys x 25s timeout = ~8 minutes lost on a SINGLE
+            # screenshot upload, every keyword, during an ImgBB outage - a
+            # per-key API error (e.g. "Rate limit reached", a real JSON
+            # response) is genuinely worth rotating keys for, but a raw
+            # connection/timeout exception isn't, so stop at the first one
+            # and go straight to Pixeldrain instead of grinding through the
+            # rest of the pool for an identical failure every time.
+            add_log(f"Screenshot upload (ImgBB) failed: {type(e).__name__}: {e} - looks like a "
+                    f"service-wide outage, not a per-key issue - skipping the other "
+                    f"{len(imgbb_keys) - i - 1} key(s) and trying Pixeldrain instead.")
+            break
         except Exception as e:
+            # Non-network exception (e.g. malformed JSON response) could
+            # still be specific to this one key/response, so keep the
+            # existing key-rotation behavior for this case.
             if i < len(imgbb_keys) - 1:
                 add_log(f"Screenshot upload (ImgBB key {i+1}/{len(imgbb_keys)}) failed: {type(e).__name__}: {e} - trying next key.")
             else:
