@@ -5054,6 +5054,27 @@ https://example.com/page-2"></textarea>
           _cities = await r.json();
         } catch (e) { }
       })();
+      // Default city shown when a country is picked and the user hasn't chosen
+      // one yet - the country's actual capital, not just whichever city sorts
+      // first alphabetically (every one of these is already a real entry in
+      // the city list above; only needed for countries where the capital
+      // wouldn't otherwise be the alphabetically-first option).
+      const COUNTRY_CAPITALS = {
+        US: 'Washington, US', AU: 'Canberra, AU', CA: 'Ottawa, CA', GB: 'London, GB',
+        IN: 'New Delhi, IN', DE: 'Berlin, DE', FR: 'Paris, FR', ES: 'Madrid, ES',
+        IT: 'Rome, IT', NL: 'Amsterdam, NL', BR: 'Brasilia, BR', MX: 'Mexico City, MX',
+        JP: 'Tokyo, JP', KR: 'Seoul, KR', RU: 'Moscow, RU', AE: 'Abu Dhabi, AE',
+        SG: 'Singapore, SG', ZA: 'Pretoria, ZA', NZ: 'Wellington, NZ', IE: 'Dublin, IE',
+        SE: 'Stockholm, SE', CH: 'Bern, CH', PL: 'Warsaw, PL', ID: 'Jakarta, ID',
+        PH: 'Manila, PH', MY: 'Kuala Lumpur, MY', PK: 'Islamabad, PK', NG: 'Abuja, NG',
+        SA: 'Riyadh, SA', TR: 'Ankara, TR', TH: 'Bangkok, TH', VN: 'Hanoi, VN',
+        AR: 'Buenos Aires, AR', CO: 'Bogota, CO', CL: 'Santiago, CL', PE: 'Lima, PE',
+        EG: 'Cairo, EG', KE: 'Nairobi, KE', PT: 'Lisbon, PT', AT: 'Vienna, AT',
+        BE: 'Brussels, BE', DK: 'Copenhagen, DK', NO: 'Oslo, NO', FI: 'Helsinki, FI',
+        CZ: 'Prague, CZ', RO: 'Bucharest, RO', GR: 'Athens, GR', HU: 'Budapest, HU',
+        IL: 'Jerusalem, IL', HK: 'Hong Kong, HK', TW: 'Taipei, TW', BD: 'Dhaka, BD',
+        LK: 'Colombo, LK', NP: 'Kathmandu, NP',
+      };
       function updateCityDropdown(prefix, countryCode) {
         const inp = document.getElementById(prefix + '-city');
         const dl = document.getElementById(prefix + '-city-list');
@@ -5063,8 +5084,12 @@ https://example.com/page-2"></textarea>
         const list = _cities.filter(c => c.name.endsWith(', ' + cc)).sort((a, b) => a.name.localeCompare(b.name));
         dl.innerHTML = '';
         list.forEach(c => { const o = document.createElement('option'); o.value = c.name; dl.appendChild(o); });
-        // Keep the previous city if it's valid for this country, else auto-fill the first one
-        if (prev && list.some(c => c.name === prev)) inp.value = prev;
+        // Keep the previous city if it's valid for this country; else default
+        // to the capital (if it's in this country's list), falling back to
+        // the alphabetically-first city only when no capital match exists.
+        if (prev && list.some(c => c.name === prev)) { inp.value = prev; return; }
+        const capital = COUNTRY_CAPITALS[cc];
+        if (capital && list.some(c => c.name === capital)) inp.value = capital;
         else inp.value = list.length ? list[0].name : '';
       }
 

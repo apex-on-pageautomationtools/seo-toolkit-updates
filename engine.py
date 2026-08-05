@@ -116,6 +116,7 @@ CITY_COORDS = {
     "Virginia Beach, US": (36.8529, -75.9780), "Omaha, US": (41.2565, -95.9345),
     "Oakland, US": (37.8044, -122.2712), "Tulsa, US": (36.1540, -95.9928),
     "Bakersfield, US": (35.3733, -119.0187), "Albuquerque, US": (35.0844, -106.6504),
+    "Washington, US": (38.9072, -77.0369),
     # AU
     "Sydney, AU": (-33.8688, 151.2093), "Melbourne, AU": (-37.8136, 144.9631),
     "Brisbane, AU": (-27.4698, 153.0251), "Perth, AU": (-31.9505, 115.8605),
@@ -446,6 +447,7 @@ CITY_CANONICAL = {
     "Tulsa, US": "Tulsa,Oklahoma,United States",
     "Bakersfield, US": "Bakersfield,California,United States",
     "Albuquerque, US": "Albuquerque,New Mexico,United States",
+    "Washington, US": "Washington,District of Columbia,United States",
     # Australia (20 cities)
     "Sydney, AU": "Sydney,New South Wales,Australia",
     "Melbourne, AU": "Melbourne,Victoria,Australia",
