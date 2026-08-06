@@ -317,13 +317,17 @@ def capture_ga4_screenshot(driver, ga4_property_name, out_path, log_fn=None):
         return False
 
 
-def capture_gsc_dimension_screenshot(driver, property_url, tab_label, out_path, log_fn=None):
+def capture_gsc_dimension_screenshot(driver, property_url, tab_label, out_path, log_fn=None, sort_by=None):
     """Real screenshot of the GSC Performance page's own breakdown table -
     Queries/Pages/Countries are tabs on the SAME page as the main graph (not
     separate URLs), so this reuses that URL and clicks the tab by its visible
     label before capturing, same defensive pattern as the metric chips
     above (never fabricates - a missing tab just means whatever's on screen
-    gets captured, and a sign-in bounce skips the screenshot entirely)."""
+    gets captured, and a sign-in bounce skips the screenshot entirely).
+    sort_by (optional): "Clicks" or "Impressions" - clicks that column's
+    header to sort the table by it (GSC defaults to Clicks descending);
+    lets the caller capture both a by-clicks and a by-impressions view of
+    the same table as two separate screenshots."""
     import time
     from selenium.webdriver.common.by import By
     log_fn = log_fn or log
@@ -360,9 +364,21 @@ def capture_gsc_dimension_screenshot(driver, property_url, tab_label, out_path, 
             time.sleep(0.5)
     except Exception as e:
         log_fn(f"  [warn] Could not scroll to the '{tab_label}' table: {e}")
+    if sort_by:
+        try:
+            headers = driver.find_elements(
+                By.XPATH, f"//th[contains(., '{sort_by}')] | //*[@role='columnheader'][contains(., '{sort_by}')]")
+            if headers:
+                _robust_click(driver, headers[0])
+                time.sleep(1.5)
+            else:
+                log_fn(f"  [warn] Could not find the '{sort_by}' column header - "
+                        f"{tab_label} screenshot will show the default sort.")
+        except Exception as e:
+            log_fn(f"  [warn] Could not sort {tab_label} by '{sort_by}': {e}")
     try:
         driver.save_screenshot(out_path)
-        log_fn(f"  GSC {tab_label} screenshot saved.")
+        log_fn(f"  GSC {tab_label} screenshot saved" + (f" (sorted by {sort_by})" if sort_by else "") + ".")
         return True
     except Exception as e:
         log_fn(f"  [warn] GSC {tab_label} screenshot save failed: {e}")
@@ -430,7 +446,7 @@ def _navigate_ga4_report(driver, ga4_property_name, nav_labels, log_fn=None):
 
 
 def capture_ga4_nav_screenshot(driver, ga4_property_name, nav_labels, out_path, log_fn=None,
-                               dimension_label=None):
+                               dimension_label=None, scroll_to_table=False):
     """Real screenshot of a specific GA4 standard report (e.g. Demographic
     details) - see _navigate_ga4_report for how it gets there. dimension_label
     (optional): some reports (Tech details) default to a dimension other than
@@ -438,7 +454,13 @@ def capture_ga4_nav_screenshot(driver, ga4_property_name, nav_labels, out_path, 
     live. When given, clicks the report's own dimension dropdown (its label
     text, e.g. "Browser", sits right after the report title) and picks the
     named option before capturing. Best-effort: on any failure, still
-    captures whatever dimension was showing rather than skipping the slide."""
+    captures whatever dimension was showing rather than skipping the slide.
+    scroll_to_table (optional): GA4's standard reports show a chart above the
+    fold and the actual row-by-row breakdown table further down - a plain
+    viewport screenshot misses the table entirely. When True, scrolls the
+    table into view first (mirroring capture_gsc_dimension_screenshot's same
+    scroll-to-table approach), so this can be called a second time on the
+    same report to get a table-focused screenshot alongside the chart one."""
     import time
     from selenium.webdriver.common.by import By
     log_fn = log_fn or log
@@ -467,6 +489,23 @@ def capture_ga4_nav_screenshot(driver, ga4_property_name, nav_labels, out_path, 
                         f"screenshot will show the default dimension.")
         except Exception as e:
             log_fn(f"  [warn] Could not switch dimension to '{dimension_label}': {e}")
+    if scroll_to_table:
+        try:
+            table_els = driver.find_elements(
+                By.XPATH, "//table | //*[@role='table'] | //*[@role='row']")
+            table_els = [t for t in table_els if t.is_displayed()]
+            if table_els:
+                driver.execute_script(
+                    "arguments[0].scrollIntoView({block:'center'});", table_els[-1])
+            else:
+                driver.execute_script("window.scrollBy(0, 600);")
+            time.sleep(1)
+        except Exception:
+            try:
+                driver.execute_script("window.scrollBy(0, 600);")
+                time.sleep(1)
+            except Exception:
+                pass
     try:
         driver.save_screenshot(out_path)
         log_fn(f"  GA4 {nav_labels[-1]} screenshot saved.")
@@ -731,9 +770,12 @@ def build_summary_slide(prs, domain):
 # --------------------------------------------------------------------------- #
 def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None, end_date=None,
                  gsc_improved=None, ga4_improved=None, gsc_screenshot=None, ga4_screenshot=None,
-                 gsc_queries_screenshot=None, gsc_pages_screenshot=None, gsc_countries_screenshot=None,
+                 gsc_queries_clicks_screenshot=None, gsc_queries_impressions_screenshot=None,
+                 gsc_pages_clicks_screenshot=None, gsc_pages_impressions_screenshot=None,
+                 gsc_countries_clicks_screenshot=None, gsc_countries_impressions_screenshot=None,
                  ga4_acquisition_screenshot=None, ga4_demographics_screenshot=None,
-                 ga4_events_screenshot=None, ga4_devices_screenshot=None, ga4_source_medium_screenshot=None):
+                 ga4_events_screenshot=None, ga4_events_table_screenshot=None,
+                 ga4_devices_screenshot=None, ga4_source_medium_screenshot=None):
     prs = Presentation()
     prs.slide_width = SLIDE_W
     prs.slide_height = SLIDE_H
@@ -768,36 +810,36 @@ def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None
             _stat_box(slide, SLIDE_W - Inches(3.2), Inches(0.4), Inches(1.5), f"{total_clicks:,}", "Total Clicks")
             _stat_box(slide, SLIDE_W - Inches(1.6), Inches(0.4), Inches(1.5), f"{total_impr:,}", "Total Impressions")
 
-        queries = gsc_data["queries"]
-        if gsc_queries_screenshot:
-            subtitle = ("Clicks improved vs. the previous period - real GSC Queries view"
-                        if "clicks" in gsc_improved else f"{start_date} to {end_date} - real GSC Queries view")
-            _screenshot_slide(prs, "Top Searches by Keywords", subtitle, gsc_queries_screenshot)
-        elif queries:
-            _bar_chart_slide(
-                prs, "Top Searches by Keywords", "Top 10 queries by clicks in this period",
-                [r["keys"][0] for r in queries], "Clicks", [r.get("clicks", 0) for r in queries],
-                headline=(str(len(queries)), "Keywords Shown"))
+        def _gsc_dimension_slides(base_title, clicks_shot, impressions_shot, rows, dimension_fmt):
+            """Each GSC breakdown (Queries/Pages/Countries) gets up to two
+            screenshot slides - one sorted by Clicks, one by Impressions -
+            instead of a single screenshot at whatever GSC's default sort
+            happened to be, so both are genuinely visible rather than only
+            ever showing "top by clicks" and leaving impressions unseen."""
+            if clicks_shot:
+                subtitle = ("Clicks improved vs. the previous period - real GSC "
+                            f"{base_title} view (sorted by clicks)" if "clicks" in gsc_improved else
+                            f"{start_date} to {end_date} - real GSC {base_title} view (sorted by clicks)")
+                _screenshot_slide(prs, f"Top {base_title} by Clicks", subtitle, clicks_shot)
+            elif rows and not impressions_shot:
+                _bar_chart_slide(
+                    prs, f"Top {base_title} by Clicks", f"Top 10 by clicks in this period",
+                    [dimension_fmt(r) for r in rows], "Clicks", [r.get("clicks", 0) for r in rows])
+            if impressions_shot:
+                subtitle = (f"{start_date} to {end_date} - real GSC {base_title} view (sorted by impressions)")
+                _screenshot_slide(prs, f"Top {base_title} by Impressions", subtitle, impressions_shot)
+            elif rows and not clicks_shot:
+                _bar_chart_slide(
+                    prs, f"Top {base_title} by Impressions", f"Top 10 by impressions in this period",
+                    [dimension_fmt(r) for r in rows], "Impressions", [r.get("impressions", 0) for r in rows])
 
-        pages = gsc_data["pages"]
-        if gsc_pages_screenshot:
-            subtitle = ("Clicks improved vs. the previous period - real GSC Pages view"
-                        if "clicks" in gsc_improved else f"{start_date} to {end_date} - real GSC Pages view")
-            _screenshot_slide(prs, "Top Searches by Pages", subtitle, gsc_pages_screenshot)
-        elif pages:
-            _bar_chart_slide(
-                prs, "Top Searches by Pages", "Top 10 pages by clicks in this period",
-                [r["keys"][0] for r in pages], "Clicks", [r.get("clicks", 0) for r in pages])
-
-        countries = gsc_data["countries"]
-        if gsc_countries_screenshot:
-            subtitle = ("Clicks improved vs. the previous period - real GSC Countries view"
-                        if "clicks" in gsc_improved else f"{start_date} to {end_date} - real GSC Countries view")
-            _screenshot_slide(prs, "Top Searches by Country", subtitle, gsc_countries_screenshot)
-        elif countries:
-            _bar_chart_slide(
-                prs, "Top Searches by Country", "Top 10 countries by clicks in this period",
-                [r["keys"][0].upper() for r in countries], "Clicks", [r.get("clicks", 0) for r in countries])
+        _gsc_dimension_slides("Searches by Keywords", gsc_queries_clicks_screenshot,
+                              gsc_queries_impressions_screenshot, gsc_data["queries"], lambda r: r["keys"][0])
+        _gsc_dimension_slides("Searches by Pages", gsc_pages_clicks_screenshot,
+                              gsc_pages_impressions_screenshot, gsc_data["pages"], lambda r: r["keys"][0])
+        _gsc_dimension_slides("Searches by Country", gsc_countries_clicks_screenshot,
+                              gsc_countries_impressions_screenshot, gsc_data["countries"],
+                              lambda r: r["keys"][0].upper())
 
     if ga4_data:
         build_section_divider(prs, "02", "Google Analytics")
@@ -854,6 +896,10 @@ def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None
         if ga4_events_screenshot:
             _screenshot_slide(prs, "Events", f"{start_date} to {end_date} - real GA4 Events view",
                              ga4_events_screenshot)
+        if ga4_events_table_screenshot:
+            _screenshot_slide(prs, "Events (Table)",
+                             f"{start_date} to {end_date} - real GA4 Events table, scrolled to the full breakdown",
+                             ga4_events_table_screenshot)
         if ga4_devices_screenshot:
             _screenshot_slide(prs, "Devices", f"{start_date} to {end_date} - real GA4 Tech details view",
                              ga4_devices_screenshot)
@@ -948,9 +994,12 @@ def main():
         sys.exit(2)
 
     gsc_screenshot, ga4_screenshot = None, None
-    gsc_queries_screenshot, gsc_pages_screenshot, gsc_countries_screenshot = None, None, None
+    gsc_queries_clicks_screenshot, gsc_queries_impressions_screenshot = None, None
+    gsc_pages_clicks_screenshot, gsc_pages_impressions_screenshot = None, None
+    gsc_countries_clicks_screenshot, gsc_countries_impressions_screenshot = None, None
     ga4_acquisition_screenshot, ga4_demographics_screenshot = None, None
-    ga4_events_screenshot, ga4_devices_screenshot, ga4_source_medium_screenshot = None, None, None
+    ga4_events_screenshot, ga4_events_table_screenshot = None, None
+    ga4_devices_screenshot, ga4_source_medium_screenshot = None, None
     # Real dashboard screenshots are now attempted for EVERY section whenever a
     # session is available, not just the ones that improved vs. the previous
     # period - previously a section with no improvement fell back to a native
@@ -976,15 +1025,27 @@ def main():
                 path = os.path.join(shot_dir, "_gsc_perf_screenshot.png")
                 if capture_gsc_performance_screenshot(gsc_driver, property_url, gsc_improved, path):
                     gsc_screenshot = path
-                path = os.path.join(shot_dir, "_gsc_queries_screenshot.png")
-                if capture_gsc_dimension_screenshot(gsc_driver, property_url, "Queries", path):
-                    gsc_queries_screenshot = path
-                path = os.path.join(shot_dir, "_gsc_pages_screenshot.png")
-                if capture_gsc_dimension_screenshot(gsc_driver, property_url, "Pages", path):
-                    gsc_pages_screenshot = path
-                path = os.path.join(shot_dir, "_gsc_countries_screenshot.png")
-                if capture_gsc_dimension_screenshot(gsc_driver, property_url, "Countries", path):
-                    gsc_countries_screenshot = path
+                # Each dimension gets two screenshots - sorted by Clicks and
+                # by Impressions - instead of one at whichever sort GSC
+                # happened to default to.
+                path = os.path.join(shot_dir, "_gsc_queries_clicks_screenshot.png")
+                if capture_gsc_dimension_screenshot(gsc_driver, property_url, "Queries", path, sort_by="Clicks"):
+                    gsc_queries_clicks_screenshot = path
+                path = os.path.join(shot_dir, "_gsc_queries_impressions_screenshot.png")
+                if capture_gsc_dimension_screenshot(gsc_driver, property_url, "Queries", path, sort_by="Impressions"):
+                    gsc_queries_impressions_screenshot = path
+                path = os.path.join(shot_dir, "_gsc_pages_clicks_screenshot.png")
+                if capture_gsc_dimension_screenshot(gsc_driver, property_url, "Pages", path, sort_by="Clicks"):
+                    gsc_pages_clicks_screenshot = path
+                path = os.path.join(shot_dir, "_gsc_pages_impressions_screenshot.png")
+                if capture_gsc_dimension_screenshot(gsc_driver, property_url, "Pages", path, sort_by="Impressions"):
+                    gsc_pages_impressions_screenshot = path
+                path = os.path.join(shot_dir, "_gsc_countries_clicks_screenshot.png")
+                if capture_gsc_dimension_screenshot(gsc_driver, property_url, "Countries", path, sort_by="Clicks"):
+                    gsc_countries_clicks_screenshot = path
+                path = os.path.join(shot_dir, "_gsc_countries_impressions_screenshot.png")
+                if capture_gsc_dimension_screenshot(gsc_driver, property_url, "Countries", path, sort_by="Impressions"):
+                    gsc_countries_impressions_screenshot = path
             if ga4_data and args.ga4_property:
                 if same_session and gsc_driver:
                     ga4_driver = gsc_driver
@@ -1013,6 +1074,13 @@ def main():
                     path = os.path.join(shot_dir, "_ga4_events_screenshot.png")
                     if capture_ga4_nav_screenshot(ga4_driver, args.ga4_property, ["Engagement", "Events"], path):
                         ga4_events_screenshot = path
+                    # Second capture of the same report, scrolled down to the
+                    # full Events breakdown table - the first capture above
+                    # is the chart view above the fold.
+                    path = os.path.join(shot_dir, "_ga4_events_table_screenshot.png")
+                    if capture_ga4_nav_screenshot(ga4_driver, args.ga4_property, ["Engagement", "Events"], path,
+                                                  scroll_to_table=True):
+                        ga4_events_table_screenshot = path
                     path = os.path.join(shot_dir, "_ga4_devices_screenshot.png")
                     if capture_ga4_nav_screenshot(ga4_driver, args.ga4_property, ["Tech", "Tech details"], path,
                                                   dimension_label="Device category"):
@@ -1037,16 +1105,26 @@ def main():
     build_report(args.domain, args.out, gsc_data=gsc_data, ga4_data=ga4_data, start_date=start_s, end_date=end_s,
                 gsc_improved=gsc_improved, ga4_improved=ga4_improved,
                 gsc_screenshot=gsc_screenshot, ga4_screenshot=ga4_screenshot,
-                gsc_queries_screenshot=gsc_queries_screenshot, gsc_pages_screenshot=gsc_pages_screenshot,
-                gsc_countries_screenshot=gsc_countries_screenshot,
+                gsc_queries_clicks_screenshot=gsc_queries_clicks_screenshot,
+                gsc_queries_impressions_screenshot=gsc_queries_impressions_screenshot,
+                gsc_pages_clicks_screenshot=gsc_pages_clicks_screenshot,
+                gsc_pages_impressions_screenshot=gsc_pages_impressions_screenshot,
+                gsc_countries_clicks_screenshot=gsc_countries_clicks_screenshot,
+                gsc_countries_impressions_screenshot=gsc_countries_impressions_screenshot,
                 ga4_acquisition_screenshot=ga4_acquisition_screenshot,
                 ga4_demographics_screenshot=ga4_demographics_screenshot,
-                ga4_events_screenshot=ga4_events_screenshot, ga4_devices_screenshot=ga4_devices_screenshot,
+                ga4_events_screenshot=ga4_events_screenshot,
+                ga4_events_table_screenshot=ga4_events_table_screenshot,
+                ga4_devices_screenshot=ga4_devices_screenshot,
                 ga4_source_medium_screenshot=ga4_source_medium_screenshot)
 
-    for p in (gsc_screenshot, ga4_screenshot, gsc_queries_screenshot, gsc_pages_screenshot,
-              gsc_countries_screenshot, ga4_acquisition_screenshot, ga4_demographics_screenshot,
-              ga4_events_screenshot, ga4_devices_screenshot, ga4_source_medium_screenshot):
+    for p in (gsc_screenshot, ga4_screenshot,
+              gsc_queries_clicks_screenshot, gsc_queries_impressions_screenshot,
+              gsc_pages_clicks_screenshot, gsc_pages_impressions_screenshot,
+              gsc_countries_clicks_screenshot, gsc_countries_impressions_screenshot,
+              ga4_acquisition_screenshot, ga4_demographics_screenshot,
+              ga4_events_screenshot, ga4_events_table_screenshot,
+              ga4_devices_screenshot, ga4_source_medium_screenshot):
         if p and os.path.exists(p):
             try:
                 os.remove(p)
