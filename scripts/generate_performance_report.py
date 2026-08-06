@@ -325,6 +325,21 @@ def capture_gsc_dimension_screenshot(driver, property_url, tab_label, out_path, 
             log_fn(f"  [warn] Could not find the '{tab_label}' tab - screenshot will show whatever tab is default.")
     except Exception as e:
         log_fn(f"  [warn] Could not switch to '{tab_label}' tab: {e}")
+    # The tab click only swaps which breakdown is active - the actual ranked
+    # table (the whole point of this screenshot) sits BELOW the summary
+    # chart, out of the viewport, so a plain save_screenshot() only ever
+    # captured the chart + tab bar, identically for every tab. Scroll the
+    # table into view before capturing.
+    try:
+        rows = driver.find_elements(By.XPATH, "//table | //*[@role='table'] | //*[@role='row']")
+        if rows:
+            driver.execute_script("arguments[0].scrollIntoView({block:'start'});", rows[0])
+            time.sleep(0.5)
+        else:
+            driver.execute_script("window.scrollBy(0, 500);")
+            time.sleep(0.5)
+    except Exception as e:
+        log_fn(f"  [warn] Could not scroll to the '{tab_label}' table: {e}")
     try:
         driver.save_screenshot(out_path)
         log_fn(f"  GSC {tab_label} screenshot saved.")
@@ -454,6 +469,20 @@ def capture_ga4_seo_channels_screenshot(driver, ga4_property_name, out_path, log
             log_fn("  [warn] Could not find GA4 'Add filter' control - screenshot will be unfiltered (includes paid channels).")
     except Exception as e:
         log_fn(f"  [warn] Could not apply SEO-channels filter on GA4 Traffic acquisition: {e} - capturing unfiltered.")
+    # Confirmed real case: the filter-apply sequence above can silently fail
+    # partway through (e.g. the wrong element matched a text search) and
+    # leave the "Build filter" side panel open and unapplied in the final
+    # screenshot - worse than just an unfiltered report, since it also looks
+    # broken. Force it closed (Escape is the universal close gesture for this
+    # kind of side-panel/dialog) regardless of whether the filter itself
+    # succeeded, so the screenshot never shows this panel either way.
+    try:
+        from selenium.webdriver.common.keys import Keys
+        if driver.find_elements(By.XPATH, "//*[contains(text(), 'Build filter')]"):
+            driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+            time.sleep(1)
+    except Exception:
+        pass
     try:
         driver.save_screenshot(out_path)
         log_fn("  GA4 Traffic acquisition (SEO channels) screenshot saved.")
@@ -651,7 +680,8 @@ def build_summary_slide(prs, domain):
 def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None, end_date=None,
                  gsc_improved=None, ga4_improved=None, gsc_screenshot=None, ga4_screenshot=None,
                  gsc_queries_screenshot=None, gsc_pages_screenshot=None, gsc_countries_screenshot=None,
-                 ga4_acquisition_screenshot=None, ga4_demographics_screenshot=None):
+                 ga4_acquisition_screenshot=None, ga4_demographics_screenshot=None,
+                 ga4_events_screenshot=None, ga4_devices_screenshot=None, ga4_source_medium_screenshot=None):
     prs = Presentation()
     prs.slide_width = SLIDE_W
     prs.slide_height = SLIDE_H
@@ -766,6 +796,20 @@ def build_report(domain, out_path, gsc_data=None, ga4_data=None, start_date=None
                 [r.get("deviceCategory", "Unknown").title() for r in devices],
                 [int(r.get("activeUsers", 0) or 0) for r in devices])
 
+        # Screenshot-only sections (no native-chart fallback data pipeline for
+        # these yet) - simply omitted from the deck if the screenshot
+        # couldn't be captured, rather than fabricating placeholder data.
+        if ga4_events_screenshot:
+            _screenshot_slide(prs, "Events", f"{start_date} to {end_date} - real GA4 Events view",
+                             ga4_events_screenshot)
+        if ga4_devices_screenshot:
+            _screenshot_slide(prs, "Devices", f"{start_date} to {end_date} - real GA4 Tech details view",
+                             ga4_devices_screenshot)
+        if ga4_source_medium_screenshot:
+            _screenshot_slide(prs, "Source / Medium",
+                             f"{start_date} to {end_date} - real GA4 User acquisition (source/medium) view",
+                             ga4_source_medium_screenshot)
+
     build_summary_slide(prs, domain)
     prs.save(out_path)
     log(f"[DONE] {out_path}")
@@ -843,6 +887,7 @@ def main():
     gsc_screenshot, ga4_screenshot = None, None
     gsc_queries_screenshot, gsc_pages_screenshot, gsc_countries_screenshot = None, None, None
     ga4_acquisition_screenshot, ga4_demographics_screenshot = None, None
+    ga4_events_screenshot, ga4_devices_screenshot, ga4_source_medium_screenshot = None, None, None
     # Real dashboard screenshots are now attempted for EVERY section whenever a
     # session is available, not just the ones that improved vs. the previous
     # period - previously a section with no improvement fell back to a native
@@ -879,6 +924,22 @@ def main():
                 if capture_ga4_nav_screenshot(driver, args.ga4_property,
                                               ["User attributes", "Demographic details"], path):
                     ga4_demographics_screenshot = path
+                # These 3 nav paths are newer additions and, like the SEO-channels
+                # filter above, not yet confirmed against a live GA4 account - if
+                # a label doesn't match GA4's real current UI, capture_ga4_nav_screenshot
+                # still captures whatever page was reached (never fails outright),
+                # and build_report() simply omits the slide if the screenshot path
+                # stays None, so a wrong guess here degrades gracefully rather than
+                # breaking the rest of the report.
+                path = os.path.join(shot_dir, "_ga4_events_screenshot.png")
+                if capture_ga4_nav_screenshot(driver, args.ga4_property, ["Engagement", "Events"], path):
+                    ga4_events_screenshot = path
+                path = os.path.join(shot_dir, "_ga4_devices_screenshot.png")
+                if capture_ga4_nav_screenshot(driver, args.ga4_property, ["Tech", "Tech details"], path):
+                    ga4_devices_screenshot = path
+                path = os.path.join(shot_dir, "_ga4_source_medium_screenshot.png")
+                if capture_ga4_nav_screenshot(driver, args.ga4_property, ["Acquisition", "User acquisition"], path):
+                    ga4_source_medium_screenshot = path
         except Exception as e:
             log(f"   [warn] Screenshot capture skipped: {type(e).__name__}: {e}")
         finally:
@@ -897,10 +958,13 @@ def main():
                 gsc_queries_screenshot=gsc_queries_screenshot, gsc_pages_screenshot=gsc_pages_screenshot,
                 gsc_countries_screenshot=gsc_countries_screenshot,
                 ga4_acquisition_screenshot=ga4_acquisition_screenshot,
-                ga4_demographics_screenshot=ga4_demographics_screenshot)
+                ga4_demographics_screenshot=ga4_demographics_screenshot,
+                ga4_events_screenshot=ga4_events_screenshot, ga4_devices_screenshot=ga4_devices_screenshot,
+                ga4_source_medium_screenshot=ga4_source_medium_screenshot)
 
     for p in (gsc_screenshot, ga4_screenshot, gsc_queries_screenshot, gsc_pages_screenshot,
-              gsc_countries_screenshot, ga4_acquisition_screenshot, ga4_demographics_screenshot):
+              gsc_countries_screenshot, ga4_acquisition_screenshot, ga4_demographics_screenshot,
+              ga4_events_screenshot, ga4_devices_screenshot, ga4_source_medium_screenshot):
         if p and os.path.exists(p):
             try:
                 os.remove(p)
