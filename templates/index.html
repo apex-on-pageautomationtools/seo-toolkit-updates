@@ -3154,13 +3154,20 @@
           <div class="field">
             <label>GSC Account <span class="hint">(for Search Console data - optional if you only want
                 GA4)</span></label>
-            <select id="perf-gsc-account" onchange="perfLoadGa4Properties()">
+            <select id="perf-gsc-account" onchange="perfOnGscAccountChanged()">
               <option value="">Loading accounts...</option>
             </select>
           </div>
           <div class="field">
-            <label>GA4 Property <span class="hint">(for Analytics data - pick an account above first; optional if you
-                only want GSC)</span></label>
+            <label>GA4 Account <span class="hint">(defaults to the GSC account above, but GSC and GA4 can be
+                connected under different Google accounts - change this if so)</span></label>
+            <select id="perf-ga4-account" onchange="perfLoadGa4Properties()">
+              <option value="">Loading accounts...</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>GA4 Property <span class="hint">(for Analytics data - pick a GA4 account above first; optional if
+                you only want GSC)</span></label>
             <input type="text" id="perf-ga4-search" placeholder="Select a GSC account first" autocomplete="off" readonly
               style="cursor:pointer" onclick="openGa4Picker()">
             <select id="perf-ga4-property" class="hidden">
@@ -5630,6 +5637,7 @@ https://example.com/page-2"></textarea>
           const perfDomain = $('perf-domain').value.trim();
           if (!perfDomain) { toast('Enter a domain'); return; }
           const perfGscAccount = $('perf-gsc-account').value;
+          const perfGa4Account = $('perf-ga4-account').value;
           const perfGa4Property = $('perf-ga4-property').value;
           if (!perfGscAccount && !perfGa4Property) { toast('Pick a GSC account and/or a GA4 property'); return; }
           setButtons('starting', 'performance');   // instant feedback, before the network round-trip
@@ -5638,7 +5646,7 @@ https://example.com/page-2"></textarea>
           $('perf-log').textContent = 'Starting...';
           const rp = await fetch('/api/performance/start', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ domain: perfDomain, gsc_account: perfGscAccount, ga4_property: perfGa4Property, days: parseInt($('perf-days').value) })
+            body: JSON.stringify({ domain: perfDomain, gsc_account: perfGscAccount, ga4_account: perfGa4Account, ga4_property: perfGa4Property, days: parseInt($('perf-days').value) })
           });
           const dp = await rp.json();
           if (dp.error) { toast(dp.error); setButtons('idle', 'performance'); $('empty-performance').style.display = 'block'; $('performance-active').classList.add('hidden'); return; }
@@ -6723,8 +6731,8 @@ https://example.com/page-2"></textarea>
         $('btn-perf-download').disabled = true;
         setButtons('idle', 'performance'); stopPerfPoll(); resetReportTimer('perf'); resetToolProgress('perf');
       }
-      async function perfLoadGscAccounts() {
-        const sel = $('perf-gsc-account');
+      async function _perfLoadAccountsInto(selId) {
+        const sel = $(selId);
         try {
           const r = await fetch('/api/gsc/accounts');
           const accs = await r.json();
@@ -6737,8 +6745,25 @@ https://example.com/page-2"></textarea>
           sel.innerHTML = '<option value="">Could not load accounts</option>';
         }
       }
+      async function perfLoadGscAccounts() {
+        await _perfLoadAccountsInto('perf-gsc-account');
+        await _perfLoadAccountsInto('perf-ga4-account');
+      }
+      function perfOnGscAccountChanged() {
+        // GSC and GA4 are usually the same account - default the GA4 picker
+        // to match whenever the GSC one changes, but this is just a
+        // convenience default: GA4 Account remains independently changeable
+        // for clients where Search Console and Analytics access were
+        // granted to different Google accounts.
+        const gscVal = $('perf-gsc-account').value;
+        const ga4Sel = $('perf-ga4-account');
+        if (gscVal && Array.from(ga4Sel.options).some(o => o.value === gscVal)) {
+          ga4Sel.value = gscVal;
+        }
+        perfLoadGa4Properties();
+      }
       function openGa4Picker() {
-        if (!$('perf-gsc-account').value) { toast('Pick a GSC account first'); return; }
+        if (!$('perf-ga4-account').value) { toast('Pick a GA4 account first'); return; }
         const sel = $('perf-ga4-property');
         const opts = Array.from(sel.options).filter(o => o.value || o.textContent === 'None').map(o => ({ value: o.value, label: o.value ? o.textContent : 'None' }));
         if (!opts.length) { toast(sel.options[0] ? sel.options[0].textContent : 'No properties available'); return; }
@@ -6747,13 +6772,13 @@ https://example.com/page-2"></textarea>
         });
       }
       async function perfLoadGa4Properties() {
-        const email = $('perf-gsc-account').value;
+        const email = $('perf-ga4-account').value;
         const sel = $('perf-ga4-property');
         const reauth = $('perf-ga4-reauth');
         const search = $('perf-ga4-search');
         reauth.classList.add('hidden');
-        if (search) { search.value = ''; search.placeholder = email ? 'Loading GA4 properties...' : 'Select a GSC account first'; }
-        if (!email) { sel.innerHTML = '<option value="">Select a GSC account first</option>'; return; }
+        if (search) { search.value = ''; search.placeholder = email ? 'Loading GA4 properties...' : 'Select a GA4 account first'; }
+        if (!email) { sel.innerHTML = '<option value="">Select a GA4 account first</option>'; return; }
         sel.innerHTML = '<option value="">Loading GA4 properties...</option>';
         try {
           const r = await fetch('/api/performance/ga4-properties?account=' + encodeURIComponent(email));
@@ -6784,14 +6809,14 @@ https://example.com/page-2"></textarea>
         // Whichever Google account is logged into in the browser that opens
         // becomes the reconnected one - same as reconnecting from GSC Audit.
         toast('Launching Google login to reconnect this account...');
-        const emailHint = $('perf-gsc-account') ? $('perf-gsc-account').value : '';
+        const emailHint = $('perf-ga4-account') ? $('perf-ga4-account').value : '';
         try {
           const r = await fetch('/api/gsc/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ browser: 'edge', email_hint: emailHint }) });
           const d = await r.json();
           if (d.error) { toast(d.error, 'err'); return; }
           toast('Reconnected: ' + d.email);
           await perfLoadGscAccounts();
-          $('perf-gsc-account').value = d.email;
+          $('perf-ga4-account').value = d.email;
           await perfLoadGa4Properties();
         } catch (e) { toast('Reconnect failed', 'err'); }
       }

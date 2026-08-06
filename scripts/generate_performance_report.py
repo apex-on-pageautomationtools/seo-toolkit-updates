@@ -214,6 +214,26 @@ def launch_screenshot_browser(session_id, browser_pref="edge", log_fn=None):
     return gsc_audit.launch_session_browser(session_id, browser_pref=browser_pref, log_fn=log_fn or log)
 
 
+def _robust_click(driver, element):
+    """A plain WebDriver .click() confirmed real failures live across every
+    click site in this file - "element not interactable" (GSC tabs, GA4 nav
+    items) and "element click intercepted" (GA4's own filter-panel footer
+    overlapping the button it was trying to click) - the matched element can
+    be technically present in the DOM but not yet scrolled into view, or
+    momentarily covered by another node, when WebDriver's own visibility/
+    hit-testing runs. Scroll it into view first, then try a native click,
+    falling back to a JS-dispatched click (bypasses that hit-testing
+    entirely) if the native one still fails - used at every click site in
+    this file instead of a bare element.click()."""
+    import time
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", element)
+    time.sleep(0.3)
+    try:
+        element.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", element)
+
+
 def capture_gsc_performance_screenshot(driver, property_url, improved_metrics, out_path, log_fn=None):
     """Navigates to GSC's own Performance report, sets the compare-to-
     previous-period view, and toggles the metric chips so only the metrics
@@ -254,7 +274,7 @@ def capture_gsc_performance_screenshot(driver, property_url, improved_metrics, o
                 is_on = "selected" in (chip.get_attribute("class") or "").lower() or \
                         chip.get_attribute("aria-pressed") == "true"
                 if is_on != wanted_on:
-                    chip.click()
+                    _robust_click(driver, chip)
                     time.sleep(1)
             except Exception as e:
                 log_fn(f"  [warn] Could not toggle '{label}' chip: {e}")
@@ -319,7 +339,7 @@ def capture_gsc_dimension_screenshot(driver, property_url, tab_label, out_path, 
     try:
         tabs = driver.find_elements(By.XPATH, f"//*[contains(text(), '{tab_label}')]")
         if tabs:
-            tabs[0].click()
+            _robust_click(driver, tabs[0])
             time.sleep(2)
         else:
             log_fn(f"  [warn] Could not find the '{tab_label}' tab - screenshot will show whatever tab is default.")
@@ -362,7 +382,7 @@ def _expand_ga4_nav_if_collapsed(driver, log_fn=None):
     try:
         toggles = driver.find_elements(By.XPATH, "//button[@aria-label='Nav toggle']")
         if toggles and toggles[0].get_attribute("aria-expanded") == "false":
-            toggles[0].click()
+            _robust_click(driver, toggles[0])
             time.sleep(1.5)
     except Exception as e:
         log_fn(f"  [warn] Could not confirm/expand the GA4 nav rail: {e}")
@@ -402,19 +422,51 @@ def _navigate_ga4_report(driver, ga4_property_name, nav_labels, log_fn=None):
             if not els:
                 log_fn(f"  [warn] Could not find GA4 nav item '{label}' - capturing whatever page was reached so far.")
                 break
-            els[0].click()
+            _robust_click(driver, els[0])
             time.sleep(3)
     except Exception as e:
         log_fn(f"  [warn] Could not navigate to GA4 '{nav_labels[-1]}' report: {e}")
     return True
 
 
-def capture_ga4_nav_screenshot(driver, ga4_property_name, nav_labels, out_path, log_fn=None):
+def capture_ga4_nav_screenshot(driver, ga4_property_name, nav_labels, out_path, log_fn=None,
+                               dimension_label=None):
     """Real screenshot of a specific GA4 standard report (e.g. Demographic
-    details) - see _navigate_ga4_report for how it gets there."""
+    details) - see _navigate_ga4_report for how it gets there. dimension_label
+    (optional): some reports (Tech details) default to a dimension other than
+    the one wanted - e.g. "Browser" instead of "Device category" - confirmed
+    live. When given, clicks the report's own dimension dropdown (its label
+    text, e.g. "Browser", sits right after the report title) and picks the
+    named option before capturing. Best-effort: on any failure, still
+    captures whatever dimension was showing rather than skipping the slide."""
+    import time
+    from selenium.webdriver.common.by import By
     log_fn = log_fn or log
     if not _navigate_ga4_report(driver, ga4_property_name, nav_labels, log_fn):
         return False
+    if dimension_label:
+        try:
+            dim_triggers = driver.find_elements(By.XPATH, "//*[@role='button' or @role='combobox']")
+            dim_triggers = [t for t in dim_triggers if t.is_displayed() and t.text.strip()
+                           and len(t.text.strip()) < 30] or dim_triggers
+            clicked = False
+            for t in dim_triggers[:5]:
+                try:
+                    _robust_click(driver, t)
+                    time.sleep(1)
+                    opts = driver.find_elements(By.XPATH, f"//*[contains(text(), '{dimension_label}')]")
+                    if opts:
+                        _robust_click(driver, opts[-1])
+                        time.sleep(2)
+                        clicked = True
+                        break
+                except Exception:
+                    continue
+            if not clicked:
+                log_fn(f"  [warn] Could not switch dimension to '{dimension_label}' - "
+                        f"screenshot will show the default dimension.")
+        except Exception as e:
+            log_fn(f"  [warn] Could not switch dimension to '{dimension_label}': {e}")
     try:
         driver.save_screenshot(out_path)
         log_fn(f"  GA4 {nav_labels[-1]} screenshot saved.")
@@ -443,7 +495,7 @@ def capture_ga4_seo_channels_screenshot(driver, ga4_property_name, out_path, log
     try:
         add_filter = driver.find_elements(By.XPATH, "//*[contains(text(), 'Add filter')]")
         if add_filter:
-            add_filter[0].click()
+            _robust_click(driver, add_filter[0])
             time.sleep(1.5)
             dim_search = driver.find_elements(
                 By.XPATH, "//input[contains(@placeholder, 'dimensions') or contains(@placeholder, 'Search')]")
@@ -452,16 +504,16 @@ def capture_ga4_seo_channels_screenshot(driver, ga4_property_name, out_path, log
                 time.sleep(1)
             dim_option = driver.find_elements(By.XPATH, "//*[contains(text(), 'Session default channel group')]")
             if dim_option:
-                dim_option[-1].click()
+                _robust_click(driver, dim_option[-1])
                 time.sleep(1)
             for group in SEO_CHANNEL_GROUPS:
                 opts = driver.find_elements(By.XPATH, f"//*[contains(text(), '{group}')]")
                 if opts:
-                    opts[-1].click()
+                    _robust_click(driver, opts[-1])
                     time.sleep(0.3)
             apply_btn = driver.find_elements(By.XPATH, "//*[contains(text(), 'Apply')]")
             if apply_btn:
-                apply_btn[-1].click()
+                _robust_click(driver, apply_btn[-1])
                 time.sleep(2)
             else:
                 log_fn("  [warn] Could not find GA4 filter 'Apply' button - screenshot may be unfiltered.")
@@ -821,15 +873,26 @@ def main():
     ap.add_argument("domain", help="Target domain, e.g. example.com")
     ap.add_argument("--out", required=True, help="Output .pptx path")
     ap.add_argument("--gsc-account", default=None, help="Connected GSC account email")
+    ap.add_argument("--ga4-account", default=None,
+                    help="Connected account email for GA4 API calls, if different from --gsc-account "
+                         "(a client may grant Search Console and Analytics access to different Google "
+                         "accounts). Defaults to --gsc-account when omitted.")
     ap.add_argument("--ga4-property", default=None, help='GA4 property resource name, e.g. "properties/123456789"')
     ap.add_argument("--days", type=int, default=28, help="How many days back to report on")
     ap.add_argument("--session-id", default=None,
-                    help="A GSC 'session' id (logged-in browser profile, see gsc_audit.py) for this "
-                         "account - if given, real GSC/GA4 dashboard screenshots are captured for every "
-                         "section regardless of improvement (the caption notes whether it improved vs. "
-                         "the previous period, or is just the current period's real dashboard view when "
-                         "not). Omit to skip screenshots entirely and use native charts only.")
+                    help="A GSC 'session' id (logged-in browser profile, see gsc_audit.py) for the "
+                         "--gsc-account - if given, real GSC dashboard screenshots (and GA4's, when GA4 "
+                         "uses the same account) are captured for every section regardless of "
+                         "improvement. Omit to skip GSC screenshots and use native charts only.")
+    ap.add_argument("--ga4-session-id", default=None,
+                    help="A separate GSC 'session' id for --ga4-account, when it's a different account "
+                         "from --gsc-account. Defaults to --session-id when omitted (the common case: "
+                         "same account for both).")
     args = ap.parse_args()
+    if not args.ga4_account:
+        args.ga4_account = args.gsc_account
+    if not args.ga4_session_id:
+        args.ga4_session_id = args.session_id
 
     if not args.gsc_account and not args.ga4_property:
         log("[ERROR] Provide --gsc-account and/or --ga4-property - nothing to report on otherwise.")
@@ -865,11 +928,11 @@ def main():
             log(f"   [warn] GSC data skipped: {type(e).__name__}: {e}")
 
     if args.ga4_property:
-        log(f"[2/4] Fetching Google Analytics data for {args.ga4_property}...")
+        log(f"[2/4] Fetching Google Analytics data for {args.ga4_property} (account: {args.ga4_account})...")
         try:
-            token = gsc_audit.get_access_token(args.gsc_account) if args.gsc_account else None
+            token = gsc_audit.get_access_token(args.ga4_account) if args.ga4_account else None
             if not token:
-                raise Exception("GA4 requires --gsc-account too (same OAuth token is used for both).")
+                raise Exception("GA4 requires --gsc-account and/or --ga4-account.")
             ga4_data = fetch_ga4_data(token, args.ga4_property, start_s, end_s)
             current_ga4 = fetch_ga4_totals(token, args.ga4_property, start_s, end_s)
             previous_ga4 = fetch_ga4_totals(token, args.ga4_property, prev_start_s, prev_end_s)
@@ -894,62 +957,81 @@ def main():
     # (synthetic) chart even though a real screenshot was just as capturable;
     # the caption below is what actually distinguishes "improved" framing from
     # a plain current-period view, not whether the screenshot itself exists.
-    if args.session_id and (gsc_data or ga4_data):
+    if (args.session_id or args.ga4_session_id) and (gsc_data or ga4_data):
         log("[3/4] Capturing real dashboard screenshots...")
-        driver = None
+        shot_dir = os.path.dirname(os.path.abspath(args.out)) or "."
+        # GSC and GA4 can be different Google accounts (--session-id vs.
+        # --ga4-session-id) - a single logged-in browser session can only
+        # ever be one Google account, so when they differ this launches TWO
+        # separate browser sessions, one per account, instead of trying to
+        # capture both dashboards through whichever account happened to be
+        # logged into the one browser. When they're the same (the common
+        # case), the second session is just a reference to the first - no
+        # second browser launch.
+        same_session = bool(args.ga4_session_id) and args.ga4_session_id == args.session_id
+        gsc_driver, ga4_driver = None, None
         try:
-            driver = launch_screenshot_browser(args.session_id)
-            shot_dir = os.path.dirname(os.path.abspath(args.out)) or "."
-            if gsc_data and property_url:
+            if args.session_id and gsc_data and property_url:
+                gsc_driver = launch_screenshot_browser(args.session_id)
                 path = os.path.join(shot_dir, "_gsc_perf_screenshot.png")
-                if capture_gsc_performance_screenshot(driver, property_url, gsc_improved, path):
+                if capture_gsc_performance_screenshot(gsc_driver, property_url, gsc_improved, path):
                     gsc_screenshot = path
                 path = os.path.join(shot_dir, "_gsc_queries_screenshot.png")
-                if capture_gsc_dimension_screenshot(driver, property_url, "Queries", path):
+                if capture_gsc_dimension_screenshot(gsc_driver, property_url, "Queries", path):
                     gsc_queries_screenshot = path
                 path = os.path.join(shot_dir, "_gsc_pages_screenshot.png")
-                if capture_gsc_dimension_screenshot(driver, property_url, "Pages", path):
+                if capture_gsc_dimension_screenshot(gsc_driver, property_url, "Pages", path):
                     gsc_pages_screenshot = path
                 path = os.path.join(shot_dir, "_gsc_countries_screenshot.png")
-                if capture_gsc_dimension_screenshot(driver, property_url, "Countries", path):
+                if capture_gsc_dimension_screenshot(gsc_driver, property_url, "Countries", path):
                     gsc_countries_screenshot = path
             if ga4_data and args.ga4_property:
-                path = os.path.join(shot_dir, "_ga4_screenshot.png")
-                if capture_ga4_screenshot(driver, args.ga4_property, path):
-                    ga4_screenshot = path
-                path = os.path.join(shot_dir, "_ga4_acquisition_screenshot.png")
-                if capture_ga4_seo_channels_screenshot(driver, args.ga4_property, path):
-                    ga4_acquisition_screenshot = path
-                path = os.path.join(shot_dir, "_ga4_demographics_screenshot.png")
-                if capture_ga4_nav_screenshot(driver, args.ga4_property,
-                                              ["User attributes", "Demographic details"], path):
-                    ga4_demographics_screenshot = path
-                # These 3 nav paths are newer additions and, like the SEO-channels
-                # filter above, not yet confirmed against a live GA4 account - if
-                # a label doesn't match GA4's real current UI, capture_ga4_nav_screenshot
-                # still captures whatever page was reached (never fails outright),
-                # and build_report() simply omits the slide if the screenshot path
-                # stays None, so a wrong guess here degrades gracefully rather than
-                # breaking the rest of the report.
-                path = os.path.join(shot_dir, "_ga4_events_screenshot.png")
-                if capture_ga4_nav_screenshot(driver, args.ga4_property, ["Engagement", "Events"], path):
-                    ga4_events_screenshot = path
-                path = os.path.join(shot_dir, "_ga4_devices_screenshot.png")
-                if capture_ga4_nav_screenshot(driver, args.ga4_property, ["Tech", "Tech details"], path):
-                    ga4_devices_screenshot = path
-                path = os.path.join(shot_dir, "_ga4_source_medium_screenshot.png")
-                if capture_ga4_nav_screenshot(driver, args.ga4_property, ["Acquisition", "User acquisition"], path):
-                    ga4_source_medium_screenshot = path
+                if same_session and gsc_driver:
+                    ga4_driver = gsc_driver
+                elif args.ga4_session_id:
+                    ga4_driver = launch_screenshot_browser(args.ga4_session_id)
+                else:
+                    log("   No --ga4-session-id given - skipping GA4 screenshots, using native charts instead.")
+                if ga4_driver:
+                    path = os.path.join(shot_dir, "_ga4_screenshot.png")
+                    if capture_ga4_screenshot(ga4_driver, args.ga4_property, path):
+                        ga4_screenshot = path
+                    path = os.path.join(shot_dir, "_ga4_acquisition_screenshot.png")
+                    if capture_ga4_seo_channels_screenshot(ga4_driver, args.ga4_property, path):
+                        ga4_acquisition_screenshot = path
+                    path = os.path.join(shot_dir, "_ga4_demographics_screenshot.png")
+                    if capture_ga4_nav_screenshot(ga4_driver, args.ga4_property,
+                                                  ["User attributes", "Demographic details"], path):
+                        ga4_demographics_screenshot = path
+                    # These 3 nav paths are newer additions and, like the SEO-channels
+                    # filter above, not yet confirmed against a live GA4 account - if
+                    # a label doesn't match GA4's real current UI, capture_ga4_nav_screenshot
+                    # still captures whatever page was reached (never fails outright),
+                    # and build_report() simply omits the slide if the screenshot path
+                    # stays None, so a wrong guess here degrades gracefully rather than
+                    # breaking the rest of the report.
+                    path = os.path.join(shot_dir, "_ga4_events_screenshot.png")
+                    if capture_ga4_nav_screenshot(ga4_driver, args.ga4_property, ["Engagement", "Events"], path):
+                        ga4_events_screenshot = path
+                    path = os.path.join(shot_dir, "_ga4_devices_screenshot.png")
+                    if capture_ga4_nav_screenshot(ga4_driver, args.ga4_property, ["Tech", "Tech details"], path,
+                                                  dimension_label="Device category"):
+                        ga4_devices_screenshot = path
+                    path = os.path.join(shot_dir, "_ga4_source_medium_screenshot.png")
+                    if capture_ga4_nav_screenshot(ga4_driver, args.ga4_property, ["Acquisition", "User acquisition"], path):
+                        ga4_source_medium_screenshot = path
         except Exception as e:
             log(f"   [warn] Screenshot capture skipped: {type(e).__name__}: {e}")
         finally:
-            if driver:
-                try:
-                    driver.quit()
-                except Exception:
-                    pass
+            for drv in ({id(gsc_driver): gsc_driver, id(ga4_driver): ga4_driver} if not same_session
+                        else {id(gsc_driver): gsc_driver}).values():
+                if drv:
+                    try:
+                        drv.quit()
+                    except Exception:
+                        pass
     elif gsc_data or ga4_data:
-        log("   No --session-id given - skipping real screenshots, using native charts instead.")
+        log("   No session available - skipping real screenshots, using native charts instead.")
 
     log("[4/4] Building report...")
     build_report(args.domain, args.out, gsc_data=gsc_data, ga4_data=ga4_data, start_date=start_s, end_date=end_s,

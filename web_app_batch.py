@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.35"
+APP_VERSION = "4.12.36"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4645,7 +4645,7 @@ perf_lock = threading.Lock()
 perf_stop = threading.Event()
 
 
-def _run_performance_report(domain, gsc_account, ga4_property, days):
+def _run_performance_report(domain, gsc_account, ga4_account, ga4_property, days):
     with perf_lock:
         perf_state.update({"status": "running", "log": [], "domain": domain,
                            "output_file": "", "error_msg": "", "progress": "Starting..."})
@@ -4680,6 +4680,18 @@ def _run_performance_report(domain, gsc_account, ga4_property, days):
                 f"instead of real dashboard screenshots (create one in GSC Audit for screenshots).")
     if ga4_property:
         cmd += ["--ga4-property", ga4_property]
+        # GA4 can be a genuinely different Google account than GSC (client
+        # granted Search Console and Analytics access separately) - pass its
+        # own account/session so GA4 API calls and screenshot capture use
+        # the account that actually owns the GA4 property, not GSC's.
+        if ga4_account and ga4_account != gsc_account:
+            cmd += ["--ga4-account", ga4_account]
+            ga4_session = gsc_audit.find_session_for_email(ga4_account)
+            if ga4_session:
+                cmd += ["--ga4-session-id", ga4_session["id"]]
+            else:
+                _log(f"No browser session for {ga4_account} - GA4 screenshots will be skipped "
+                    f"(native charts only) unless one is created in GSC Audit.")
 
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -4743,6 +4755,11 @@ def api_performance_start():
     if not domain:
         return jsonify({"error": "Domain is required."}), 400
     gsc_account = (data.get("gsc_account") or "").strip() or None
+    # GA4 Account defaults to the GSC account when not given separately - GSC
+    # and GA4 are usually the same account, but a client may have granted
+    # them to different Google accounts, so the frontend now lets this be
+    # picked independently.
+    ga4_account = (data.get("ga4_account") or "").strip() or gsc_account
     ga4_property = (data.get("ga4_property") or "").strip() or None
     if not gsc_account and not ga4_property:
         return jsonify({"error": "Connect a GSC account and/or pick a GA4 property first."}), 400
@@ -4751,7 +4768,7 @@ def api_performance_start():
     except (TypeError, ValueError):
         days = 28
     t = threading.Thread(target=_run_performance_report,
-                          args=(domain, gsc_account, ga4_property, days), daemon=True)
+                          args=(domain, gsc_account, ga4_account, ga4_property, days), daemon=True)
     t.start()
     return jsonify({"status": "started"})
 
