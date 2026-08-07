@@ -1,5 +1,5 @@
 {
-  "version": "4.12.38",
+  "version": "4.12.39",
   "files": [
     {
       "path": "da_checker.py",
@@ -33,7 +33,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "79bdd00a3bb3aa1aea1c9013ca1bd84667d9f24ea804c3860f1f7f2b14439a48",
+      "hash": "b860534fd6668b51cbfe889e41f69afa53204c4188083722663a3af3eaeaee88",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -198,7 +198,7 @@
     },
     {
       "path": "scripts/generate_seranking_audit.py",
-      "hash": "31df756ae651580d5740318f2639b2c7e9dfbdedc93307795a650edf2882f282",
+      "hash": "e3a1b832ffe6c467264b59f41cd6930be0e3390d192d995032ac3b8815dacc37",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seranking_audit.py"
     },
     {

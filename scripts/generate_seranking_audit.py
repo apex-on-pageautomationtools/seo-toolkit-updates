@@ -330,6 +330,146 @@ def build_pdf_summary_rows(pdf_path):
 
 
 # --------------------------------------------------------------------------- #
+# Structured PDF issue extraction (SE Ranking's own "Site Audit" PDF export) -
+# unlike the generic text-dump above, this PDF has real per-issue tables
+# ("<Issue Name> <affected> <new> <fixed>" header, followed by the affected
+# page URLs) that can be turned into the SAME per-issue sheets the .xlsx path
+# produces, complete with real suggestions.
+#
+# Confirmed live (jumpyparty.com PDF export): pdfminer.six's default layout
+# analysis (used by extract_pdf_text() above) reorders this specific
+# card/table layout's text - an issue's own "<count> <new> <fixed>" numbers
+# can land dozens of lines away from its label, breaking any header/URL
+# pairing. pdfplumber's simpler position-based line reconstruction keeps the
+# label and its 3 numbers on one line as they're visually laid out, so this
+# uses pdfplumber specifically for this extraction (extract_pdf_text() above
+# is left untouched, still pdfminer-first, for the generic prose/summary case).
+# --------------------------------------------------------------------------- #
+def _ensure_pdfplumber():
+    """Installed on first use into this same embedded interpreter, same
+    pattern as _ensure_pdfminer() above. Returns None (never raises) if
+    pip/PyPI isn't reachable - caller falls back to the generic text dump."""
+    try:
+        import pdfplumber
+        return pdfplumber
+    except ImportError:
+        pass
+    try:
+        import subprocess
+        subprocess.run([sys.executable, "-m", "pip", "install", "pdfplumber", "--quiet"],
+                        timeout=180, capture_output=True, check=True)
+        import pdfplumber
+        return pdfplumber
+    except Exception:
+        return None
+
+
+# SE Ranking's PDF export caps each issue's own URL list at 100 entries even
+# when the header states more pages are affected (confirmed live: "Alt text
+# missing 217 0 0" only lists 100 URLs in the PDF body) - the remaining pages
+# genuinely aren't in the document, not a parsing gap.
+_PDF_ISSUE_URL_CAP = 100
+
+_PDF_ISSUE_HEADER_RE = re.compile(r"^([A-Za-z][A-Za-z0-9 ,()/&\-]*?)\s+(\d+)\s+(\d+)\s+(\d+)$")
+_PDF_ISSUE_SKIP_LINE = re.compile(r"^(SEO Services|Aug-\d\d \d{4} \d+|ISSUES PAGES NEW FIXED)$", re.I)
+_PDF_URL_CONTINUATION_RE = re.compile(r"^[\w\-/%._~]+/?$")
+
+
+def extract_pdf_issue_tables(pdf_path):
+    """{issue label: {"stated": int, "urls": [...]}} parsed from the PDF's own
+    per-issue tables. Returns {} if this PDF doesn't have that per-issue
+    table structure at all (e.g. pdfplumber unavailable, or a different PDF
+    export style) - caller falls back to the generic text-dump sheet."""
+    pdfplumber = _ensure_pdfplumber()
+    if pdfplumber is None:
+        return {}
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            full_text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+    except Exception as e:
+        log(f"   [warn] pdfplumber could not read {pdf_path}: {type(e).__name__}: {e}")
+        return {}
+
+    lines = [l.strip() for l in full_text.splitlines() if l.strip()]
+
+    # The first pages are a health-score dashboard (stat blocks that also look
+    # like "<label> N N N") - the real per-issue detail section always starts
+    # with this column caption line, repeated per page from there on.
+    start = None
+    for i, l in enumerate(lines):
+        if l.strip().upper() == "ISSUES PAGES NEW FIXED":
+            start = i
+            break
+    if start is None:
+        return {}  # not this PDF layout - nothing to safely extract
+
+    issues = {}
+    current = None
+    i = start
+    while i < len(lines):
+        line = lines[i]
+        if _PDF_ISSUE_SKIP_LINE.match(line):
+            i += 1
+            continue
+        m = _PDF_ISSUE_HEADER_RE.match(line)
+        if m:
+            current = m.group(1).strip()
+            issues.setdefault(current, {"stated": int(m.group(2)), "urls": []})
+            i += 1
+            continue
+        if current and line.startswith(("http://", "https://")):
+            url = line
+            # a long URL sometimes wraps onto the next line with no scheme -
+            # stitch it back as long as that next line doesn't look like the
+            # start of a new URL/header/caption itself.
+            while i + 1 < len(lines) and not lines[i + 1].startswith(("http://", "https://")) \
+                    and not _PDF_ISSUE_HEADER_RE.match(lines[i + 1]) \
+                    and not _PDF_ISSUE_SKIP_LINE.match(lines[i + 1]):
+                nxt = lines[i + 1]
+                if " " not in nxt and _PDF_URL_CONTINUATION_RE.match(nxt):
+                    url += nxt
+                    i += 1
+                else:
+                    break
+            issues[current]["urls"].append(url)
+        i += 1
+
+    # Never report more affected URLs than the issue's own header claims -
+    # a stray boundary-detection miss (two blocks' URLs briefly merging)
+    # should never inflate the count past what SE Ranking itself stated.
+    for d in issues.values():
+        d["urls"] = d["urls"][:max(d["stated"], 1)]
+    return issues
+
+
+def build_pdf_issue_sheets(pdf_path):
+    """[(sheet_name, headers, rows), ...] - one sheet per issue type found in
+    the PDF's own per-issue tables, in the same (headers, rows) shape
+    _read_sheet() produces from an .xlsx sheet, so it flows through the exact
+    same _apply_suggestions()/_apply_generic_advice() pipeline and comes out
+    with real suggestions, not just a raw text dump.
+
+    An issue whose header states more pages than the PDF actually lists (SE
+    Ranking's own cap - see _PDF_ISSUE_URL_CAP) gets every page the PDF DOES
+    show, plus one trailing note row saying how many more exist and that the
+    .xlsx export is needed for those - never silently drops them without
+    saying so."""
+    issues = extract_pdf_issue_tables(pdf_path)
+    sheets = []
+    for label, d in issues.items():
+        stated, urls = d["stated"], d["urls"]
+        shown = urls[:_PDF_ISSUE_URL_CAP]
+        rows = [[u] for u in shown]
+        remaining = stated - len(shown)
+        if remaining > 0:
+            rows.append([f"+ {remaining} more page(s) affected by this issue - SE Ranking's PDF "
+                         f"export only lists the first {len(shown)}. Please provide the .xlsx "
+                         f"export for the complete list."])
+        sheets.append((label, ["Page URL"], rows))
+    return sheets
+
+
+# --------------------------------------------------------------------------- #
 # Live page fetch - best-effort, never raises. Same shape suggest_meta() wants.
 # --------------------------------------------------------------------------- #
 _UA = "Mozilla/5.0 SERankingAuditBot"
@@ -779,6 +919,9 @@ def process_workbook(in_path, out_path, brand, pdf_path=None, zip_path=None):
     if zip_path:
         for fname, headers, rows in _read_seranking_zip(zip_path):
             total_rows += len(rows)
+    pdf_sheets = build_pdf_issue_sheets(pdf_path) if pdf_path else None
+    if pdf_sheets:
+        total_rows += sum(len(rows) for _, _, rows in pdf_sheets)
     onpage2.set_run_scale(total_rows)
 
     if in_path:
@@ -819,9 +962,25 @@ def process_workbook(in_path, out_path, brand, pdf_path=None, zip_path=None):
 
     if pdf_path:
         log(f"Reading PDF: {pdf_path}")
-        rows = build_pdf_summary_rows(pdf_path)
-        log(f"   Extracted {len(rows)} line(s) of text.")
-        _write_sheet(wb_out, "PDF Summary", ["#", "Text"], rows)
+        if pdf_sheets:
+            # SE Ranking's own "Site Audit" PDF export - real per-issue tables,
+            # processed through the exact same suggestion pipeline as an xlsx
+            # sheet (see build_pdf_issue_sheets()'s docstring).
+            log(f"   Found {len(pdf_sheets)} issue table(s) in the PDF.")
+            for i, (sheet_name, headers, rows) in enumerate(pdf_sheets):
+                log(f"[{i + 1}/{len(pdf_sheets)}] Processing '{sheet_name}' ({len(rows)} row(s))...")
+                if _norm(sheet_name) == "all issue":
+                    continue
+                headers, rows = _apply_suggestions(sheet_name, headers, rows, brand)
+                headers, rows = _apply_generic_advice(sheet_name, headers, rows)
+                _write_sheet(wb_out, sheet_name, headers, rows)
+                issue_sheet_names.append(sheet_name)
+        else:
+            # Not that PDF layout (e.g. a SEMrush summary export) - fall back
+            # to a plain readable text dump rather than producing nothing.
+            rows = build_pdf_summary_rows(pdf_path)
+            log(f"   No per-issue tables found - extracted {len(rows)} line(s) of text instead.")
+            _write_sheet(wb_out, "PDF Summary", ["#", "Text"], rows)
 
     if issue_sheet_names:
         label = brand or Path(in_path or zip_path or out_path).stem
