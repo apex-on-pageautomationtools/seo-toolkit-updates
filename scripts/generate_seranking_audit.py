@@ -374,6 +374,13 @@ _PDF_ISSUE_HEADER_RE = re.compile(r"^([A-Za-z][A-Za-z0-9 ,()/&\-]*?)\s+(\d+)\s+(
 _PDF_ISSUE_SKIP_LINE = re.compile(r"^(SEO Services|Aug-\d\d \d{4} \d+|ISSUES PAGES NEW FIXED)$", re.I)
 _PDF_URL_CONTINUATION_RE = re.compile(r"^[\w\-/%._~]+/?$")
 
+# Issue labels where the PDF's listed URL is the PAGE that has the problem,
+# not the specific broken/redirecting link itself (see build_pdf_issue_sheets()
+# docstring) - e.g. "Internal links to 3XX redirect pages", "External links
+# to 3XX", "External JavaScript with 3XX, 4XX or 5XX".
+_PDF_LINK_ONLY_ISSUE_RE = re.compile(r"\blinks?\b", re.I)
+_PDF_RESOURCE_STATUS_ISSUE_RE = re.compile(r"(javascript|css|\bimage\b).*\b(3xx|4xx|5xx)\b", re.I)
+
 
 def extract_pdf_issue_tables(pdf_path):
     """{issue label: {"stated": int, "urls": [...]}} parsed from the PDF's own
@@ -453,19 +460,40 @@ def build_pdf_issue_sheets(pdf_path):
     Ranking's own cap - see _PDF_ISSUE_URL_CAP) gets every page the PDF DOES
     show, plus one trailing note row saying how many more exist and that the
     .xlsx export is needed for those - never silently drops them without
-    saying so."""
+    saying so.
+
+    A "links" issue (Internal/External links to 3XX, links missing anchor,
+    inbound links, a page's embedded JS/CSS/image returning 3XX/4XX/5XX, etc.)
+    only ever lists the PAGE that has the problem - confirmed live against a
+    real export (both the PDF's visible text AND its hyperlink annotations
+    were checked directly) that SE Ranking's PDF never includes the specific
+    broken/redirecting link's own URL or where on the page it sits, unlike
+    the .xlsx export's extra column for that. Rather than silently leaving
+    that gap unexplained, these sheets get a "Note" column saying so."""
     issues = extract_pdf_issue_tables(pdf_path)
     sheets = []
     for label, d in issues.items():
         stated, urls = d["stated"], d["urls"]
         shown = urls[:_PDF_ISSUE_URL_CAP]
-        rows = [[u] for u in shown]
+        link_only = bool(_PDF_LINK_ONLY_ISSUE_RE.search(label) or _PDF_RESOURCE_STATUS_ISSUE_RE.search(label))
+        if link_only:
+            headers = ["Page URL", "Note"]
+            rows = [[u, None] for u in shown]
+            if rows:
+                rows[0][1] = ("This is the page that has the issue - SE Ranking's PDF export "
+                              "doesn't include the specific broken/redirecting link's own URL "
+                              "or where on the page it sits. Check the page's outbound links "
+                              "manually, or provide the .xlsx export for the exact link.")
+        else:
+            headers = ["Page URL"]
+            rows = [[u] for u in shown]
         remaining = stated - len(shown)
         if remaining > 0:
-            rows.append([f"+ {remaining} more page(s) affected by this issue - SE Ranking's PDF "
-                         f"export only lists the first {len(shown)}. Please provide the .xlsx "
-                         f"export for the complete list."])
-        sheets.append((label, ["Page URL"], rows))
+            note = (f"+ {remaining} more page(s) affected by this issue - SE Ranking's PDF "
+                    f"export only lists the first {len(shown)}. Please provide the .xlsx "
+                    f"export for the complete list.")
+            rows.append([note, None] if link_only else [note])
+        sheets.append((label, headers, rows))
     return sheets
 
 
@@ -634,7 +662,14 @@ _NAME_JUDGMENT_RULES = [
     (re.compile(r"h1", re.I), "h1"),
     (re.compile(r"title", re.I), "title"),
     (re.compile(r"description", re.I), "desc"),
-    (re.compile(r"4xx|broken|dead.?link", re.I), "broken"),
+    # The negative lookahead excludes issues about an EMBEDDED RESOURCE's own
+    # status (e.g. "External JavaScript with 3XX, 4XX or 5XX") - confirmed
+    # live via a SEranking PDF export, that sheet's rows are the PAGE that
+    # references the broken resource, not the resource itself, so running
+    # the broken-link HEAD-check against them checks whether the PAGE loads
+    # (always yes) and wrongly reports "No changes needed - link is live" for
+    # a page that actually has a broken embedded script/stylesheet/image.
+    (re.compile(r"^(?!.*(javascript|css|\bimage\b)).*\b(4xx|broken|dead.?link)\b", re.I), "broken"),
     (re.compile(r"alt.?text|alt.?tag|missing.?alt", re.I), "alt"),
     (re.compile(r"canonical", re.I), "canon"),
 ]
