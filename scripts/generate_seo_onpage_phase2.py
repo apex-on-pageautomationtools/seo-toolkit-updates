@@ -301,6 +301,30 @@ def _allowed_image_host(src, site_host):
 
 
 # -------------------------------------------------------------------- crawling
+# A bot-check/security-challenge interstitial (Cloudflare-style "Checking your
+# browser", DDoS-Guard, etc.) served instead of the real page - confirmed live,
+# a target page returned this and its "Checking your browser" H1 + no meta
+# description got reported as the site's REAL existing content, and the
+# challenge page's own body text ("We are currently performing a quick
+# security check...") got fed to AI as if it were the page's actual content,
+# producing a bogus suggested title/description about a security check. Same
+# marker list health_audit.py's _looks_like_challenge_page() already uses.
+_CHALLENGE_PAGE_MARKERS = (
+    "checking your browser", "just a moment", "cf-browser-verification",
+    "attention required", "please turn javascript on and reload",
+    "ddos protection by", "please wait while we verify",
+    "enable javascript and cookies to continue", "cf-chl-",
+    "verifying you are human", "unusual traffic",
+)
+
+
+def _looks_like_challenge_page(html):
+    if not html:
+        return False
+    low = html.lower()
+    return any(m in low for m in _CHALLENGE_PAGE_MARKERS)
+
+
 def _mock_page(url, keywords):
     kw = keywords[0] if keywords else "page"
     return {
@@ -436,11 +460,27 @@ def _crawl_selenium(url, keywords):
 
 
 def _crawl_rendered(url, keywords):
-    """Prefer a real browser render (selenium+Chrome), fall back to raw HTTP."""
+    """Prefer a real browser render (selenium+Chrome), fall back to raw HTTP.
+    If a result looks like a bot-check/security-challenge page rather than the
+    real page, try the other method before accepting it - a headless browser
+    is more likely to trip a challenge than a plain HTTP fetch, but either can
+    hit one. If BOTH look like a challenge, still return a result (never crash
+    the run) but flag it with page_data["blocked"] = True so downstream code
+    reports "could not check" instead of presenting the challenge page's own
+    title/H1/text as if it were the site's real existing content."""
     sel = _crawl_selenium(url, keywords)
-    if sel is not None:
+    if sel is not None and not _looks_like_challenge_page(sel.get("html")):
         return sel
-    return _crawl_requests(url, keywords)
+    req = _crawl_requests(url, keywords)
+    if req is not None and not _looks_like_challenge_page(req.get("html")):
+        return req
+    result = sel or req
+    if result is not None and _looks_like_challenge_page(result.get("html")):
+        result["blocked"] = True
+        log(f"   [warn] {url} returned a bot-check/security-challenge page instead of "
+            f"real content - reporting existing title/description/H1 as unavailable "
+            f"rather than the challenge page's own text.")
+    return result
 
 
 def crawl_page(url, keywords, dry_run=False):
@@ -462,7 +502,18 @@ def crawl_page(url, keywords, dry_run=False):
             html = page.content()
             final_url = page.url
             browser.close()
-        return _parse_html(html, final_url or url, status)
+        result = _parse_html(html, final_url or url, status)
+        if _looks_like_challenge_page(result.get("html")):
+            # patchright hit a bot-check page too - try selenium/raw before
+            # giving up, same as _crawl_rendered does for its own two methods.
+            fallback = _crawl_rendered(url, keywords)
+            if fallback is not None and not _looks_like_challenge_page(fallback.get("html")):
+                return fallback
+            result["blocked"] = True
+            log(f"   [warn] {url} returned a bot-check/security-challenge page instead of "
+                f"real content (patchright + fallback both hit it) - reporting existing "
+                f"title/description/H1 as unavailable rather than the challenge text.")
+        return result
     except Exception as e:
         log(f"   [warn] browser crawl failed for {url}: {type(e).__name__}: {e}")
         return _crawl_rendered(url, keywords)      # patchright failed -> selenium/raw
@@ -970,6 +1021,25 @@ def suggest_meta(page_data, keywords, brand, keyword_ranks=None):
     title should not get overwritten - and the sheet instead says to check it against
     the ranking. A description is suggested whenever it's missing, too short, or
     missing its target keyword (not optimized)."""
+    if page_data.get("blocked"):
+        # Crawl hit a bot-check/security-challenge page instead of the real
+        # one (see _looks_like_challenge_page) - its title/H1/body text is
+        # the challenge interstitial's own copy, not the site's actual
+        # content, so it must never be presented as "existing" data or fed to
+        # AI as if it were real. Report the block plainly instead.
+        blocked_msg = ("Could not check - page returned a bot-check/security "
+                       "challenge instead of real content. Please check manually.")
+        return {
+            "page": page_data["url"],
+            "existing_title": blocked_msg,
+            "suggested_title": "Check manually - page was blocked",
+            "existing_description": blocked_msg,
+            "suggested_description": "Check manually - page was blocked",
+            "existing_h1": blocked_msg,
+            "suggested_h1": "Check manually as per ranking and traffic",
+            "content_match": "Could not check - page was blocked by a bot-check/security challenge",
+        }
+
     existing_title = page_data["title"]
     existing_desc = page_data["description"]
     existing_h1 = page_data["h1"]
@@ -1184,6 +1254,13 @@ def suggest_alt(page_data, keywords, brand, domain=""):
 
 def recommend_canonical(page_data):
     url = page_data["url"]
+    if page_data.get("blocked"):
+        # Same bot-check/security-challenge situation suggest_meta() guards
+        # against - the challenge page's own (or absent) canonical tag isn't
+        # the real page's, so don't recommend against it.
+        blocked_msg = ("Could not check - page returned a bot-check/security "
+                       "challenge instead of real content. Please check manually.")
+        return {"page": url, "existing": blocked_msg, "recommended": "Check manually - page was blocked"}
     existing = page_data.get("canonical") or MISSING
     m = re.search(r'href="([^"]+)"', existing)
     existing_href = m.group(1).strip() if m else None
