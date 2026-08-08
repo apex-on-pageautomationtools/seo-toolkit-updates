@@ -748,43 +748,98 @@ def _click_export_download_csv(driver, download_dir, log_fn, timeout=25, debug_l
     candidate button up to its own ancestor [data-export-url] wrapper and
     picks the one actually matching the expected scope."""
     from selenium.webdriver.common.by import By
-    export_btns = driver.find_elements(By.CSS_SELECTOR, "[jsname='Kl7ZDb'][aria-label='EXPORT']")
-    if not export_btns:
-        export_btns = driver.find_elements(
-            By.XPATH, "//*[contains(translate(@aria-label,'EXPORT','export'),'export')]")
-    if not export_btns:
-        log_fn("    [warn] No Export control found.")
-        if debug_label:
-            _save_debug_artifacts(driver, f"{debug_label}_no_export_btn", log_fn)
-        return None
-    target_btn = export_btns[0]
-    if expected_scope:
-        matched = None
-        for btn in export_btns:
+    from selenium.common.exceptions import StaleElementReferenceException
+
+    def _find_scoped_export_btn():
+        """A FRESH query every call - confirmed live (the first reason in a
+        run succeeds, every one after it fails identically) that reusing an
+        element reference found even a second earlier can go stale once GSC's
+        SPA re-renders the header again, and both _robust_click()'s native
+        and JS-click fallbacks silently swallow StaleElementReferenceException
+        rather than surfacing it - looked exactly like "the click did
+        nothing" with zero error. Re-querying right before each click
+        minimizes that window instead of trusting one lookup for the whole
+        multi-step sequence."""
+        btns = driver.find_elements(By.CSS_SELECTOR, "[jsname='Kl7ZDb'][aria-label='EXPORT']")
+        if not btns:
+            btns = driver.find_elements(
+                By.XPATH, "//*[contains(translate(@aria-label,'EXPORT','export'),'export')]")
+        if not btns:
+            return None
+        if not expected_scope:
+            return btns[0]
+        for btn in btns:
             try:
                 wrapper = btn.find_element(By.XPATH, "./ancestor::*[@data-export-url][1]")
                 if wrapper.get_attribute("data-export-url") == expected_scope:
-                    matched = btn
-                    break
+                    return btn
             except Exception:
                 continue
-        if matched is not None:
-            target_btn = matched
-        elif len(export_btns) > 1:
-            log_fn(f"    [warn] {len(export_btns)} Export button(s) found but none scoped to "
-                   f"'{expected_scope}' - using the first one (may be stale).")
+        return btns[0]
+
     before = set(os.listdir(download_dir))
-    _robust_click(driver, target_btn)
+    last_stale = False
+    for attempt in range(3):
+        try:
+            target_btn = _find_scoped_export_btn()
+            if target_btn is None:
+                log_fn("    [warn] No Export control found.")
+                if debug_label:
+                    _save_debug_artifacts(driver, f"{debug_label}_no_export_btn", log_fn)
+                return None
+            target_btn.click()
+        except StaleElementReferenceException:
+            last_stale = True
+            log_fn(f"    [warn] Export button went stale mid-click (attempt {attempt + 1}/3) - retrying...")
+            time.sleep(0.5)
+            continue
+        except Exception:
+            try:
+                driver.execute_script("arguments[0].scrollIntoView({block:'center'});", target_btn)
+                driver.execute_script("arguments[0].click();", target_btn)
+            except StaleElementReferenceException:
+                last_stale = True
+                log_fn(f"    [warn] Export button went stale mid-click (attempt {attempt + 1}/3) - retrying...")
+                time.sleep(0.5)
+                continue
+            except Exception:
+                pass
+        last_stale = False
+        break
+    if last_stale:
+        log_fn("    [warn] Export button stayed stale across every retry.")
+        if debug_label:
+            _save_debug_artifacts(driver, f"{debug_label}_stale_export_btn", log_fn)
+        return None
+
     time.sleep(1)
-    csv_opts = driver.find_elements(By.CSS_SELECTOR, "[aria-label='Download CSV']")
+    csv_opts = None
+    for attempt in range(3):
+        try:
+            opts = driver.find_elements(By.CSS_SELECTOR, "[aria-label='Download CSV']")
+            if not opts:
+                opts = driver.find_elements(By.XPATH, "//*[contains(text(), 'Download CSV')]")
+            if not opts:
+                break
+            opts[0].click()
+            csv_opts = opts
+            break
+        except StaleElementReferenceException:
+            log_fn(f"    [warn] 'Download CSV' item went stale mid-click (attempt {attempt + 1}/3) - retrying...")
+            time.sleep(0.5)
+            continue
+        except Exception:
+            try:
+                driver.execute_script("arguments[0].click();", opts[0])
+                csv_opts = opts
+                break
+            except Exception:
+                break
     if not csv_opts:
-        csv_opts = driver.find_elements(By.XPATH, "//*[contains(text(), 'Download CSV')]")
-    if not csv_opts:
-        log_fn("    [warn] No 'Download CSV' menu item found.")
+        log_fn("    [warn] No 'Download CSV' menu item found (or stayed stale).")
         if debug_label:
             _save_debug_artifacts(driver, f"{debug_label}_no_csv_item", log_fn)
         return None
-    _robust_click(driver, csv_opts[0])
     result = _find_downloaded_export(download_dir, before, timeout=timeout)
     if not result and debug_label:
         log_fn(f"    [warn] Clicked Export -> Download CSV but no file appeared within {timeout}s.")
