@@ -1932,6 +1932,15 @@
         </svg>
         <span class="sb-label">SEranking/SEMrush Audit</span>
       </button>
+      <button class="sb-item" id="tab-indexcoverage" data-tip="Index Coverage Report" onclick="switchTab('indexcoverage')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="9" y1="13" x2="15" y2="13" />
+          <line x1="9" y1="17" x2="12" y2="17" />
+        </svg>
+        <span class="sb-label">Index Coverage Report</span>
+      </button>
       <button class="sb-item" id="tab-geo" data-tip="GEO/AI Optimization Suggestions" onclick="switchTab('geo')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <circle cx="12" cy="12" r="3" />
@@ -2902,23 +2911,6 @@
           <div class="note">Google account connections and Browser Sessions are managed in the <a href="#"
               onclick="switchTab('gscaccounts');return false;">Google Accounts</a> tab - the account that owns a domain
             is selected automatically once it's connected there, no need to pick one here.</div>
-
-          <div class="field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
-            <label>Index Coverage Report <span class="testing-badge">(testing)</span></label>
-            <p style="color:var(--text-3);font-size:12px;margin:2px 0 10px;line-height:1.4">Turns Search Console's
-              Page Indexing report into a client-ready workbook - one tab per indexing reason (Discovered/Crawled -
-              not indexed, Soft 404, Not found 404 with a real redirect suggestion, etc.), every URL live-status-
-              checked. Uses the domain above.</p>
-            <div style="display:flex;gap:8px">
-              <button class="btn btn-primary" id="ic-run-btn" style="font-size:12px;padding:6px 14px"
-                onclick="icStart()">Run Index Coverage Report</button>
-              <button class="btn btn-tonal" id="ic-stop-btn" style="font-size:12px;padding:6px 14px;display:none"
-                onclick="icStop()">Stop</button>
-              <a class="btn btn-tonal" id="ic-download-btn" style="font-size:12px;padding:6px 14px;display:none"
-                href="/api/index-coverage/download">Download Report</a>
-            </div>
-            <div id="ic-status" style="font-size:11px;color:var(--text-3);margin-top:8px;white-space:pre-line"></div>
-          </div>
         </section>
 
         <!-- GOOGLE ACCOUNTS (shared across GSC Audit, Submit for Indexing fallback, and any other tool that needs a connected account) -->
@@ -3083,6 +3075,47 @@
             this app's own Python the first time you use it (needs internet access once); if that install can't
             complete, PDF falls back to a best-effort text extraction and reports honestly when it can't reliably read a
             page.</div>
+        </section>
+
+        <section class="card panel" id="panel-indexcoverage" style="display:none">
+          <div class="card-t">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="9" y1="13" x2="15" y2="13" />
+              <line x1="9" y1="17" x2="12" y2="17" />
+            </svg>
+            Index Coverage Report <span class="testing-badge">(testing)</span>
+          </div>
+          <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Turns Search Console's Page
+            Indexing report into a client-ready workbook - one tab per indexing reason (Discovered/Crawled - not
+            indexed, Soft 404, Not found 404 with a real redirect suggestion, etc.), every URL live-status-checked
+            (never trusts GSC's own possibly-stale recorded reason). Upload the exports yourself: in GSC's Pages
+            report, click <b>Export → Download CSV</b> on the main summary page, then open each reason you want
+            included and do the same there.</p>
+          <div class="field">
+            <label>Domain</label>
+            <input type="text" id="ic2-domain" placeholder="example.com" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Brand name <span class="hint">(optional)</span></label>
+            <input type="text" id="ic2-brand" placeholder="e.g. Ace Abseiling" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Coverage export (summary) <span class="hint">(the ZIP from the main Pages report's Export →
+                Download CSV)</span></label>
+            <input type="file" id="ic2-summary" accept=".zip">
+          </div>
+          <div class="field">
+            <label>Coverage-Drilldown export(s) <span class="hint">(one ZIP per reason you want included - each
+                self-identifies its reason, no need to label them)</span></label>
+            <input type="file" id="ic2-drilldowns" accept=".zip" multiple>
+          </div>
+          <div class="note">Each URL is checked live before the report is built, so a page GSC still classifies under
+            an old reason (e.g. "Page with redirect") but that's since been fixed shows up correctly rather than
+            repeating GSC's possibly-stale classification. GSC's own export caps each reason at 1,000 rows - if a
+            reason has more affected pages than that, the report says so explicitly rather than reporting a partial
+            list as if it were complete.</div>
         </section>
 
         <section class="card panel" id="panel-geo" style="display:none">
@@ -3753,6 +3786,42 @@ https://example.com/page-2"></textarea>
                 </button>
                 <button class="btn btn-tonal" onclick="srReset()">New Audit</button>
                 <button class="btn btn-tonal" onclick="copyLogText('sr-log')">Copy Log</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- index coverage report -->
+          <div id="tbl-indexcoverage" style="flex:1;display:none">
+            <div class="empty" id="empty-indexcoverage">
+              <div class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="9" y1="13" x2="15" y2="13" />
+                  <line x1="9" y1="17" x2="12" y2="17" />
+                </svg></div>
+              <p>Upload the Coverage export + at least one Coverage-Drilldown export and click <b>Start</b>.</p>
+            </div>
+            <div id="indexcoverage-active" class="hidden">
+              <div style="margin-bottom:12px">
+                <span class="tag t-yes" id="ic-progress">Starting...</span>
+                <span id="ic-timer" style="font-size:12px;color:var(--text-3);margin-left:8px"></span>
+              </div>
+              <div class="prog" style="margin-bottom:12px">
+                <div class="prog-bar" id="ic-progbar"></div>
+              </div>
+              <div class="log" id="ic-log" style="height:350px;overflow-y:auto;font-size:12px"></div>
+              <div style="margin-top:14px;display:flex;gap:10px">
+                <button class="btn btn-primary" id="btn-ic-download" onclick="icDownload()" disabled>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Download Report
+                </button>
+                <button class="btn btn-tonal" onclick="icReset()">New Report</button>
+                <button class="btn btn-tonal" onclick="copyLogText('ic-log')">Copy Log</button>
               </div>
             </div>
           </div>
@@ -5063,7 +5132,7 @@ https://example.com/page-2"></textarea>
       // tool's paused session stays visible (correctly) while browsing other tabs,
       // but with no tool name it read as an unexplained, possibly stuck "Action
       // needed" no matter which tab you were actually looking at.
-      const TOOL_TITLES = { overview: 'Dashboard', ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Website Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SEranking/SEMrush Audit', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GA4)', history: 'Report History', admin: 'Admin Panel' };
+      const TOOL_TITLES = { overview: 'Dashboard', ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Website Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SEranking/SEMrush Audit', indexcoverage: 'Index Coverage Report', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GA4)', history: 'Report History', admin: 'Admin Panel' };
       // The four browser tools run in parallel, so each keeps its OWN poll timer, its own
       // running count, and its own last-seen status. The shared status bar / log / result
       // count reflect only the ACTIVE tab; every tool's table keeps filling in the background.
@@ -5211,6 +5280,7 @@ https://example.com/page-2"></textarea>
         $('panel-blogopt').style.display = m === 'blogopt' ? '' : 'none';
         $('panel-wayback').style.display = m === 'wayback' ? '' : 'none';
         $('panel-seranking').style.display = m === 'seranking' ? '' : 'none';
+        $('panel-indexcoverage').style.display = m === 'indexcoverage' ? '' : 'none';
         $('panel-geo').style.display = m === 'geo' ? '' : 'none';
         $('panel-performance').style.display = m === 'performance' ? '' : 'none';
         $('panel-indexing').style.display = m === 'indexing' ? '' : 'none';
@@ -5229,6 +5299,7 @@ https://example.com/page-2"></textarea>
         $('tbl-blogopt').style.display = m === 'blogopt' ? '' : 'none';
         $('tbl-wayback').style.display = m === 'wayback' ? '' : 'none';
         $('tbl-seranking').style.display = m === 'seranking' ? '' : 'none';
+        $('tbl-indexcoverage').style.display = m === 'indexcoverage' ? '' : 'none';
         $('tbl-geo').style.display = m === 'geo' ? '' : 'none';
         $('tbl-performance').style.display = m === 'performance' ? '' : 'none';
         $('tbl-indexing').style.display = m === 'indexing' ? '' : 'none';
@@ -5248,6 +5319,7 @@ https://example.com/page-2"></textarea>
           brief: 'Quick SEO analysis - indexing, domain age, titles, meta, headers, images, redirects, canonical, sitemap, robots, broken links.',
           wayback: 'Submit URLs to the Wayback Machine\'s Save Page Now for a fresh, dated archive snapshot.',
           seranking: 'Turn a SEranking Site Audit export into a suggestion-filled final workbook.',
+          indexcoverage: 'Turn Search Console\'s Page Indexing report exports into a client-ready workbook - one tab per reason, every URL live-status-checked.',
           geo: 'AI-searchable keywords + FAQ suggestions, plus a no-login check of whether the site is already cited in AI answers (Perplexity reliable; Google/ChatGPT best-effort). Testing phase.',
           performance: 'Monthly performance deck built from real Google Search Console + Google Analytics 4 data - real charts, not screenshots. Testing phase.',
           indexing: 'Submit URLs to Google for indexing via a shared team quota, with a real-Search-Console fallback once your daily share is used. Testing phase.',
@@ -5632,6 +5704,31 @@ https://example.com/page-2"></textarea>
           startSrPoll();
           startReportTimer('sr'); resetToolProgress('sr');
           return;
+        } else if (mode === 'indexcoverage') {
+          const icDomain = hostOnly($('ic2-domain').value.trim());
+          const icSummary = $('ic2-summary').files[0];
+          const icDrilldowns = $('ic2-drilldowns').files;
+          if (!icDomain) { toast('Enter a domain'); return; }
+          if (!icSummary) { toast('Upload the Coverage (summary) export ZIP'); return; }
+          if (!icDrilldowns || !icDrilldowns.length) { toast('Upload at least one Coverage-Drilldown export ZIP'); return; }
+          const icFd = new FormData();
+          icFd.append('domain', icDomain);
+          icFd.append('brand', $('ic2-brand').value.trim());
+          icFd.append('summary', icSummary);
+          for (const f of icDrilldowns) icFd.append('drilldowns', f);
+          setButtons('starting', 'indexcoverage');   // instant feedback, before the network round-trip
+          $('empty-indexcoverage').style.display = 'none';
+          $('indexcoverage-active').classList.remove('hidden');
+          $('ic-log').textContent = 'Starting...';
+          const ric = await fetch('/api/index-coverage/upload-start', { method: 'POST', body: icFd });
+          const dic = await ric.json();
+          if (dic.error) { toast(dic.error); setButtons('idle', 'indexcoverage'); $('empty-indexcoverage').style.display = 'block'; $('indexcoverage-active').classList.add('hidden'); return; }
+          toast('Index Coverage report started');
+          $('btn-ic-download').disabled = true;
+          setButtons('running', 'indexcoverage');
+          startIcPoll();
+          startReportTimer('ic'); resetToolProgress('ic');
+          return;
         } else if (mode === 'geo') {
           const geoDomain = $('geo-domain').value.trim();
           if (!geoDomain) { toast('Enter a domain'); return; }
@@ -5844,6 +5941,7 @@ https://example.com/page-2"></textarea>
         if (mode === 'blogopt') { await boStop(); return; }
         if (mode === 'wayback') { await wbStop(); return; }
         if (mode === 'seranking') { await srStop(); return; }
+        if (mode === 'indexcoverage') { await icStop(); return; }
         if (mode === 'geo') { await geoStop(); return; }
         if (mode === 'performance') { await perfStop(); return; }
         if (mode === 'keywordvolume') { return; }  // synchronous request - nothing to cancel mid-flight
@@ -5861,6 +5959,7 @@ https://example.com/page-2"></textarea>
         if (mode === 'crawl') { crawlReset(); return; }
         if (mode === 'wayback') { wbReset(); return; }
         if (mode === 'seranking') { srReset(); return; }
+        if (mode === 'indexcoverage') { icReset(); return; }
         if (mode === 'geo') { geoReset(); return; }
         if (mode === 'performance') { perfReset(); return; }
         if (mode === 'keywordvolume') { kvReset(); return; }
@@ -5995,7 +6094,7 @@ https://example.com/page-2"></textarea>
         else { topEl.style.display = 'none'; }
         $('cur-kw').textContent = (kw && cur > 0 && cur <= tot) ? 'Checking: "' + kw + '"' : '';
       }
-      const _modeState = { ranking: 'idle', index: 'idle', count: 'idle', backlink: 'idle', onpage: 'idle', health: 'idle', gsc: 'idle', crawl: 'idle', brief: 'idle', wayback: 'idle', seranking: 'idle', geo: 'idle', performance: 'idle', keywordvolume: 'idle', admin: 'idle' };
+      const _modeState = { ranking: 'idle', index: 'idle', count: 'idle', backlink: 'idle', onpage: 'idle', health: 'idle', gsc: 'idle', crawl: 'idle', brief: 'idle', wayback: 'idle', seranking: 'idle', indexcoverage: 'idle', geo: 'idle', performance: 'idle', keywordvolume: 'idle', admin: 'idle' };
       function setButtons(s, m) {
         m = m || mode;
         _modeState[m] = s;
@@ -6673,6 +6772,50 @@ https://example.com/page-2"></textarea>
         $('sr-file').value = '';
         $('sr-pdf').value = '';
         setButtons('idle', 'seranking'); stopSrPoll(); resetReportTimer('sr'); resetToolProgress('sr');
+      }
+
+      /* ===================== index coverage report ===================== */
+      let icTimer = null;
+      function startIcPoll() { stopIcPoll(); icTimer = setInterval(icPoll, 2000); }
+      function stopIcPoll() { if (icTimer) { clearInterval(icTimer); icTimer = null; } }
+      async function icPoll() {
+        try {
+          const r = await fetch('/api/index-coverage/status');
+          const d = await r.json();
+          const el = $('ic-log');
+          if (d.log && d.log.length) el.textContent = d.log.join('\n');
+          el.scrollTop = el.scrollHeight;
+          mirrorSidebarLog(d.log, 'indexcoverage');
+          if (d.status === 'completed') {
+            $('ic-progress').textContent = 'Completed'; $('ic-progress').className = 'tag t-yes';
+            $('btn-ic-download').disabled = !d.has_file;
+            finishToolProgress('ic', true);
+            setButtons('completed', 'indexcoverage'); stopIcPoll(); stopReportTimer('ic'); toast('Index Coverage report ready');
+          } else if (d.status === 'error') {
+            $('ic-progress').className = 'tag t-not_found';
+            $('ic-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
+            finishToolProgress('ic', false);
+            setButtons('stopped', 'indexcoverage'); stopIcPoll(); stopReportTimer('ic');
+          } else if (d.status === 'stopped') {
+            $('ic-progress').className = 'tag t-unknown';
+            finishToolProgress('ic', false);
+            setButtons('stopped', 'indexcoverage'); stopIcPoll(); stopReportTimer('ic');
+          } else {
+            $('ic-progress').textContent = d.progress || 'Running...'; $('ic-progress').className = 'tag t-yes';
+            setToolProgress('ic', d.progress);
+          }
+        } catch (e) { }
+      }
+      function icDownload() { window.location.href = '/api/index-coverage/download'; }
+      async function icStop() { await fetch('/api/index-coverage/stop', { method: 'POST' }); toast('Stopping...'); }
+      function icReset() {
+        $('empty-indexcoverage').style.display = 'block';
+        $('indexcoverage-active').classList.add('hidden');
+        $('ic-log').textContent = '';
+        $('btn-ic-download').disabled = true;
+        $('ic2-summary').value = '';
+        $('ic2-drilldowns').value = '';
+        setButtons('idle', 'indexcoverage'); stopIcPoll(); resetReportTimer('ic'); resetToolProgress('ic');
       }
 
       /* ===================== geo / ai optimization ===================== */
@@ -7634,7 +7777,9 @@ https://example.com/page-2"></textarea>
         { key: 'siteaudit', label: 'Website Audit' },
         { key: 'gsc', label: 'GSC Audit' }, { key: 'crawl', label: 'Crawl Tracker' },
         { key: 'brief', label: 'Brief Analysis' }, { key: 'wayback', label: 'Wayback Submitter' },
-        { key: 'seranking', label: 'SEranking/SEMrush Audit' }, { key: 'geo', label: 'GEO / AI Optimization' },
+        { key: 'seranking', label: 'SEranking/SEMrush Audit' },
+        { key: 'indexcoverage', label: 'Index Coverage Report' },
+        { key: 'geo', label: 'GEO / AI Optimization' },
         { key: 'blogopt', label: 'Blog Optimization Suggestions' },
         { key: 'keywordvolume', label: 'Keyword Search Volume' }];
 
@@ -8503,43 +8648,6 @@ https://example.com/page-2"></textarea>
         } catch (e) { info.style.display = 'none'; }
       }
 
-      /* ===================== Index Coverage Report ===================== */
-      let _icPollTimer = null;
-      async function icStart() {
-        const domain = hostOnly($('gsc-domain').value.trim());
-        if (!domain) { toast('Enter a domain first'); return; }
-        if (!_gscEmail) { toast('This domain needs a connected Google account first - see the info box above'); return; }
-        $('ic-status').textContent = 'Starting...';
-        $('ic-run-btn').disabled = true;
-        $('ic-download-btn').style.display = 'none';
-        try {
-          const r = await (await fetch('/api/index-coverage/start', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ domain, email: _gscEmail })
-          })).json();
-          if (r.error) { toast(r.error); $('ic-run-btn').disabled = false; return; }
-          $('ic-stop-btn').style.display = '';
-          _icPollTimer = setInterval(icPoll, 2000);
-          icPoll();
-        } catch (e) { toast('Could not start: ' + e); $('ic-run-btn').disabled = false; }
-      }
-      async function icPoll() {
-        try {
-          const r = await (await fetch('/api/index-coverage/status')).json();
-          $('ic-status').textContent = (r.progress || '') + '\n' + (r.log || []).slice(-8).join('\n');
-          if (r.status === 'completed' || r.status === 'error' || r.status === 'stopped') {
-            clearInterval(_icPollTimer); _icPollTimer = null;
-            $('ic-run-btn').disabled = false;
-            $('ic-stop-btn').style.display = 'none';
-            if (r.status === 'completed' && r.has_file) { $('ic-download-btn').style.display = ''; toast('Index Coverage Report ready'); }
-            if (r.status === 'error') toast('Error: ' + (r.error_msg || 'unknown'));
-          }
-        } catch (e) { }
-      }
-      async function icStop() {
-        await fetch('/api/index-coverage/stop', { method: 'POST' });
-      }
-
       /* ===================== init ===================== */
       async function applyFormatFilter() {
         try {
@@ -8578,7 +8686,7 @@ https://example.com/page-2"></textarea>
           if (typeof t === 'string') t = t.split(',');          // accept comma string
           const allowed = t.map(x => String(x).trim().toLowerCase()).filter(x => x);
           if (allowed.length === 0 || allowed.includes('all')) return;
-          const KEYS = ['ranking', 'index', 'count', 'backlink', 'onpage', 'health', 'siteaudit', 'gsc', 'crawl', 'brief', 'wayback', 'seranking', 'geo', 'keywordvolume', 'indexing', 'performance', 'blogopt'];
+          const KEYS = ['ranking', 'index', 'count', 'backlink', 'onpage', 'health', 'siteaudit', 'gsc', 'crawl', 'brief', 'wayback', 'seranking', 'indexcoverage', 'geo', 'keywordvolume', 'indexing', 'performance', 'blogopt'];
           KEYS.forEach(key => {
             if (!allowed.includes(key)) { const b = $('tab-' + key); if (b) b.style.display = 'none'; }
           });

@@ -755,6 +755,27 @@ def _read_drilldown_urls(zip_path, log_fn):
     return _urls_from_export_file(zip_path)
 
 
+def read_drilldown_reason_name(zip_path, log_fn=None):
+    """The reason name a drilldown export is FOR, from its own "Metadata.csv"
+    (confirmed live: "Property,Value" rows including "Issue,<reason name>")
+    - lets an uploaded drilldown zip self-identify which reason it belongs
+    to instead of requiring the user to label/name each file themselves."""
+    log_fn = log_fn or print
+    import csv as _csv, zipfile
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            if "Metadata.csv" not in zf.namelist():
+                return None
+            content = zf.read("Metadata.csv").decode("utf-8-sig", errors="replace")
+            for row in _csv.reader(content.splitlines()):
+                if len(row) >= 2 and row[0].strip().lower() == "issue":
+                    return row[1].strip()
+    except Exception as e:
+        log_fn(f"  [warn] Could not read {os.path.basename(zip_path)}'s Metadata.csv: "
+               f"{type(e).__name__}: {e}")
+    return None
+
+
 def _find_reason_row(driver, reason_name):
     """The clickable row for a SPECIFIC, already-known reason name (from
     _read_summary_reasons - the authoritative source), matched by substring

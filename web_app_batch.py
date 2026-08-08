@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.45"
+APP_VERSION = "4.12.46"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5632,6 +5632,138 @@ def _run_index_coverage(domain, email):
         with ic_lock:
             ic_state["status"] = "error"
             ic_state["error_msg"] = str(e)
+
+
+def _run_index_coverage_from_uploads(domain, summary_path, drilldown_paths, brand):
+    """Same report as _run_index_coverage, but sourced from GSC export files
+    the user downloaded manually (Export -> Download CSV, on the summary
+    page and on each reason's own drilldown page) and uploaded here - no
+    live browser automation involved, so this works today regardless of how
+    reliable the automated scraper turns out to be against GSC's real UI.
+    Each drilldown zip self-identifies which reason it's for via its own
+    Metadata.csv (gsc_audit.read_drilldown_reason_name) - the user never has
+    to label/name the files themselves."""
+    with ic_lock:
+        ic_state.update({"status": "running", "log": [], "output_file": "",
+                         "output_file_backup": "", "error_msg": "", "progress": "Starting...",
+                         "domain": domain})
+    ic_stop.clear()
+    activity(f"Index Coverage report started from uploads ({domain})")
+
+    def _log(msg):
+        with ic_lock:
+            ic_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            if msg.startswith("[") or msg.startswith("  "):
+                ic_state["progress"] = msg
+
+    try:
+        _log("[1/3] Reading the summary export (reason list + real counts)...")
+        stated_counts = gsc_audit._read_summary_reasons(summary_path, _log)
+        if not stated_counts:
+            raise RuntimeError("No reasons with affected pages found in the summary export - "
+                               "make sure the uploaded file is the Coverage export's ZIP "
+                               "(GSC's Pages report -> Export -> Download CSV).")
+        _log(f"  {len(stated_counts)} reason(s): {list(stated_counts.keys())}")
+
+        _log(f"[2/3] Reading {len(drilldown_paths)} drilldown export(s)...")
+        reason_urls = {}
+        for path in drilldown_paths:
+            reason = gsc_audit.read_drilldown_reason_name(path, _log)
+            if not reason:
+                _log(f"  [warn] Could not identify which reason '{os.path.basename(path)}' is for - skipping.")
+                continue
+            urls = gsc_audit._read_drilldown_urls(path, _log)
+            _log(f"  '{reason}': {len(urls)} URL(s)")
+            if urls:
+                reason_urls[reason] = urls
+        if not reason_urls:
+            raise RuntimeError("None of the uploaded drilldown exports could be read - make sure "
+                               "each one is a Coverage-Drilldown export's ZIP (open the reason's own "
+                               "page in GSC, then Export -> Download CSV).")
+        if ic_stop.is_set():
+            with ic_lock:
+                ic_state["status"] = "stopped"
+            return
+
+        _log(f"  Checking live status for every URL across {len(reason_urls)} reason(s)...")
+        sitemap_urls = georpt.get_sitemap_urls(domain, cap=2000)
+        _log(f"  {len(sitemap_urls)} sitemap URL(s) found for redirect suggestions.")
+        homepage_url = f"https://{index_coverage.onpage2.safe_domain(domain)}/"
+        index_coverage.onpage2.set_run_scale(sum(len(v) for v in reason_urls.values()))
+
+        reason_rows = {}
+        for reason, urls in reason_urls.items():
+            if ic_stop.is_set():
+                break
+            _log(f"  '{reason}' ({len(urls)} URL(s))...")
+            reason_rows[reason] = index_coverage.process_reason(
+                reason, urls, domain, sitemap_urls, homepage_url,
+                stated_count=stated_counts.get(reason))
+        if ic_stop.is_set():
+            with ic_lock:
+                ic_state["status"] = "stopped"
+            return
+
+        _log("[3/3] Building the report...")
+        out_dir = _domain_folder(domain, "index_coverage")
+        out_path = os.path.join(out_dir, f"Index Coverage Report - {domain}.xlsx")
+        index_coverage.build_report(domain, reason_rows, out_path)
+        backup_path = _backup_report("index_coverage", domain, out_path)
+
+        with ic_lock:
+            ic_state["status"] = "completed"
+            ic_state["output_file"] = out_path
+            ic_state["output_file_backup"] = backup_path or ""
+            ic_state["progress"] = "Report ready for download"
+        _log("Done.")
+    except Exception as e:
+        _log(f"Error: {e}")
+        with ic_lock:
+            ic_state["status"] = "error"
+            ic_state["error_msg"] = str(e)
+    finally:
+        for p in ([summary_path] + list(drilldown_paths)):
+            if p:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+
+
+@app.route("/api/index-coverage/upload-start", methods=["POST"])
+def api_index_coverage_upload_start():
+    if not _require_tool("indexcoverage"):
+        return jsonify({"error": "You don't have access to the Index Coverage Report tool."}), 403
+    with ic_lock:
+        if ic_state["status"] == "running":
+            return jsonify({"error": "Index Coverage report already running."}), 400
+    domain = to_domain(request.form.get("domain") or "")
+    brand = (request.form.get("brand") or "").strip()
+    if not domain:
+        return jsonify({"error": "Domain is required."}), 400
+    summary_file = request.files.get("summary")
+    drilldown_files = request.files.getlist("drilldowns")
+    if not summary_file or not summary_file.filename:
+        return jsonify({"error": "Upload the Coverage (summary) export's ZIP - GSC's Pages report -> "
+                                  "Export -> Download CSV."}), 400
+    if not drilldown_files or not any(f.filename for f in drilldown_files):
+        return jsonify({"error": "Upload at least one Coverage-Drilldown export's ZIP - open a "
+                                  "reason's own page in GSC, then Export -> Download CSV."}), 400
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+    ts = int(time.time())
+    summary_path = os.path.join(UPLOADS_DIR, f"ic_{ts}_summary_{os.path.basename(summary_file.filename)}")
+    summary_file.save(summary_path)
+    drilldown_paths = []
+    for i, f in enumerate(drilldown_files):
+        if not f.filename:
+            continue
+        p = os.path.join(UPLOADS_DIR, f"ic_{ts}_drilldown_{i}_{os.path.basename(f.filename)}")
+        f.save(p)
+        drilldown_paths.append(p)
+    t = threading.Thread(target=_run_index_coverage_from_uploads,
+                         args=(domain, summary_path, drilldown_paths, brand), daemon=True)
+    t.start()
+    return jsonify({"status": "started", "domain": domain})
 
 
 @app.route("/api/index-coverage/start", methods=["POST"])
