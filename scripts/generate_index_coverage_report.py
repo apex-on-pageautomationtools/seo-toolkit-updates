@@ -42,6 +42,7 @@ import urllib.parse
 import urllib.request
 import urllib.error
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = Path(__file__).parent.resolve()
 if str(ROOT) not in sys.path:
@@ -549,7 +550,8 @@ def build_report(domain, reason_rows, out_path, brand=None):
     log(f"[DONE] {out_path}")
 
 
-def process_reason(reason, urls, domain, sitemap_urls, homepage_url, stated_count=None):
+def process_reason(reason, urls, domain, sitemap_urls, homepage_url, stated_count=None,
+                    max_workers=15):
     """Live-check every URL for one reason and build its row list - the
     shared per-reason pipeline main() and any other caller (e.g. a future
     web_app_batch.py route) should both use, so the live-check/redirect-
@@ -560,22 +562,50 @@ def process_reason(reason, urls, domain, sitemap_urls, homepage_url, stated_coun
     per-reason export (capped at 1000 rows, same class of limit the SE
     Ranking PDF export already has to be flagged for elsewhere in this app)
     returned fewer URLs than that, a trailing note row says so explicitly
-    rather than silently reporting a partial list as if it were complete."""
+    rather than silently reporting a partial list as if it were complete.
+
+    Each URL's live check is a network round trip (a live redirect-chain
+    walk, or a single status check) with no dependency on any other URL's
+    result - confirmed live these ran fully sequentially at ~1.2-1.3s/URL,
+    turning a ~2,400-URL run into the better part of an hour. A small thread
+    pool runs them concurrently instead; results are collected back into the
+    ORIGINAL url order (not completion order) since the report's row order
+    should match GSC's own list, not whichever finished first."""
     info = _reason_info(reason)
     redirect_relevant = reason.translate(str.maketrans(_UNICODE_PUNCT_NORMALIZE)) in (
         "Not found (404)", "Page with redirect")
-    out = []
-    for i, url in enumerate(urls, 1):
-        log(f"   [{i}/{len(urls)}] Checking {url}")
+
+    def _check_one(url):
         if redirect_relevant:
-            out.append(_build_redirect_row(url, reason, sitemap_urls, homepage_url))
-        else:
-            live = check_live_status(url)
-            indexability, indexability_status = classify_indexability(url, live)
-            action = info["default_action"] or "Check manually"
-            out.append({"kind": "simple", "url": url, "status": live.get("status"),
-                       "indexability": indexability, "indexability_status": indexability_status,
-                       "action": action})
+            return _build_redirect_row(url, reason, sitemap_urls, homepage_url)
+        live = check_live_status(url)
+        indexability, indexability_status = classify_indexability(url, live)
+        action = info["default_action"] or "Check manually"
+        return {"kind": "simple", "url": url, "status": live.get("status"),
+                "indexability": indexability, "indexability_status": indexability_status,
+                "action": action}
+
+    out = [None] * len(urls)
+    done = 0
+    with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(urls)))) as pool:
+        futures = {pool.submit(_check_one, url): i for i, url in enumerate(urls)}
+        for fut in as_completed(futures):
+            i = futures[fut]
+            try:
+                out[i] = fut.result()
+            except Exception as e:
+                err = f"Check manually - live check failed ({type(e).__name__})"
+                if redirect_relevant:
+                    out[i] = {"kind": "redirect", "url": urls[i], "current_status": "",
+                              "redirects_to": "", "destination_status": "", "hop_count": "",
+                              "recommended_fix": err}
+                else:
+                    out[i] = {"kind": "simple", "url": urls[i], "status": None,
+                              "indexability": "", "indexability_status": "", "action": err}
+            done += 1
+            if done % 25 == 0 or done == len(urls):
+                log(f"   [{done}/{len(urls)}] checked")
+
     if stated_count and len(urls) < stated_count:
         remaining = stated_count - len(urls)
         note = (f"+ {remaining} more page(s) affected by this issue - Search Console's own "
