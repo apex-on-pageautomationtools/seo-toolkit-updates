@@ -703,6 +703,29 @@ def _save_debug_artifacts(driver, label, log_fn):
         log_fn(f"    [warn] Could not save debug artifacts: {e}")
 
 
+def _wait_for_drilldown_export_scope(driver, timeout=10):
+    """Poll until the Export control's OWN data-export-url attribute reads
+    "index/drilldown" (not the stale "index/summary" it briefly carries
+    right after navigating to a reason's page) - confirmed live via a real
+    failure's saved debug HTML: the page's visible content (heading,
+    breadcrumb, affected-page count) all update immediately, but this
+    specific attribute lags behind, so a fixed post-navigation sleep isn't
+    a reliable enough signal that Export is actually scoped to the reason
+    yet. Returns True once it flips, False if it never does within timeout
+    (never raises)."""
+    from selenium.webdriver.common.by import By
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            wrappers = driver.find_elements(By.CSS_SELECTOR, "[data-export-url]")
+            if any(w.get_attribute("data-export-url") == "index/drilldown" for w in wrappers):
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return False
+
+
 def _click_export_download_csv(driver, download_dir, log_fn, timeout=25, debug_label=None):
     """Click GSC's own Export control and "Download CSV" - confirmed live
     (both on the summary page and a per-reason drilldown page) via the exact
@@ -954,6 +977,21 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
                         log_fn(f"    [warn] Clicking '{reason_name}' didn't navigate to its own page "
                                f"(still showing '{heading}') - skipping.")
                         _save_debug_artifacts(driver, f"{reason_name}_no_navigation", log_fn)
+                        continue
+                    # Confirmed live via a real failure's saved HTML: the page's
+                    # visible content (heading, breadcrumb, affected-page count)
+                    # updates before the Export control's OWN data-export-url
+                    # attribute does - it can sit at "index/summary" for several
+                    # more seconds on a freshly-navigated drilldown page, so
+                    # clicking Export too early re-exports the SUMMARY (which
+                    # produces no new/visible file since one was already
+                    # downloaded, exactly matching every drilldown attempt
+                    # silently timing out). Wait for the real signal instead of
+                    # a fixed delay.
+                    if not _wait_for_drilldown_export_scope(driver, timeout=10):
+                        log_fn(f"    [warn] Export control for '{reason_name}' never switched to "
+                               f"drilldown scope (still bound to the summary export) - skipping.")
+                        _save_debug_artifacts(driver, f"{reason_name}_stale_export_scope", log_fn)
                         continue
                     drilldown_zip = _click_export_download_csv(
                         driver, download_dir, log_fn, debug_label=reason_name)
