@@ -515,6 +515,256 @@ def capture_gsc_with_session(session_id, property_url, email, out_dir,
 
 
 # ---------------------------------------------------------------------------
+# Index Coverage report - the Page Indexing report's per-reason URL lists
+# aren't exposed by the official Search Console API at all (a real,
+# documented gap - not something worked around here by choice), so this
+# drives the same already-authenticated GSC session browser every other GSC
+# tool in this app uses, navigates to the Pages report, and uses GSC's OWN
+# native Export button per reason rather than scraping a virtualized table -
+# far more reliable than trying to scroll/paginate a live-rendered list, and
+# gets every affected URL GSC has, not just however many happened to be
+# rendered in the DOM at once.
+#
+# UNVERIFIED against a live GSC account as of when this was written - GSC's
+# Pages report is a Material/Angular SPA whose class names are obfuscated
+# and change across Google's own UI updates, so exact selectors here are a
+# best-effort first pass (text/aria-label-based, matching how every other
+# GSC/GA4 scraper in this app is written), not confirmed-working. Logs
+# clearly at each step so a failed run is diagnosable, and degrades
+# gracefully (returns whatever reasons it DID manage to export, never raises
+# out and loses everything already collected).
+# ---------------------------------------------------------------------------
+def _robust_click(driver, element):
+    """Scroll into view, try a native click, fall back to a JS click - a raw
+    .click() is prone to ElementNotInteractableException/ElementClickIntercepted
+    on GSC's dynamic UI, same reason generate_performance_report.py has its
+    own copy of this exact helper for GSC/GA4."""
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", element)
+    except Exception:
+        pass
+    time.sleep(0.3)
+    try:
+        element.click()
+    except Exception:
+        try:
+            driver.execute_script("arguments[0].click();", element)
+        except Exception:
+            pass
+
+
+def _find_downloaded_csv(download_dir, before_files, timeout=20):
+    """Poll download_dir for a NEW .csv file (one not present before the
+    export click) - the file's real final name isn't predictable in advance
+    (GSC names it after the reason/date), so this waits for whatever new
+    complete (non-.crdownload) file appears."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            now_files = set(os.listdir(download_dir))
+        except Exception:
+            now_files = set()
+        new_files = [f for f in (now_files - before_files) if f.lower().endswith(".csv")]
+        if new_files and not any(f.endswith(".crdownload") for f in now_files):
+            return os.path.join(download_dir, new_files[0])
+        time.sleep(0.5)
+    return None
+
+
+def _parse_url_csv(csv_path):
+    """Every URL found in the CSV, from whichever column actually looks like
+    URLs - GSC's exact export column name/position isn't hardcoded here since
+    it isn't confirmed live; scans every column and picks the one where most
+    non-empty cells parse as http(s) URLs, rather than assuming a fixed
+    header like "URL" or "Address"."""
+    import csv as _csv
+    try:
+        with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
+            rows = list(_csv.reader(f))
+    except Exception:
+        return []
+    if not rows:
+        return []
+    header, data = rows[0], rows[1:]
+    if not data:
+        return []
+    best_col, best_count = None, 0
+    for i in range(len(header)):
+        count = sum(1 for r in data if i < len(r) and r[i].strip().startswith(("http://", "https://")))
+        if count > best_count:
+            best_col, best_count = i, count
+    if best_col is None:
+        return []
+    return [r[best_col].strip() for r in data if best_col < len(r) and r[best_col].strip().startswith(("http://", "https://"))]
+
+
+_REASON_ROW_RE = re.compile(r"^(.+?)\s+([\d,]+)$")
+
+
+def _discover_index_coverage_reasons(driver):
+    """Every reason row currently shown in the Pages report's breakdown table
+    - {reason_name: row_element}. Text-based (row text ends in a count), not
+    a fixed reason list, so a property with reasons beyond the ~10 common
+    ones still gets every one of them, per the "all points" requirement."""
+    from selenium.webdriver.common.by import By
+    reasons = {}
+    try:
+        rows = driver.find_elements(By.CSS_SELECTOR, "tr, [role='row']")
+    except Exception:
+        rows = []
+    for row in rows:
+        try:
+            text = (row.text or "").strip().replace("\n", " ")
+        except Exception:
+            continue
+        m = _REASON_ROW_RE.match(text)
+        if not m:
+            continue
+        label = m.group(1).strip()
+        if not label or label.lower() in ("type", "reason", "trend", "validation status"):
+            continue
+        if label not in reasons:
+            reasons[label] = row
+    return reasons
+
+
+def capture_index_coverage_urls(session_id, property_url, email, browser_pref="edge", log_fn=None):
+    """{reason_name: [url, ...], ...} for EVERY reason currently showing in
+    this property's Page Indexing report - see the module docstring above
+    for why this has to be browser-driven rather than an API call, and the
+    caveats on exact GSC selectors not being live-confirmed yet.
+
+    Google's 1000-rows-per-reason UI limit is GSC's own limit (same one the
+    official Search Console UI itself enforces), not something this adds -
+    a reason with more affected pages than that comes back with the first
+    1000 GSC's own export gives, same shape as the SE Ranking PDF's own
+    100-row cap this app already surfaces honestly elsewhere."""
+    if log_fn is None:
+        log_fn = print
+    import engine
+    from selenium.webdriver.common.by import By
+    profile_dir = os.path.join(_sessions_dir(), session_id, "chrome_profile")
+    download_dir = tempfile.mkdtemp(prefix="gsc_index_coverage_")
+
+    def _attempt(headless):
+        driver = None
+        try:
+            driver = engine.build_driver(
+                profile_dir, proxy=None, headless=headless,
+                country="us", extra_extensions=[],
+                logger=log_fn, browser_pref=browser_pref,
+            )
+            # Override the download-block every driver this app builds has by
+            # default (engine._block_downloads) - only for this session, only
+            # to this fresh temp dir, so GSC's own Export -> CSV can land somewhere.
+            try:
+                driver.execute_cdp_cmd("Browser.setDownloadBehavior",
+                                       {"behavior": "allow", "downloadPath": download_dir})
+            except Exception as e:
+                log_fn(f"  [warn] could not enable downloads for this session: {e}")
+
+            driver.get("https://search.google.com/search-console")
+            time.sleep(3)
+            if _looks_like_signin(driver):
+                return {"error": "session_expired", "session_id": session_id}
+
+            url = build_gsc_url("index", property_url, email)
+            log_fn(f"  Opening Pages (Index Coverage) report: {url}")
+            driver.get(url)
+            time.sleep(6)
+            if _looks_like_signin(driver):
+                return {"error": "session_expired", "session_id": session_id}
+            if _looks_like_no_access(driver):
+                log_fn(f"  [warn] {email} does not have access to {property_url} - skipping.")
+                return {"error": "no_access", "session_id": session_id}
+
+            reasons = _discover_index_coverage_reasons(driver)
+            log_fn(f"  Found {len(reasons)} reason(s) in the Pages report: {list(reasons.keys())}")
+            if not reasons:
+                log_fn("  [warn] No reason rows detected - GSC's UI structure may not match "
+                       "this scraper's selectors, or every page is healthy/indexed.")
+
+            reason_urls = {}
+            for reason_name, row in reasons.items():
+                log_fn(f"  Exporting '{reason_name}'...")
+                try:
+                    _robust_click(driver, row)
+                    time.sleep(3)
+                    if _looks_like_signin(driver):
+                        log_fn(f"    [warn] bounced to sign-in opening '{reason_name}' - skipping.")
+                        continue
+                    # GSC's export control - a toolbar button/icon whose accessible
+                    # name contains "Export" (unconfirmed live; text-based so it
+                    # survives a class-name change even if the exact wording drifts).
+                    export_btns = driver.find_elements(
+                        By.XPATH, "//*[contains(translate(@aria-label,'EXPORT','export'),'export') "
+                                  "or contains(translate(text(),'EXPORT','export'),'export')]")
+                    if not export_btns:
+                        log_fn(f"    [warn] no Export control found for '{reason_name}' - "
+                               f"skipping (GSC's UI may have changed).")
+                        continue
+                    before = set(os.listdir(download_dir))
+                    _robust_click(driver, export_btns[0])
+                    time.sleep(1)
+                    csv_opts = driver.find_elements(
+                        By.XPATH, "//*[contains(translate(text(),'CSV','csv'),'csv')]")
+                    if csv_opts:
+                        _robust_click(driver, csv_opts[0])
+                    csv_path = _find_downloaded_csv(download_dir, before, timeout=25)
+                    if not csv_path:
+                        log_fn(f"    [warn] CSV download for '{reason_name}' did not appear in time - skipping.")
+                        continue
+                    urls = _parse_url_csv(csv_path)
+                    log_fn(f"    {len(urls)} URL(s) exported for '{reason_name}'.")
+                    if urls:
+                        reason_urls[reason_name] = urls
+                    try:
+                        os.remove(csv_path)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    log_fn(f"    [warn] '{reason_name}' export failed: {type(e).__name__}: {e}")
+                finally:
+                    # Back to the reasons list for the next one.
+                    try:
+                        driver.get(url)
+                        time.sleep(4)
+                    except Exception:
+                        pass
+
+            return {"reason_urls": reason_urls, "session_id": session_id}
+        except Exception as e:
+            log_fn(f"  Index coverage capture error ({'headless' if headless else 'visible'}): {e}")
+            return {"error": str(e)}
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+            try:
+                import shutil
+                shutil.rmtree(download_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+    lock = _profile_lock(profile_dir)
+    acquired = lock.acquire(timeout=180)
+    if not acquired:
+        log_fn("  Another capture is using this Google session - timed out waiting.")
+        return {"error": "session_busy", "session_id": session_id}
+    try:
+        result = _attempt(headless=True)
+        if isinstance(result, dict) and result.get("error") == "session_expired":
+            log_fn("  Headless GSC session bounced to login - retrying in a visible window...")
+            result = _attempt(headless=False)
+        _trim_session_cache(profile_dir)
+        return result
+    finally:
+        lock.release()
+
+
+# ---------------------------------------------------------------------------
 # Submit for Indexing - browser-based fallback for once a user's shared-pool
 # daily cap (see the VPS indexing_service) is used up. Google's real Search
 # Console UI has its own unofficial ~10-15/day "Request Indexing" limit per

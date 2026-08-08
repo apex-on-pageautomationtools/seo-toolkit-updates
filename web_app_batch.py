@@ -57,11 +57,13 @@ import site_audit
 # Site Audit report is built in-process straight from sa_state["results"],
 # with no intermediate file to hand a subprocess.
 import generate_seranking_audit
+import generate_index_coverage_report as index_coverage
+import generate_geo_report as georpt
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.43"
+APP_VERSION = "4.12.44"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5531,6 +5533,151 @@ def api_gsc_download():
 def api_gsc_formats():
     return jsonify([{"value": k, "label": v["label"]}
                     for k, v in gsc_audit.GSC_FORMATS.items()])
+
+
+# --------------------------------------------------------------------------- #
+# Index Coverage report - GSC's Page Indexing report (per-reason URL lists),
+# scraped via the same already-authenticated GSC session every other GSC tool
+# uses (gsc_audit.capture_index_coverage_urls - see its docstring for why the
+# official API can't do this), then live-checked and turned into the
+# suggestion-filled workbook via generate_index_coverage_report.py - same
+# in-process pattern site_audit.py's report uses, no subprocess/JSON hop.
+# --------------------------------------------------------------------------- #
+ic_state = {"status": "idle", "log": [], "output_file": "", "output_file_backup": "",
+           "error_msg": "", "progress": "", "domain": ""}
+ic_lock = threading.Lock()
+ic_stop = threading.Event()
+
+
+def _run_index_coverage(domain, email):
+    with ic_lock:
+        ic_state.update({"status": "running", "log": [], "output_file": "",
+                         "output_file_backup": "", "error_msg": "", "progress": "Starting...",
+                         "domain": domain})
+    ic_stop.clear()
+    activity(f"Index Coverage report started ({domain})")
+
+    def _log(msg):
+        with ic_lock:
+            ic_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            if msg.startswith("[") or msg.startswith("  "):
+                ic_state["progress"] = msg
+
+    try:
+        _log(f"Account: {email}")
+        token = gsc_audit.get_access_token(email)
+        _log("Resolving GSC property...")
+        property_url = gsc_audit.resolve_property(token, domain)
+        _log(f"Property: {property_url}")
+
+        session = gsc_audit.find_session_for_email(email)
+        if not session:
+            raise RuntimeError(f"No browser session found for {email} - reconnect it in "
+                               f"the Google Accounts tab first.")
+
+        _log("[1/3] Exporting the Pages report from Search Console...")
+        result = gsc_audit.capture_index_coverage_urls(session["id"], property_url, email, log_fn=_log)
+        if result.get("error") == "session_expired":
+            raise RuntimeError("The GSC session was signed out - reconnect the account in "
+                               "the Google Accounts tab and try again.")
+        if result.get("error") == "no_access":
+            raise RuntimeError(f"{email} doesn't have access to {property_url} in Search Console.")
+        if result.get("error"):
+            raise RuntimeError(result["error"])
+        reason_urls = result.get("reason_urls") or {}
+        if not reason_urls:
+            raise RuntimeError("No page-indexing reasons were found to export - either every page is "
+                               "healthy/indexed, or GSC's UI structure didn't match this tool's "
+                               "selectors (Search Console updates its UI periodically). Check the log "
+                               "above for details.")
+        if ic_stop.is_set():
+            with ic_lock:
+                ic_state["status"] = "stopped"
+            return
+
+        _log(f"[2/3] Checking live status for every URL across {len(reason_urls)} reason(s)...")
+        sitemap_urls = georpt.get_sitemap_urls(domain, cap=2000)
+        _log(f"  {len(sitemap_urls)} sitemap URL(s) found for redirect suggestions.")
+        homepage_url = f"https://{index_coverage.onpage2.safe_domain(domain)}/"
+        index_coverage.onpage2.set_run_scale(sum(len(v) for v in reason_urls.values()))
+
+        reason_rows = {}
+        for reason, urls in reason_urls.items():
+            if ic_stop.is_set():
+                break
+            _log(f"  '{reason}' ({len(urls)} URL(s))...")
+            reason_rows[reason] = index_coverage.process_reason(
+                reason, urls, domain, sitemap_urls, homepage_url)
+        if ic_stop.is_set():
+            with ic_lock:
+                ic_state["status"] = "stopped"
+            return
+
+        _log("[3/3] Building the report...")
+        out_dir = _domain_folder(domain, "index_coverage")
+        out_path = os.path.join(out_dir, f"Index Coverage Report - {domain}.xlsx")
+        index_coverage.build_report(domain, reason_rows, out_path)
+        backup_path = _backup_report("index_coverage", domain, out_path)
+
+        with ic_lock:
+            ic_state["status"] = "completed"
+            ic_state["output_file"] = out_path
+            ic_state["output_file_backup"] = backup_path or ""
+            ic_state["progress"] = "Report ready for download"
+        _log("Done.")
+    except Exception as e:
+        _log(f"Error: {e}")
+        with ic_lock:
+            ic_state["status"] = "error"
+            ic_state["error_msg"] = str(e)
+
+
+@app.route("/api/index-coverage/start", methods=["POST"])
+def api_index_coverage_start():
+    if not _require_tool("gsc"):
+        return jsonify({"error": "You don't have access to the GSC Audit tool."}), 403
+    with ic_lock:
+        if ic_state["status"] == "running":
+            return jsonify({"error": "Index Coverage report already running."}), 400
+    data = request.get_json(silent=True) or {}
+    domain = to_domain(data.get("domain") or "")
+    email = (data.get("email") or "").strip()
+    if not domain:
+        return jsonify({"error": "Domain is required."}), 400
+    if not email:
+        return jsonify({"error": "Please connect a Google account first."}), 400
+    t = threading.Thread(target=_run_index_coverage, args=(domain, email), daemon=True)
+    t.start()
+    return jsonify({"status": "started", "domain": domain})
+
+
+@app.route("/api/index-coverage/status")
+def api_index_coverage_status():
+    with ic_lock:
+        return jsonify({
+            "status": ic_state["status"],
+            "log": ic_state["log"][-200:],
+            "domain": ic_state["domain"],
+            "progress": ic_state["progress"],
+            "error_msg": ic_state["error_msg"],
+            "has_file": bool(ic_state["output_file"]),
+        })
+
+
+@app.route("/api/index-coverage/stop", methods=["POST"])
+def api_index_coverage_stop():
+    ic_stop.set()
+    return jsonify({"status": "stopping"})
+
+
+@app.route("/api/index-coverage/download")
+def api_index_coverage_download():
+    with ic_lock:
+        fpath = ic_state.get("output_file", "")
+    if not fpath or not os.path.exists(fpath):
+        return jsonify({"error": "No report available."}), 404
+    return send_file(fpath, as_attachment=True,
+                     download_name=os.path.basename(fpath))
 
 
 # --------------------------------------------------------------------------- #

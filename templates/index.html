@@ -2902,6 +2902,23 @@
           <div class="note">Google account connections and Browser Sessions are managed in the <a href="#"
               onclick="switchTab('gscaccounts');return false;">Google Accounts</a> tab - the account that owns a domain
             is selected automatically once it's connected there, no need to pick one here.</div>
+
+          <div class="field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+            <label>Index Coverage Report <span class="testing-badge">(testing)</span></label>
+            <p style="color:var(--text-3);font-size:12px;margin:2px 0 10px;line-height:1.4">Turns Search Console's
+              Page Indexing report into a client-ready workbook - one tab per indexing reason (Discovered/Crawled -
+              not indexed, Soft 404, Not found 404 with a real redirect suggestion, etc.), every URL live-status-
+              checked. Uses the domain above.</p>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-primary" id="ic-run-btn" style="font-size:12px;padding:6px 14px"
+                onclick="icStart()">Run Index Coverage Report</button>
+              <button class="btn btn-tonal" id="ic-stop-btn" style="font-size:12px;padding:6px 14px;display:none"
+                onclick="icStop()">Stop</button>
+              <a class="btn btn-tonal" id="ic-download-btn" style="font-size:12px;padding:6px 14px;display:none"
+                href="/api/index-coverage/download">Download Report</a>
+            </div>
+            <div id="ic-status" style="font-size:11px;color:var(--text-3);margin-top:8px;white-space:pre-line"></div>
+          </div>
         </section>
 
         <!-- GOOGLE ACCOUNTS (shared across GSC Audit, Submit for Indexing fallback, and any other tool that needs a connected account) -->
@@ -8484,6 +8501,43 @@ https://example.com/page-2"></textarea>
             window._gscConnectHint = '';
           }
         } catch (e) { info.style.display = 'none'; }
+      }
+
+      /* ===================== Index Coverage Report ===================== */
+      let _icPollTimer = null;
+      async function icStart() {
+        const domain = hostOnly($('gsc-domain').value.trim());
+        if (!domain) { toast('Enter a domain first'); return; }
+        if (!_gscEmail) { toast('This domain needs a connected Google account first - see the info box above'); return; }
+        $('ic-status').textContent = 'Starting...';
+        $('ic-run-btn').disabled = true;
+        $('ic-download-btn').style.display = 'none';
+        try {
+          const r = await (await fetch('/api/index-coverage/start', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain, email: _gscEmail })
+          })).json();
+          if (r.error) { toast(r.error); $('ic-run-btn').disabled = false; return; }
+          $('ic-stop-btn').style.display = '';
+          _icPollTimer = setInterval(icPoll, 2000);
+          icPoll();
+        } catch (e) { toast('Could not start: ' + e); $('ic-run-btn').disabled = false; }
+      }
+      async function icPoll() {
+        try {
+          const r = await (await fetch('/api/index-coverage/status')).json();
+          $('ic-status').textContent = (r.progress || '') + '\n' + (r.log || []).slice(-8).join('\n');
+          if (r.status === 'completed' || r.status === 'error' || r.status === 'stopped') {
+            clearInterval(_icPollTimer); _icPollTimer = null;
+            $('ic-run-btn').disabled = false;
+            $('ic-stop-btn').style.display = 'none';
+            if (r.status === 'completed' && r.has_file) { $('ic-download-btn').style.display = ''; toast('Index Coverage Report ready'); }
+            if (r.status === 'error') toast('Error: ' + (r.error_msg || 'unknown'));
+          }
+        } catch (e) { }
+      }
+      async function icStop() {
+        await fetch('/api/index-coverage/stop', { method: 'POST' });
       }
 
       /* ===================== init ===================== */
