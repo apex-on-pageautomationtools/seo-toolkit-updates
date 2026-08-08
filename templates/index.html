@@ -3499,6 +3499,16 @@ https://example.com/page-2"></textarea>
                 </svg>
                 Export CSV
               </button>
+              <button class="btn btn-tonal btn-sm" id="btn-export-serps" onclick="exportSerpsCSV()" disabled
+                title="Every organic result seen on every page checked, per keyword - not just where your domain landed"
+                style="display:none">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Export SERPs CSV
+              </button>
             </div>
             <div class="cur-kw" id="cur-kw"></div>
             <div class="prog">
@@ -5206,6 +5216,7 @@ https://example.com/page-2"></textarea>
         $('tbl-performance').style.display = m === 'performance' ? '' : 'none';
         $('tbl-indexing').style.display = m === 'indexing' ? '' : 'none';
         $('tbl-keywordvolume').style.display = m === 'keywordvolume' ? '' : 'none';
+        $('btn-export-serps').style.display = m === 'ranking' ? '' : 'none';
         const subs = {
           overview: 'An overview of every tool in SEO Toolkit Pro - pick one to get started.',
           ranking: 'Find where your domain ranks on Google - across regions. It can have captcha so please use VPN on system as much possible.',
@@ -5285,6 +5296,7 @@ https://example.com/page-2"></textarea>
         if (BATCH.includes(m)) {
           $('count').textContent = lastCounts[m] + (lastCounts[m] === 1 ? ' result' : ' results');
           $('btn-export').disabled = lastCounts[m] === 0;
+          $('btn-export-serps').disabled = lastCounts[m] === 0;
           poll(m);
         }
       }
@@ -5840,11 +5852,12 @@ https://example.com/page-2"></textarea>
       async function loadPrevious() {
         const m = mode;
         const r = await fetch('/api/load-autosave?mode=' + m); const d = await r.json();
-        if (d.loaded && d.count > 0) { clearResults(m); lastCounts[m] = 0; await poll(m); setStatus('completed'); setButtons('completed', m); $('btn-export').disabled = false; toast('Loaded ' + d.count + ' previous results'); }
+        if (d.loaded && d.count > 0) { clearResults(m); lastCounts[m] = 0; await poll(m); setStatus('completed'); setButtons('completed', m); $('btn-export').disabled = false; $('btn-export-serps').disabled = false; toast('Loaded ' + d.count + ' previous results'); }
         else toast('No previous results found');
       }
       function exportCSV() { exportCSVMode(mode); }
       function exportCSVMode(m) { window.location.href = '/api/export/csv?mode=' + (m || mode); }
+      function exportSerpsCSV() { window.location.href = '/api/export/serps-csv'; }
       function saveLog() {
         const txt = $('log').innerText; if (!txt.trim()) { toast('Log is empty'); return; }
         const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([txt], { type: 'text/plain' }));
@@ -5919,7 +5932,7 @@ https://example.com/page-2"></textarea>
         if (d.results && d.results.length > lastCounts[m]) {
           d.results.slice(lastCounts[m]).forEach((row, i) => appendRow(row, lastCounts[m] + i + 1, m));
           lastCounts[m] = d.results.length;
-          if (isActive) { $('count').textContent = lastCounts[m] + (lastCounts[m] === 1 ? ' result' : ' results'); $('btn-export').disabled = false; }
+          if (isActive) { $('count').textContent = lastCounts[m] + (lastCounts[m] === 1 ? ' result' : ' results'); $('btn-export').disabled = false; $('btn-export-serps').disabled = false; }
         }
         if (d.status === 'paused') { if (isActive) showAlert(true); setButtons('paused', m); }
         else if (d.status === 'running' || d.status === 'starting') { setButtons('running', m); }
@@ -5927,7 +5940,7 @@ https://example.com/page-2"></textarea>
           setButtons(d.status, m); stopPoll(m);
           if (isActive) {
             $('cur-kw').textContent = '';
-            if (d.results && d.results.length) $('btn-export').disabled = false;
+            if (d.results && d.results.length) { $('btn-export').disabled = false; $('btn-export-serps').disabled = false; }
             if (d.status === 'error' && d.error_msg) showAlert(true, d.error_msg, false);
           }
           const transitioned = (applyPrev[m] === 'running' || applyPrev[m] === 'starting');
@@ -6046,7 +6059,7 @@ https://example.com/page-2"></textarea>
         $(emp).style.display = 'block';
         if (m === 'ranking') document.querySelectorAll('.col-target').forEach(el => el.classList.add('hidden'));
         lastCounts[m] = 0;
-        if (m === mode) { $('count').textContent = '0 results'; $('btn-export').disabled = true; }
+        if (m === mode) { $('count').textContent = '0 results'; $('btn-export').disabled = true; $('btn-export-serps').disabled = true; }
       }
       window.tbody_r = document.getElementById('tbody-r');
       window.tbody_i = document.getElementById('tbody-i');

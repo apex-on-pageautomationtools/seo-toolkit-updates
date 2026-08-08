@@ -61,7 +61,7 @@ import generate_seranking_audit
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.40"
+APP_VERSION = "4.12.41"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -419,7 +419,7 @@ BATCH_MODES = ("ranking", "index", "count", "backlink")
 
 def _fresh_state(mode):
     return {"status": "idle", "current_keyword": "", "current_index": 0, "total": 0,
-            "results": [], "captcha_msg": "", "error_msg": "", "log": [],
+            "results": [], "serp_lists": [], "captcha_msg": "", "error_msg": "", "log": [],
             "driver": None, "mode": mode, "domain": "", "start_time": None, "elapsed_at_end": None}
 
 class _Job:
@@ -504,6 +504,7 @@ def autosave():
             mode = state.get("mode", "ranking")
             data = {"mode": mode,
                     "results": list(state["results"]),
+                    "serp_lists": list(state.get("serp_lists", [])),
                     "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         with open(_autosave_file(mode), "w", encoding="utf-8") as f:
             json.dump(data, f)   # compact (no indent) - this file is only ever read back by
@@ -1725,6 +1726,13 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                 except Exception as e:
                     add_log(f"Could not save debug HTML: {e}")
 
+        # Every organic URL seen on every page actually checked for this keyword,
+        # in ranked order - not just the target domain's own matches. Powers the
+        # "SERPs per keyword" CSV export (api_export_serps_csv), which lists what
+        # was really showing in the top N pages for each keyword, not just where
+        # the tracked domain landed.
+        all_serp_urls = list(links_page1)
+
         # Ctrl+F search on page 1
         all_matches = find_domain_in_page(sess.driver, domain_clean, page_offset=0)
         if len(all_matches) > 1:
@@ -1832,6 +1840,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                             break
                     prev_total = total_links   # organic results counted on all prior pages
                     total_links += len(page_links)
+                    all_serp_urls.extend(page_links)
                     add_log(f"Page {page_num}: {len(page_links)} links")
                     # Rank = results on prior pages + position on THIS page. Use the ACTUAL
                     # cumulative count, not page_num*10 - Google frequently shows fewer than
@@ -1870,6 +1879,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                         page_num += 1
                         prev_total = total_links
                         total_links += len(page_links)
+                        all_serp_urls.extend(page_links)
                         add_log(f"Page {page_num}: {len(page_links)} links (recovered after timeout)")
                         page_matches = find_domain_in_page(sess.driver, domain_clean, page_offset=prev_total)
                         if page_matches:
@@ -1899,7 +1909,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
             # load needed, and none is done, so the driver stays on the SERP page.
             add_log(f"'{keyword}': found at #{matches[0]['position']} "
                     f"({total_links} results across {page_num} pages)")
-            return {"status": "found", "matches": matches, "pages": page_num}
+            return {"status": "found", "matches": matches, "pages": page_num, "all_serp_urls": all_serp_urls}
         if blocked_incomplete:
             reason_txt = "a block" if incomplete_reason == "block" else "a renderer timeout"
             max_retries = CONFIG.get("max_block_retries", 3)
@@ -1911,7 +1921,7 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
             add_log(f"'{keyword}': search cut short by {reason_txt} at page {page_num} - "
                     f"ranking may exist deeper ({total_links} results seen)")
             return {"status": f"not_found (incomplete - {incomplete_reason} at page {page_num})",
-                    "matches": [], "pages": page_num, "incomplete": True}
+                    "matches": [], "pages": page_num, "incomplete": True, "all_serp_urls": all_serp_urls}
         if page_num == 1 and total_links == 0:
             # Every retry (including the whole-keyword restarts above) still came
             # back with zero organic links on page 1 - Google never actually
@@ -1921,11 +1931,12 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
             add_log(f"'{keyword}': page 1 never returned real results after all retries - "
                     f"reporting as inconclusive, not a confident not-found")
             return {"status": "not_found (incomplete - page 1 never loaded real results)",
-                    "matches": [], "pages": page_num, "incomplete": True}
+                    "matches": [], "pages": page_num, "incomplete": True, "all_serp_urls": all_serp_urls}
         add_log(f"'{keyword}': not in top {page_num} pages ({total_links} results)")
-        return {"status": f"not_found in {page_num} pages", "matches": [], "pages": page_num}
+        return {"status": f"not_found in {page_num} pages", "matches": [], "pages": page_num,
+                "all_serp_urls": all_serp_urls}
 
-    return {"status": f"not_found in {max_pages} pages", "matches": []}
+    return {"status": f"not_found in {max_pages} pages", "matches": [], "all_serp_urls": []}
 
 def _vpn_pause_at_start(vpn_method, driver=None):
     # Check through the browser (proxy-aware) when a driver is already running,
@@ -2111,6 +2122,10 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
             with state_lock:
                 row = _make_row(kw, kw_target, result)
                 state["results"].append(row)
+                # Parallel to state["results"] (same index) - every organic URL seen
+                # across all pages checked for this keyword, not just where the
+                # tracked domain landed. Powers the separate "SERPs per keyword" CSV.
+                state["serp_lists"].append({"keyword": kw, "urls": result.get("all_serp_urls", [])})
                 if result.get("incomplete"):
                     incomplete.append((kw, kw_domain, kw_target, len(state["results"]) - 1))
             autosave()
@@ -2164,10 +2179,16 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
                                   city=city, lang=lang)
                 with state_lock:
                     new_row = _make_row(kw, kw_target, result)
+                    new_serp_entry = {"keyword": kw, "urls": result.get("all_serp_urls", [])}
                     if 0 <= ridx < len(state["results"]):
                         state["results"][ridx] = new_row   # replace the incomplete row
+                        if ridx < len(state["serp_lists"]):
+                            state["serp_lists"][ridx] = new_serp_entry
+                        else:
+                            state["serp_lists"].append(new_serp_entry)
                     else:
                         state["results"].append(new_row)
+                        state["serp_lists"].append(new_serp_entry)
                 if result.get("matches"):
                     add_log(f"'{kw}': retry found at #{result['matches'][0]['position']}",
                             to_activity=True)
@@ -3170,7 +3191,7 @@ def api_start():
 
     with state_lock:
         state.update({"status": "starting", "current_keyword": "", "current_index": 0,
-                      "total": len(keywords), "results": [], "captcha_msg": "",
+                      "total": len(keywords), "results": [], "serp_lists": [], "captcha_msg": "",
                       "error_msg": "", "mode": mode, "log": [], "domain": domain,
                       "start_time": time.time()})
     pause_event.set(); stop_event.clear(); clear_autosave()
@@ -3248,7 +3269,7 @@ def api_reset():
     stop_event.set(); pause_event.set()
     with state_lock:
         state.update({"status": "idle", "current_keyword": "", "current_index": 0,
-                      "total": 0, "results": [], "captcha_msg": "", "error_msg": "",
+                      "total": 0, "results": [], "serp_lists": [], "captcha_msg": "", "error_msg": "",
                       "log": [], "domain": ""})
     stop_event.clear(); clear_autosave()
     return jsonify({"status": "idle"})
@@ -3420,6 +3441,7 @@ def api_load_autosave():
     if data and data.get("results"):
         with state_lock:
             state["results"] = data["results"]
+            state["serp_lists"] = data.get("serp_lists", [])
             state["mode"] = data.get("mode", "ranking")
             state["status"] = "completed"
         return jsonify({"loaded": True, "count": len(data["results"]),
@@ -3516,6 +3538,40 @@ def api_export_csv():
     csv_data = "﻿" + out.getvalue()
     try:
         folder = _domain_folder(domain, m)
+        with open(os.path.join(folder, name), "w", encoding="utf-8", newline="") as f:
+            f.write(csv_data)
+    except Exception:
+        pass
+    return Response(csv_data, mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={name}"})
+
+@app.route("/api/export/serps-csv")
+def api_export_serps_csv():
+    """Every organic URL seen on every page actually checked, for every keyword -
+    not just where the tracked domain landed (that's the regular Export CSV above).
+    Layout: each keyword gets its own header row, followed by one row per SERP
+    URL found for it (position + URL), so scrolling down one CSV shows exactly
+    what was really showing in the top N pages for each keyword in turn."""
+    _pin_request_mode()
+    with state_lock:
+        serp_lists = list(state.get("serp_lists", []))
+        domain = state.get("domain", "")
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["Keyword", "Position", "SERP URL"])
+    for entry in serp_lists:
+        kw = entry.get("keyword", "")
+        urls = entry.get("urls") or []
+        w.writerow([kw, "", ""])
+        for pos, url in enumerate(urls, 1):
+            w.writerow(["", pos, url])
+    out.seek(0)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    _dslug = (domain or "report").lower().replace("https://", "").replace("http://", "").replace("www.", "").strip("/").split("/")[0].replace(":", "_") or "report"
+    name = f"{_dslug}_serps_by_keyword_{ts}.csv"
+    csv_data = "﻿" + out.getvalue()
+    try:
+        folder = _domain_folder(domain, "ranking")
         with open(os.path.join(folder, name), "w", encoding="utf-8", newline="") as f:
             f.write(csv_data)
     except Exception:
