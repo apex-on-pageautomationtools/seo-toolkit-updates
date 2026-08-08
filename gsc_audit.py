@@ -954,6 +954,103 @@ def _find_reason_row(driver, reason_name):
     return None
 
 
+def _wait_for_drilldown_table(driver, timeout=10):
+    """Poll until the per-URL table (header column data-name="URL") is in
+    the DOM - confirmed live this table lags a moment behind the heading/
+    breadcrumb after a reason-row click, same SPA-render lag already
+    confirmed on the Export control's own data-export-url attribute."""
+    from selenium.webdriver.common.by import By
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            if driver.find_elements(By.CSS_SELECTOR, "th[data-name='URL']"):
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+def _scrape_drilldown_urls(driver, log_fn, debug_label=None, max_pages=20):
+    """Read the per-reason URL list DIRECTLY off the rendered drilldown
+    table, instead of GSC's Export -> Download CSV mechanism.
+
+    Confirmed live (4 live-debugging rounds against a real GSC account) that
+    the Export mechanism is unreliable for repeated exports within one
+    browser session: the summary export and the FIRST drilldown export in a
+    run succeed every time, but every drilldown export attempted after that
+    silently times out with zero error from GSC's own UI - while GSC's
+    notification bell (visible in a saved debug screenshot) quietly
+    accumulated 70+ "your export is ready" jobs never delivered to this
+    browser tab. That points to GSC's export being an async, rate-limited
+    job queue past the first request per session, not an instant per-click
+    download - no amount of "click it more correctly" fixes that.
+
+    The on-screen table has no such limit: GSC's own "Rows per page"
+    control goes up to 500, and its Next-page button is a plain, synchronous,
+    unthrottled click - confirmed live via a real drilldown page's saved
+    HTML (real <tr data-rowid> rows, each with a
+    <td data-string-value="<url>">, plus a <span data-paginate="next">
+    button with aria-disabled reflecting whether there's another page)."""
+    from selenium.webdriver.common.by import By
+    from selenium.common.exceptions import StaleElementReferenceException
+
+    if not _wait_for_drilldown_table(driver, timeout=10):
+        log_fn("    [warn] URL table never appeared for this reason.")
+        if debug_label:
+            _save_debug_artifacts(driver, f"{debug_label}_no_table", log_fn)
+        return []
+
+    # Bump "Rows per page" to GSC's own max (500) so most reasons finish in
+    # a single page - best-effort, falls back to whatever's already set.
+    try:
+        listbox = driver.find_element(
+            By.CSS_SELECTOR, "[jsname='S4nex'][aria-label='Number of rows per page']")
+        _robust_click(driver, listbox)
+        time.sleep(0.5)
+        opt500 = driver.find_elements(By.CSS_SELECTOR, "[data-value='500']")
+        if opt500:
+            _robust_click(driver, opt500[0])
+            time.sleep(1.5)
+    except Exception:
+        pass
+
+    urls = []
+    seen = set()
+    for _page in range(max_pages):
+        page_urls = []
+        for attempt in range(3):
+            try:
+                cells = driver.find_elements(By.CSS_SELECTOR, "tr[data-rowid] td[data-string-value]")
+                page_urls = [c.get_attribute("data-string-value") for c in cells]
+                break
+            except StaleElementReferenceException:
+                time.sleep(0.5)
+                continue
+        if not page_urls:
+            break
+        new_count = 0
+        for u in page_urls:
+            if u and u not in seen:
+                seen.add(u)
+                urls.append(u)
+                new_count += 1
+        try:
+            next_btns = driver.find_elements(By.CSS_SELECTOR, "[data-paginate='next']")
+            if not next_btns or next_btns[0].get_attribute("aria-disabled") == "true":
+                break
+            _robust_click(driver, next_btns[0])
+            time.sleep(1.5)
+        except StaleElementReferenceException:
+            break
+        except Exception:
+            break
+        if new_count == 0:
+            # Paginated but got the exact same rows back - stop rather than loop forever.
+            break
+    return urls
+
+
 def capture_index_coverage_urls(session_id, property_url, email, browser_pref="edge", log_fn=None):
     """{reason_name: [url, ...], ...} for EVERY reason currently showing in
     this property's Page Indexing report - see the module docstring above
@@ -1026,13 +1123,13 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
 
             # Step 2: reveal the per-reason breakdown table (only rendered
             # after clicking the "Not indexed" scorecard - confirmed live),
-            # then click into each KNOWN reason (from step 1) and export its
-            # own drilldown Table.csv for the real per-URL list.
+            # then click into each KNOWN reason (from step 1) and read its
+            # own drilldown table's URL list directly off the page.
             _click_not_indexed_scorecard(driver, log_fn)
 
             reason_urls = {}
             for reason_name, stated_count in stated_counts.items():
-                log_fn(f"  Exporting '{reason_name}' ({stated_count} affected page(s))...")
+                log_fn(f"  Reading '{reason_name}' ({stated_count} affected page(s))...")
                 try:
                     row = _find_reason_row(driver, reason_name)
                     if not row:
@@ -1045,11 +1142,8 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
                         continue
                     # Confirm the click actually navigated to this reason's own
                     # drilldown page (breadcrumb heading = the reason name) -
-                    # the summary page's OWN Export/Download CSV succeeds with
-                    # these exact same selectors, so a per-reason export
-                    # failing every time hints the row click might not be
-                    # navigating anywhere at all, silently re-exporting the
-                    # summary instead of the reason.
+                    # a stale/unmatched heading means the click didn't actually
+                    # navigate anywhere, still showing the previous page.
                     try:
                         heading = driver.find_element(
                             "xpath", "//span[@role='heading' and @aria-level='1']").text.strip()
@@ -1060,33 +1154,21 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
                                f"(still showing '{heading}') - skipping.")
                         _save_debug_artifacts(driver, f"{reason_name}_no_navigation", log_fn)
                         continue
-                    # Confirmed live via a real failure's saved HTML: the page's
-                    # visible content (heading, breadcrumb, affected-page count)
-                    # updates before the Export control's OWN data-export-url
-                    # attribute does - it can sit at "index/summary" for several
-                    # more seconds on a freshly-navigated drilldown page, so
-                    # clicking Export too early re-exports the SUMMARY (which
-                    # produces no new/visible file since one was already
-                    # downloaded, exactly matching every drilldown attempt
-                    # silently timing out). Wait for the real signal instead of
-                    # a fixed delay.
-                    if not _wait_for_drilldown_export_scope(driver, timeout=10):
-                        log_fn(f"    [warn] Export control for '{reason_name}' never switched to "
-                               f"drilldown scope (still bound to the summary export) - skipping.")
-                        _save_debug_artifacts(driver, f"{reason_name}_stale_export_scope", log_fn)
+                    # Read the URL list DIRECTLY off the rendered table rather
+                    # than GSC's Export -> Download CSV mechanism - confirmed
+                    # live across 4 debugging rounds that the export mechanism
+                    # only reliably delivers the summary export plus the FIRST
+                    # drilldown export per browser session; every one after
+                    # that silently times out while GSC's own notification
+                    # bell quietly piles up "export ready" jobs never
+                    # delivered to this tab (an async, rate-limited queue,
+                    # not an instant per-click download). The on-screen table
+                    # has no such limit - see _scrape_drilldown_urls().
+                    urls = _scrape_drilldown_urls(driver, log_fn, debug_label=reason_name)
+                    if not urls:
+                        log_fn(f"    [warn] No URLs read from the table for '{reason_name}'.")
                         continue
-                    drilldown_zip = _click_export_download_csv(
-                        driver, download_dir, log_fn, debug_label=reason_name,
-                        expected_scope="index/drilldown")
-                    if not drilldown_zip:
-                        log_fn(f"    [warn] Export failed for '{reason_name}'.")
-                        continue
-                    urls = _read_drilldown_urls(drilldown_zip, log_fn)
-                    try:
-                        os.remove(drilldown_zip)
-                    except Exception:
-                        pass
-                    log_fn(f"    {len(urls)}/{stated_count} URL(s) exported for '{reason_name}'"
+                    log_fn(f"    {len(urls)}/{stated_count} URL(s) read for '{reason_name}'"
                            + ("" if len(urls) >= stated_count else " - GSC's own export didn't "
                               "return them all (its own 1000-row cap, or a smaller partial export)."))
                     if urls:
