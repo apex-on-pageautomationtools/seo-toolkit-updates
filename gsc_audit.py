@@ -553,22 +553,55 @@ def _robust_click(driver, element):
             pass
 
 
-def _find_downloaded_csv(download_dir, before_files, timeout=20):
-    """Poll download_dir for a NEW .csv file (one not present before the
-    export click) - the file's real final name isn't predictable in advance
-    (GSC names it after the reason/date), so this waits for whatever new
-    complete (non-.crdownload) file appears."""
+def _find_downloaded_export(download_dir, before_files, timeout=20):
+    """Poll download_dir for a NEW .csv OR .zip file (one not present before
+    the export click). Confirmed live: GSC's own Export control on both the
+    summary AND a per-reason drilldown page carries
+    data-export-csv-as-zip="true" - "Download CSV" always produces a ZIP,
+    never a bare .csv, so both extensions are watched for defensively rather
+    than assuming one or the other."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
             now_files = set(os.listdir(download_dir))
         except Exception:
             now_files = set()
-        new_files = [f for f in (now_files - before_files) if f.lower().endswith(".csv")]
+        new_files = [f for f in (now_files - before_files) if f.lower().endswith((".csv", ".zip"))]
         if new_files and not any(f.endswith(".crdownload") for f in now_files):
             return os.path.join(download_dir, new_files[0])
         time.sleep(0.5)
     return None
+
+
+def _urls_from_export_file(path):
+    """URLs from a downloaded export - transparently handles both the plain
+    .csv case and the ZIP case (confirmed live: GSC's own Export always
+    zips, even for a single reason's drilldown - the zip can contain more
+    than one CSV member, e.g. split by the page's current pages= filter, so
+    every member is parsed and merged/deduped rather than assuming exactly
+    one file inside)."""
+    if path.lower().endswith(".zip"):
+        import zipfile
+        urls = []
+        try:
+            with zipfile.ZipFile(path) as zf:
+                for name in zf.namelist():
+                    if not name.lower().endswith(".csv"):
+                        continue
+                    tmp_path = path + "." + os.path.basename(name)
+                    try:
+                        with zf.open(name) as member, open(tmp_path, "wb") as out:
+                            out.write(member.read())
+                        urls.extend(_parse_url_csv(tmp_path))
+                    finally:
+                        try:
+                            os.remove(tmp_path)
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"  [warn] could not read zip {path}: {type(e).__name__}: {e}")
+        return list(dict.fromkeys(urls))   # dedupe, keep order
+    return _parse_url_csv(path)
 
 
 def _parse_url_csv(csv_path):
@@ -598,34 +631,149 @@ def _parse_url_csv(csv_path):
     return [r[best_col].strip() for r in data if best_col < len(r) and r[best_col].strip().startswith(("http://", "https://"))]
 
 
-_REASON_ROW_RE = re.compile(r"^(.+?)\s+([\d,]+)$")
-
-
-def _discover_index_coverage_reasons(driver):
-    """Every reason row currently shown in the Pages report's breakdown table
-    - {reason_name: row_element}. Text-based (row text ends in a count), not
-    a fixed reason list, so a property with reasons beyond the ~10 common
-    ones still gets every one of them, per the "all points" requirement."""
+def _click_not_indexed_scorecard(driver, log_fn):
+    """Click the "Not indexed" scorecard chip - confirmed live, the
+    per-reason breakdown table only renders after this click; landing on the
+    summary page alone shows just the Indexed/Not-indexed totals, not the
+    individual reason rows. Confirmed markup: a div with title="Not indexed"
+    inside a clickable role="button" ancestor (the OK/Indexed chip sits right
+    next to it with the same structure, title="Indexed" - matched on text so
+    only the Not-indexed one gets clicked)."""
     from selenium.webdriver.common.by import By
+    try:
+        candidates = driver.find_elements(
+            By.XPATH, "//*[@title='Not indexed']/ancestor::*[@role='button'][1]")
+        if not candidates:
+            # Fallback: any element whose visible text is exactly "Not indexed".
+            candidates = driver.find_elements(
+                By.XPATH, "//*[normalize-space(text())='Not indexed']/ancestor::*[@role='button'][1]")
+        if candidates:
+            _robust_click(driver, candidates[0])
+            time.sleep(2.5)
+            return True
+        log_fn("  [warn] Could not find the 'Not indexed' scorecard to click - "
+               "GSC's UI may have changed, or every page is indexed.")
+    except Exception as e:
+        log_fn(f"  [warn] Could not click 'Not indexed' scorecard: {e}")
+    return False
+
+
+def _click_export_download_csv(driver, download_dir, log_fn, timeout=25):
+    """Click GSC's own Export control and "Download CSV" - confirmed live
+    (both on the summary page and a per-reason drilldown page) via the exact
+    jsname/aria-label GSC itself uses:
+      <div jsname="Kl7ZDb" aria-label="EXPORT" role="button" ...>
+        ...<span aria-label="Download CSV" role="menuitem">...
+    Falls back to a looser text-based match if those exact attributes ever
+    change, same resilience pattern the rest of this app's GSC/GA4 scrapers
+    use. Returns the downloaded ZIP's path, or None. Every GSC export is a
+    ZIP (data-export-csv-as-zip="true" - confirmed on both the summary AND
+    drilldown export controls), never a bare .csv."""
+    from selenium.webdriver.common.by import By
+    export_btns = driver.find_elements(By.CSS_SELECTOR, "[jsname='Kl7ZDb'][aria-label='EXPORT']")
+    if not export_btns:
+        export_btns = driver.find_elements(
+            By.XPATH, "//*[contains(translate(@aria-label,'EXPORT','export'),'export')]")
+    if not export_btns:
+        log_fn("    [warn] No Export control found.")
+        return None
+    before = set(os.listdir(download_dir))
+    _robust_click(driver, export_btns[0])
+    time.sleep(1)
+    csv_opts = driver.find_elements(By.CSS_SELECTOR, "[aria-label='Download CSV']")
+    if not csv_opts:
+        csv_opts = driver.find_elements(By.XPATH, "//*[contains(text(), 'Download CSV')]")
+    if not csv_opts:
+        log_fn("    [warn] No 'Download CSV' menu item found.")
+        return None
+    _robust_click(driver, csv_opts[0])
+    return _find_downloaded_export(download_dir, before, timeout=timeout)
+
+
+def _read_summary_reasons(zip_path, log_fn):
+    """{reason_name: stated_count} from the summary export's own
+    "Critical issues.csv" + "Non-critical issues.csv" - confirmed live these
+    are the REAL reason list with real per-reason counts (columns:
+    Reason,Source,Validation,Pages), the authoritative source instead of
+    trying to scrape/guess reason names out of the rendered page. A reason
+    with 0 pages is skipped - nothing to check."""
+    import csv as _csv, zipfile
     reasons = {}
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            for member in ("Critical issues.csv", "Non-critical issues.csv"):
+                if member not in zf.namelist():
+                    continue
+                content = zf.read(member).decode("utf-8-sig", errors="replace")
+                rows = list(_csv.reader(content.splitlines()))
+                if not rows:
+                    continue
+                header, data = rows[0], rows[1:]
+                header_l = [h.strip().lower() for h in header]
+                reason_col = header_l.index("reason") if "reason" in header_l else 0
+                pages_col = header_l.index("pages") if "pages" in header_l else len(header) - 1
+                for r in data:
+                    if reason_col >= len(r) or pages_col >= len(r):
+                        continue
+                    reason = r[reason_col].strip()
+                    try:
+                        count = int(r[pages_col].strip().replace(",", "") or 0)
+                    except ValueError:
+                        count = 0
+                    if reason and count > 0:
+                        reasons[reason] = count
+    except Exception as e:
+        log_fn(f"  [warn] Could not read summary export: {type(e).__name__}: {e}")
+    return reasons
+
+
+def _read_drilldown_urls(zip_path, log_fn):
+    """URLs from a per-reason drilldown export's own "Table.csv" (confirmed
+    live columns: URL,Last crawled) - falls back to scanning every member
+    generically if the exact filename/columns ever change."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            names = zf.namelist()
+            member = "Table.csv" if "Table.csv" in names else None
+            if member:
+                tmp_path = zip_path + ".table.csv"
+                with zf.open(member) as m, open(tmp_path, "wb") as out:
+                    out.write(m.read())
+                try:
+                    urls = _parse_url_csv(tmp_path)
+                finally:
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+                if urls:
+                    return urls
+    except Exception as e:
+        log_fn(f"  [warn] Could not read drilldown export: {type(e).__name__}: {e}")
+    # Fallback: scan every CSV member for URL-looking columns.
+    return _urls_from_export_file(zip_path)
+
+
+def _find_reason_row(driver, reason_name):
+    """The clickable row for a SPECIFIC, already-known reason name (from
+    _read_summary_reasons - the authoritative source), matched by substring
+    rather than guessing an unknown label+count text format - far more
+    reliable than the earlier label-regex approach since the reason name is
+    already known exactly."""
+    from selenium.webdriver.common.by import By
     try:
         rows = driver.find_elements(By.CSS_SELECTOR, "tr, [role='row']")
     except Exception:
         rows = []
     for row in rows:
         try:
-            text = (row.text or "").strip().replace("\n", " ")
+            text = (row.text or "").strip()
         except Exception:
             continue
-        m = _REASON_ROW_RE.match(text)
-        if not m:
-            continue
-        label = m.group(1).strip()
-        if not label or label.lower() in ("type", "reason", "trend", "validation status"):
-            continue
-        if label not in reasons:
-            reasons[label] = row
-    return reasons
+        if reason_name in text:
+            return row
+    return None
 
 
 def capture_index_coverage_urls(session_id, property_url, email, browser_pref="edge", log_fn=None):
@@ -642,7 +790,6 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
     if log_fn is None:
         log_fn = print
     import engine
-    from selenium.webdriver.common.by import By
     profile_dir = os.path.join(_sessions_dir(), session_id, "chrome_profile")
     download_dir = tempfile.mkdtemp(prefix="gsc_index_coverage_")
 
@@ -678,61 +825,71 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
                 log_fn(f"  [warn] {email} does not have access to {property_url} - skipping.")
                 return {"error": "no_access", "session_id": session_id}
 
-            reasons = _discover_index_coverage_reasons(driver)
-            log_fn(f"  Found {len(reasons)} reason(s) in the Pages report: {list(reasons.keys())}")
-            if not reasons:
-                log_fn("  [warn] No reason rows detected - GSC's UI structure may not match "
-                       "this scraper's selectors, or every page is healthy/indexed.")
+            # Step 1: export the SUMMARY - its own "Critical/Non-critical
+            # issues.csv" is the authoritative reason list + real per-reason
+            # counts (confirmed live), far more reliable than scraping/
+            # guessing reason names out of the rendered scorecard/table.
+            log_fn("  Exporting the summary (reason list + counts)...")
+            summary_zip = _click_export_download_csv(driver, download_dir, log_fn)
+            if not summary_zip:
+                log_fn("  [warn] Could not export the summary - GSC's UI may have changed.")
+                return {"error": "export_failed", "session_id": session_id}
+            stated_counts = _read_summary_reasons(summary_zip, log_fn)
+            try:
+                os.remove(summary_zip)
+            except Exception:
+                pass
+            log_fn(f"  {len(stated_counts)} reason(s) with affected pages: {stated_counts}")
+            if not stated_counts:
+                log_fn("  [warn] No reasons with affected pages found - either every page is "
+                       "healthy/indexed, or GSC's export format changed.")
+                return {"reason_urls": {}, "stated_counts": {}, "session_id": session_id}
+
+            # Step 2: reveal the per-reason breakdown table (only rendered
+            # after clicking the "Not indexed" scorecard - confirmed live),
+            # then click into each KNOWN reason (from step 1) and export its
+            # own drilldown Table.csv for the real per-URL list.
+            _click_not_indexed_scorecard(driver, log_fn)
 
             reason_urls = {}
-            for reason_name, row in reasons.items():
-                log_fn(f"  Exporting '{reason_name}'...")
+            for reason_name, stated_count in stated_counts.items():
+                log_fn(f"  Exporting '{reason_name}' ({stated_count} affected page(s))...")
                 try:
+                    row = _find_reason_row(driver, reason_name)
+                    if not row:
+                        log_fn(f"    [warn] Could not find a clickable row for '{reason_name}' - skipping.")
+                        continue
                     _robust_click(driver, row)
                     time.sleep(3)
                     if _looks_like_signin(driver):
                         log_fn(f"    [warn] bounced to sign-in opening '{reason_name}' - skipping.")
                         continue
-                    # GSC's export control - a toolbar button/icon whose accessible
-                    # name contains "Export" (unconfirmed live; text-based so it
-                    # survives a class-name change even if the exact wording drifts).
-                    export_btns = driver.find_elements(
-                        By.XPATH, "//*[contains(translate(@aria-label,'EXPORT','export'),'export') "
-                                  "or contains(translate(text(),'EXPORT','export'),'export')]")
-                    if not export_btns:
-                        log_fn(f"    [warn] no Export control found for '{reason_name}' - "
-                               f"skipping (GSC's UI may have changed).")
+                    drilldown_zip = _click_export_download_csv(driver, download_dir, log_fn)
+                    if not drilldown_zip:
+                        log_fn(f"    [warn] Export failed for '{reason_name}'.")
                         continue
-                    before = set(os.listdir(download_dir))
-                    _robust_click(driver, export_btns[0])
-                    time.sleep(1)
-                    csv_opts = driver.find_elements(
-                        By.XPATH, "//*[contains(translate(text(),'CSV','csv'),'csv')]")
-                    if csv_opts:
-                        _robust_click(driver, csv_opts[0])
-                    csv_path = _find_downloaded_csv(download_dir, before, timeout=25)
-                    if not csv_path:
-                        log_fn(f"    [warn] CSV download for '{reason_name}' did not appear in time - skipping.")
-                        continue
-                    urls = _parse_url_csv(csv_path)
-                    log_fn(f"    {len(urls)} URL(s) exported for '{reason_name}'.")
-                    if urls:
-                        reason_urls[reason_name] = urls
+                    urls = _read_drilldown_urls(drilldown_zip, log_fn)
                     try:
-                        os.remove(csv_path)
+                        os.remove(drilldown_zip)
                     except Exception:
                         pass
+                    log_fn(f"    {len(urls)}/{stated_count} URL(s) exported for '{reason_name}'"
+                           + ("" if len(urls) >= stated_count else " - GSC's own export didn't "
+                              "return them all (its own 1000-row cap, or a smaller partial export)."))
+                    if urls:
+                        reason_urls[reason_name] = urls
                 except Exception as e:
                     log_fn(f"    [warn] '{reason_name}' export failed: {type(e).__name__}: {e}")
                 finally:
-                    # Back to the reasons list for the next one.
+                    # Back to the summary, re-expand the breakdown table, for the next reason.
                     try:
                         driver.get(url)
                         time.sleep(4)
+                        _click_not_indexed_scorecard(driver, log_fn)
                     except Exception:
                         pass
 
-            return {"reason_urls": reason_urls, "session_id": session_id}
+            return {"reason_urls": reason_urls, "stated_counts": stated_counts, "session_id": session_id}
         except Exception as e:
             log_fn(f"  Index coverage capture error ({'headless' if headless else 'visible'}): {e}")
             return {"error": str(e)}

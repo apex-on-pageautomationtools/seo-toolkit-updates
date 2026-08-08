@@ -256,8 +256,26 @@ _GENERIC_REASON_INFO = {
 }
 
 
+_UNICODE_PUNCT_NORMALIZE = {
+    "‘": "'", "’": "'", "“": '"', "”": '"',   # curly quotes
+    "–": "-", "—": "-",                                 # en/em dash
+}
+_REASON_LOOKUP = {}
+for _name, _info in REASON_INFO.items():
+    _REASON_LOOKUP[_name.translate(str.maketrans(_UNICODE_PUNCT_NORMALIZE))] = _info
+
+
 def _reason_info(reason):
-    return REASON_INFO.get(reason, _GENERIC_REASON_INFO)
+    """Looks up REASON_INFO tolerantly - confirmed live, GSC's real exported
+    reason names use curly quotes/en-dashes ("Excluded by 'noindex' tag",
+    "Discovered - currently not indexed" with typographic punctuation) while
+    this table was typed with plain ASCII ones; a straight equality lookup
+    would silently miss every one of those and fall back to the generic
+    entry despite having a real, tailored definition for it."""
+    if reason in REASON_INFO:
+        return REASON_INFO[reason]
+    normalized = reason.translate(str.maketrans(_UNICODE_PUNCT_NORMALIZE))
+    return _REASON_LOOKUP.get(normalized, _GENERIC_REASON_INFO)
 
 
 # --------------------------------------------------------------------------- #
@@ -435,11 +453,18 @@ def build_report(domain, reason_rows, out_path, brand=None):
     log(f"[DONE] {out_path}")
 
 
-def process_reason(reason, urls, domain, sitemap_urls, homepage_url):
+def process_reason(reason, urls, domain, sitemap_urls, homepage_url, stated_count=None):
     """Live-check every URL for one reason and build its row list - the
     shared per-reason pipeline main() and any other caller (e.g. a future
     web_app_batch.py route) should both use, so the live-check/redirect-
-    suggestion logic never has to be duplicated."""
+    suggestion logic never has to be duplicated.
+
+    stated_count (optional): the reason's real affected-page count per GSC's
+    own summary export (gsc_audit._read_summary_reasons) - when GSC's own
+    per-reason export (capped at 1000 rows, same class of limit the SE
+    Ranking PDF export already has to be flagged for elsewhere in this app)
+    returned fewer URLs than that, a trailing note row says so explicitly
+    rather than silently reporting a partial list as if it were complete."""
     info = _reason_info(reason)
     out = []
     for i, url in enumerate(urls, 1):
@@ -453,6 +478,13 @@ def process_reason(reason, urls, domain, sitemap_urls, homepage_url):
             action = info["default_action"] or "Check manually"
         out.append({"url": url, "status": live.get("status"), "indexability": indexability,
                    "indexability_status": indexability_status, "action": action})
+    if stated_count and len(urls) < stated_count:
+        remaining = stated_count - len(urls)
+        out.append({"url": f"+ {remaining} more page(s) affected by this issue - Search Console's own "
+                           f"export only returned {len(urls)} of {stated_count} (GSC caps CSV exports "
+                           f"at 1,000 rows per reason). Use URL Inspection or a sitemap-based crawl for "
+                           f"the remaining pages.",
+                   "status": None, "indexability": "", "indexability_status": "", "action": ""})
     return out
 
 

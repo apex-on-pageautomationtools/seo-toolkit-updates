@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.44"
+APP_VERSION = "4.12.45"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5585,6 +5585,7 @@ def _run_index_coverage(domain, email):
         if result.get("error"):
             raise RuntimeError(result["error"])
         reason_urls = result.get("reason_urls") or {}
+        stated_counts = result.get("stated_counts") or {}
         if not reason_urls:
             raise RuntimeError("No page-indexing reasons were found to export - either every page is "
                                "healthy/indexed, or GSC's UI structure didn't match this tool's "
@@ -5607,7 +5608,8 @@ def _run_index_coverage(domain, email):
                 break
             _log(f"  '{reason}' ({len(urls)} URL(s))...")
             reason_rows[reason] = index_coverage.process_reason(
-                reason, urls, domain, sitemap_urls, homepage_url)
+                reason, urls, domain, sitemap_urls, homepage_url,
+                stated_count=stated_counts.get(reason))
         if ic_stop.is_set():
             with ic_lock:
                 ic_state["status"] = "stopped"
