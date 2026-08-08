@@ -676,7 +676,34 @@ def _click_not_indexed_scorecard(driver, log_fn):
     return False
 
 
-def _click_export_download_csv(driver, download_dir, log_fn, timeout=25):
+def _index_coverage_debug_dir():
+    d = os.path.join(_sessions_dir(), "..", "index_coverage_debug")
+    d = os.path.normpath(d)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _save_debug_artifacts(driver, label, log_fn):
+    """Screenshot + full page HTML, saved on a real failure - confirmed live
+    (the summary export succeeds with these exact same selectors/click
+    sequence, but every per-reason drilldown export times out with no file
+    ever appearing), so the next failure needs real evidence of what's
+    actually on screen instead of another guess at the selectors. Never
+    raises - a debug save failing shouldn't also kill the real run."""
+    try:
+        safe_label = re.sub(r"[^\w\-]+", "_", label)[:60]
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base = os.path.join(_index_coverage_debug_dir(), f"{safe_label}_{ts}")
+        driver.save_screenshot(base + ".png")
+        with open(base + ".html", "w", encoding="utf-8") as f:
+            f.write(driver.page_source or "")
+        log_fn(f"    [debug] Saved {os.path.basename(base)}.png/.html for diagnosis "
+               f"(folder: {_index_coverage_debug_dir()})")
+    except Exception as e:
+        log_fn(f"    [warn] Could not save debug artifacts: {e}")
+
+
+def _click_export_download_csv(driver, download_dir, log_fn, timeout=25, debug_label=None):
     """Click GSC's own Export control and "Download CSV" - confirmed live
     (both on the summary page and a per-reason drilldown page) via the exact
     jsname/aria-label GSC itself uses:
@@ -694,6 +721,8 @@ def _click_export_download_csv(driver, download_dir, log_fn, timeout=25):
             By.XPATH, "//*[contains(translate(@aria-label,'EXPORT','export'),'export')]")
     if not export_btns:
         log_fn("    [warn] No Export control found.")
+        if debug_label:
+            _save_debug_artifacts(driver, f"{debug_label}_no_export_btn", log_fn)
         return None
     before = set(os.listdir(download_dir))
     _robust_click(driver, export_btns[0])
@@ -703,9 +732,15 @@ def _click_export_download_csv(driver, download_dir, log_fn, timeout=25):
         csv_opts = driver.find_elements(By.XPATH, "//*[contains(text(), 'Download CSV')]")
     if not csv_opts:
         log_fn("    [warn] No 'Download CSV' menu item found.")
+        if debug_label:
+            _save_debug_artifacts(driver, f"{debug_label}_no_csv_item", log_fn)
         return None
     _robust_click(driver, csv_opts[0])
-    return _find_downloaded_export(download_dir, before, timeout=timeout)
+    result = _find_downloaded_export(download_dir, before, timeout=timeout)
+    if not result and debug_label:
+        log_fn(f"    [warn] Clicked Export -> Download CSV but no file appeared within {timeout}s.")
+        _save_debug_artifacts(driver, f"{debug_label}_no_file", log_fn)
+    return result
 
 
 def _read_summary_reasons(zip_path, log_fn):
@@ -869,7 +904,7 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
             # counts (confirmed live), far more reliable than scraping/
             # guessing reason names out of the rendered scorecard/table.
             log_fn("  Exporting the summary (reason list + counts)...")
-            summary_zip = _click_export_download_csv(driver, download_dir, log_fn)
+            summary_zip = _click_export_download_csv(driver, download_dir, log_fn, debug_label="summary")
             if not summary_zip:
                 log_fn("  [warn] Could not export the summary - GSC's UI may have changed.")
                 return {"error": "export_failed", "session_id": session_id}
@@ -903,7 +938,25 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
                     if _looks_like_signin(driver):
                         log_fn(f"    [warn] bounced to sign-in opening '{reason_name}' - skipping.")
                         continue
-                    drilldown_zip = _click_export_download_csv(driver, download_dir, log_fn)
+                    # Confirm the click actually navigated to this reason's own
+                    # drilldown page (breadcrumb heading = the reason name) -
+                    # the summary page's OWN Export/Download CSV succeeds with
+                    # these exact same selectors, so a per-reason export
+                    # failing every time hints the row click might not be
+                    # navigating anywhere at all, silently re-exporting the
+                    # summary instead of the reason.
+                    try:
+                        heading = driver.find_element(
+                            "xpath", "//span[@role='heading' and @aria-level='1']").text.strip()
+                    except Exception:
+                        heading = None
+                    if heading and heading != reason_name:
+                        log_fn(f"    [warn] Clicking '{reason_name}' didn't navigate to its own page "
+                               f"(still showing '{heading}') - skipping.")
+                        _save_debug_artifacts(driver, f"{reason_name}_no_navigation", log_fn)
+                        continue
+                    drilldown_zip = _click_export_download_csv(
+                        driver, download_dir, log_fn, debug_label=reason_name)
                     if not drilldown_zip:
                         log_fn(f"    [warn] Export failed for '{reason_name}'.")
                         continue
