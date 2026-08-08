@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.47"
+APP_VERSION = "4.12.48"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5559,7 +5559,13 @@ def _run_index_coverage(domain, email):
 
     def _log(msg):
         with ic_lock:
-            ic_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            # Tagged with the tool name (this function is shared reasoning
+            # for two entry points - auto-fetch and upload - and the same
+            # underlying gsc_audit/get_access_token code path other tools
+            # like GSC Audit also call) so a pasted log line is unambiguous
+            # about which tool it came from, without relying on which tab
+            # happened to be open when it was copied.
+            ic_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] [Index Coverage Report] {msg}")
             if msg.startswith("[") or msg.startswith("  "):
                 ic_state["progress"] = msg
 
@@ -5652,7 +5658,13 @@ def _run_index_coverage_from_uploads(domain, summary_path, drilldown_paths, bran
 
     def _log(msg):
         with ic_lock:
-            ic_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            # Tagged with the tool name (this function is shared reasoning
+            # for two entry points - auto-fetch and upload - and the same
+            # underlying gsc_audit/get_access_token code path other tools
+            # like GSC Audit also call) so a pasted log line is unambiguous
+            # about which tool it came from, without relying on which tab
+            # happened to be open when it was copied.
+            ic_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] [Index Coverage Report] {msg}")
             if msg.startswith("[") or msg.startswith("  "):
                 ic_state["progress"] = msg
 

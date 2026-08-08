@@ -234,11 +234,29 @@ def _refresh_token(email):
     }).encode()
     req = urllib.request.Request(OAUTH_TOKEN_URL, data=data,
                                 headers={"Content-Type": "application/x-www-form-urlencoded"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        tokens = json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            tokens = json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        # Google's OAuth token endpoint returns the real error (e.g.
+        # invalid_grant - the refresh token was revoked, most commonly by an
+        # account password change, which silently kills every refresh token
+        # ever issued to that account across every app) as a 4xx HTTP status
+        # WITH a JSON error body, not a 200 with {"error": ...} inside it -
+        # urlopen() raises HTTPError for that BEFORE this function ever gets
+        # to read the body, so without this except the caller only ever saw
+        # a bare "HTTP Error 400: Bad Request" with no indication of what
+        # actually failed or that reconnecting would fix it.
+        try:
+            body = json.loads(e.read().decode())
+            reason = body.get("error_description") or body.get("error") or str(e)
+        except Exception:
+            reason = str(e)
+        remove_account(email)
+        raise Exception(f"Session expired for {email} ({reason}). Please reconnect the account.")
     if "error" in tokens:
         remove_account(email)
-        raise Exception(f"Session expired for {email}. Please reconnect.")
+        raise Exception(f"Session expired for {email} ({tokens.get('error')}). Please reconnect.")
 
     acc["access_token"] = tokens["access_token"]
     acc["expires_at"] = time.time() + tokens.get("expires_in", 3600) - 60
