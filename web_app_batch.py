@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.48"
+APP_VERSION = "4.12.49"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5578,14 +5578,14 @@ def _run_index_coverage(domain, email):
 
         session = gsc_audit.find_session_for_email(email)
         if not session:
-            raise RuntimeError(f"No browser session found for {email} - reconnect it in "
-                               f"the Google Accounts tab first.")
+            raise RuntimeError(f"No browser session found for {email} - create/refresh its "
+                               f"browser session in the Google Accounts tab first.")
 
         _log("[1/3] Exporting the Pages report from Search Console...")
         result = gsc_audit.capture_index_coverage_urls(session["id"], property_url, email, log_fn=_log)
         if result.get("error") == "session_expired":
-            raise RuntimeError("The GSC session was signed out - reconnect the account in "
-                               "the Google Accounts tab and try again.")
+            raise RuntimeError(f"The browser session for {email} was signed out mid-fetch - "
+                               f"refresh its login in the Google Accounts tab and try again.")
         if result.get("error") == "no_access":
             raise RuntimeError(f"{email} doesn't have access to {property_url} in Search Console.")
         if result.get("error"):

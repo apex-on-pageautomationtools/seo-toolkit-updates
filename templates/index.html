@@ -3500,9 +3500,14 @@ https://example.com/page-2"></textarea>
               <line x1="12" y1="17" x2="12.01" y2="17" />
             </svg>
             Action needed<span id="alert-tool"></span>
+            <button class="alert-x" id="alert-x" onclick="showAlert(false)" aria-label="Close" title="Close"
+              style="margin-left:auto;background:none;border:none;cursor:pointer;color:inherit;opacity:.7;font-size:18px;line-height:1;padding:0 2px">&times;</button>
           </div>
           <div class="msg" id="alert-msg"></div>
-          <button class="btn btn-ok btn-w" id="alert-btn" onclick="doResume()">Resume</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ok btn-w" id="alert-btn" onclick="doResume()">Resume</button>
+            <button class="btn btn-tonal" id="alert-action-btn" style="display:none"></button>
+          </div>
         </div>
 
         <!-- ACTIVITY LOG -->
@@ -6083,7 +6088,7 @@ https://example.com/page-2"></textarea>
           if (isActive) {
             $('cur-kw').textContent = '';
             if (d.results && d.results.length) { $('btn-export').disabled = false; $('btn-export-serps').disabled = false; }
-            if (d.status === 'error' && d.error_msg) showAlert(true, d.error_msg, false);
+            if (d.status === 'error' && d.error_msg) showReconnectAwareAlert(d.error_msg);
           }
           const transitioned = (applyPrev[m] === 'running' || applyPrev[m] === 'starting');
           if (d.status === 'completed' && transitioned) {
@@ -6157,7 +6162,62 @@ https://example.com/page-2"></textarea>
           $('status-txt').textContent = 'Idle';
         }
       }
-      function showAlert(show, msg, resumable) {
+      // Shared by every GSC-account-based tool (GSC Audit, Index Coverage
+      // Report, Performance Report, etc.) - their errors bottom out in one
+      // of two distinct places, needing two distinct fixes, so this
+      // distinguishes them by wording rather than sending everything to the
+      // same generic "go to Google Accounts" spot:
+      //   1. The OAuth API token is dead (gsc_audit.get_access_token /
+      //      _refresh_token's own "Session expired for X ... reconnect"
+      //      message) - fixed by reconnecting the account (Google Accounts
+      //      section's "+ Connect account").
+      //   2. The BROWSER session (saved login cookies, used for screenshot-
+      //      based scraping) is missing/dead - a completely different
+      //      mechanism (Browser Sessions section's own Login button) - these
+      //      messages all contain the literal phrase "browser session".
+      // Either way this is a persistent popup with a one-click action button
+      // that takes the user straight to the actual fix, not just a toast
+      // describing where to go - shown until the user dismisses it.
+      function showReconnectAwareAlert(errMsg) {
+        if (!errMsg) return;
+        const emailMatch = errMsg.match(/([\w.+-]+@[\w.-]+\.[a-z]{2,})/i);
+        const email = emailMatch ? emailMatch[1] : '';
+        const isBrowserSession = /browser session/i.test(errMsg);
+        if (email && isBrowserSession) {
+          showAlert(true, errMsg, false, {
+            label: 'Fix Browser Session for ' + email,
+            onClick: async () => {
+              switchTab('gscaccounts');
+              try {
+                const sessions = await (await fetch('/api/gsc/sessions')).json();
+                window._gscSessions = sessions;
+                const match = (sessions || []).find(s => (s.accounts || [])
+                  .some(a => String(a).toLowerCase() === email.toLowerCase()));
+                if (match) {
+                  toast('Opening browser to refresh the session for ' + email + '...');
+                  gscSessionLaunch(match.id);
+                } else {
+                  toast('No session has ' + email + ' yet - click "+ New Session" below, then log in as ' + email);
+                }
+              } catch (e) {
+                toast('Go to Browser Sessions below and log in as ' + email);
+              }
+            }
+          });
+        } else if (email) {
+          showAlert(true, errMsg, false, {
+            label: 'Reconnect ' + email,
+            onClick: () => {
+              switchTab('gscaccounts');
+              window._gscConnectHint = email;
+              toast('Click "+ Connect account" below to sign in as ' + email);
+            }
+          });
+        } else {
+          showAlert(true, errMsg, false);
+        }
+      }
+      function showAlert(show, msg, resumable, action) {
         $('alert').classList.toggle('show', !!show);
         if (msg) $('alert-msg').textContent = msg;
         // Named per the tool active at the moment this was raised - this card lives
@@ -6180,6 +6240,20 @@ https://example.com/page-2"></textarea>
         } else {
           $('alert-btn').textContent = 'Resume';
           $('alert-btn').onclick = doResume;
+        }
+        // action: {label, onClick} - an extra button for errors that have a
+        // concrete, known fix (e.g. "Reconnect Account") - takes the user
+        // straight to where the fix happens instead of just describing it in
+        // text. Stays visible until the user dismisses it via the x/Dismiss,
+        // same as the rest of this alert - never auto-hides like a toast.
+        const actionBtn = $('alert-action-btn');
+        if (action && action.label) {
+          actionBtn.textContent = action.label;
+          actionBtn.style.display = '';
+          actionBtn.onclick = () => { action.onClick && action.onClick(); showAlert(false); };
+        } else {
+          actionBtn.style.display = 'none';
+          actionBtn.onclick = null;
         }
       }
       // Clear ONLY the given tool's table. The four browser tools run in parallel, so
@@ -6402,6 +6476,7 @@ https://example.com/page-2"></textarea>
             $('op-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
             finishToolProgress('op', false);
             setButtons('stopped', 'onpage'); stopOpPoll(); stopReportTimer('op');
+            showReconnectAwareAlert(d.error_msg);
           } else if (d.status === 'stopped') {
             $('op-progress').className = 'tag t-unknown';
             finishToolProgress('op', false);
@@ -6466,6 +6541,7 @@ https://example.com/page-2"></textarea>
             $('ha-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
             finishToolProgress('ha', false);
             setButtons('stopped', 'health'); stopHaPoll(); stopReportTimer('ha');
+            showReconnectAwareAlert(d.error_msg);
           } else if (d.status === 'stopped') {
             $('ha-progress').className = 'tag t-unknown';
             finishToolProgress('ha', false);
@@ -6538,6 +6614,7 @@ https://example.com/page-2"></textarea>
             $('sa-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
             finishToolProgress('sa', false);
             setButtons('stopped', 'siteaudit'); stopSaPoll(); stopReportTimer('sa');
+            showReconnectAwareAlert(d.error_msg);
           } else if (d.status === 'stopped') {
             $('sa-progress').className = 'tag t-unknown';
             finishToolProgress('sa', false);
@@ -6582,6 +6659,7 @@ https://example.com/page-2"></textarea>
               clearInterval(saReportTimer); saReportTimer = null;
               btn.disabled = false; btn.innerHTML = label;
               toast('Report generation failed: ' + (d.error_msg || 'unknown error'));
+              showReconnectAwareAlert(d.error_msg);
             }
           } catch (e) { }
         }, 2000);
@@ -6650,6 +6728,7 @@ https://example.com/page-2"></textarea>
             $('gsc-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
             finishToolProgress('gsc', false);
             setButtons('stopped', 'gsc'); stopGscPoll(); stopReportTimer('gsc');
+            showReconnectAwareAlert(d.error_msg);
           } else if (d.status === 'stopped') {
             $('gsc-progress').className = 'tag t-unknown';
             finishToolProgress('gsc', false);
@@ -6692,6 +6771,7 @@ https://example.com/page-2"></textarea>
             $('ba-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
             finishToolProgress('ba', false);
             setButtons('stopped', 'brief'); stopBaPoll(); stopReportTimer('ba');
+            showReconnectAwareAlert(d.error_msg);
           } else if (d.status === 'stopped') {
             $('ba-progress').className = 'tag t-unknown';
             finishToolProgress('ba', false);
@@ -6735,6 +6815,7 @@ https://example.com/page-2"></textarea>
             $('bo-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
             finishToolProgress('bo', false);
             setButtons('stopped', 'blogopt'); stopBoPoll(); stopReportTimer('bo');
+            showReconnectAwareAlert(d.error_msg);
             toast(d.error_msg || 'Blog optimization suggestions failed', 'err');
           } else if (d.status === 'stopped') {
             $('bo-progress').className = 'tag t-unknown';
@@ -6778,6 +6859,7 @@ https://example.com/page-2"></textarea>
             $('sr-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
             finishToolProgress('sr', false);
             setButtons('stopped', 'seranking'); stopSrPoll(); stopReportTimer('sr');
+            showReconnectAwareAlert(d.error_msg);
           } else if (d.status === 'stopped') {
             $('sr-progress').className = 'tag t-unknown';
             finishToolProgress('sr', false);
@@ -6819,9 +6901,14 @@ https://example.com/page-2"></textarea>
             setButtons('completed', 'indexcoverage'); stopIcPoll(); stopReportTimer('ic'); toast('Index Coverage report ready');
           } else if (d.status === 'error') {
             $('ic-progress').className = 'tag t-not_found';
-            $('ic-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
+            const icErrMsg = d.error_msg || 'failed';
+            $('ic-progress').textContent = 'Error: ' + icErrMsg;
             finishToolProgress('ic', false);
             setButtons('stopped', 'indexcoverage'); stopIcPoll(); stopReportTimer('ic');
+            // Persistent popup, not just a toast - a run failing in the background
+            // (this tab may not even be the active one) needs to stay visible until
+            // the user actually deals with it, not auto-dismiss after a few seconds.
+            showReconnectAwareAlert(icErrMsg);
           } else if (d.status === 'stopped') {
             $('ic-progress').className = 'tag t-unknown';
             finishToolProgress('ic', false);
@@ -6866,6 +6953,7 @@ https://example.com/page-2"></textarea>
             $('geo-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
             finishToolProgress('geo', false);
             setButtons('stopped', 'geo'); stopGeoPoll(); stopReportTimer('geo');
+            showReconnectAwareAlert(d.error_msg);
           } else if (d.status === 'stopped') {
             $('geo-progress').className = 'tag t-unknown';
             finishToolProgress('geo', false);
@@ -6911,6 +6999,7 @@ https://example.com/page-2"></textarea>
             $('perf-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
             finishToolProgress('perf', false);
             setButtons('stopped', 'performance'); stopPerfPoll(); stopReportTimer('perf');
+            showReconnectAwareAlert(d.error_msg);
           } else if (d.status === 'stopped') {
             $('perf-progress').className = 'tag t-unknown';
             finishToolProgress('perf', false);
@@ -7455,6 +7544,7 @@ https://example.com/page-2"></textarea>
         const box = $('gsc-sessions-list');
         try {
           const sessions = await (await fetch('/api/gsc/sessions')).json();
+          window._gscSessions = sessions;   // reused by showReconnectAwareAlert() to find a session by email
           if (!sessions.length) { box.innerHTML = '<span style="color:var(--text-3)">No sessions yet. Click "+ New Session" to create one, then log into your Google accounts.</span>'; return; }
           let html = '';
           sessions.forEach(s => {
