@@ -1001,17 +1001,38 @@ def _scrape_drilldown_urls(driver, log_fn, debug_label=None, max_pages=20):
             _save_debug_artifacts(driver, f"{debug_label}_no_table", log_fn)
         return []
 
+    def _url_table():
+        """Confirmed live (a real drilldown page's saved HTML) that GSC
+        leaves TWO other tables mounted in the DOM at the same time as the
+        real URL table - leftover "Reason/Source/Validation" summary tables
+        from earlier in the page. All three use the exact same
+        tr[data-rowid]/td[data-string-value] row markup, so an unscoped
+        query silently pulled in rows from ALL of them (confirmed live: every
+        reason came back with the exact same +12 extra rows over GSC's own
+        stated count). Scope everything to the table under the real "URL"
+        column header, re-queried fresh each time since it can go stale
+        across a pagination click same as everything else in this SPA."""
+        try:
+            return driver.find_element(By.XPATH, "//th[@data-name='URL']/ancestor::table[1]")
+        except Exception:
+            return None
+
     # Bump "Rows per page" to GSC's own max (500) so most reasons finish in
     # a single page - best-effort, falls back to whatever's already set.
+    # Scoped to the control nearest (in document order) to the URL table,
+    # same reasoning as _url_table() above - the other two leftover tables
+    # each carry their own "Rows per page"/pagination controls too.
     try:
-        listbox = driver.find_element(
-            By.CSS_SELECTOR, "[jsname='S4nex'][aria-label='Number of rows per page']")
-        _robust_click(driver, listbox)
-        time.sleep(0.5)
-        opt500 = driver.find_elements(By.CSS_SELECTOR, "[data-value='500']")
-        if opt500:
-            _robust_click(driver, opt500[0])
-            time.sleep(1.5)
+        table_el = _url_table()
+        if table_el is not None:
+            listbox = table_el.find_element(
+                By.XPATH, "following::*[@jsname='S4nex' and @aria-label='Number of rows per page'][1]")
+            _robust_click(driver, listbox)
+            time.sleep(0.5)
+            opt500 = driver.find_elements(By.CSS_SELECTOR, "[data-value='500']")
+            if opt500:
+                _robust_click(driver, opt500[0])
+                time.sleep(1.5)
     except Exception:
         pass
 
@@ -1021,7 +1042,10 @@ def _scrape_drilldown_urls(driver, log_fn, debug_label=None, max_pages=20):
         page_urls = []
         for attempt in range(3):
             try:
-                cells = driver.find_elements(By.CSS_SELECTOR, "tr[data-rowid] td[data-string-value]")
+                table_el = _url_table()
+                if table_el is None:
+                    break
+                cells = table_el.find_elements(By.CSS_SELECTOR, "tr[data-rowid] td[data-string-value]")
                 page_urls = [c.get_attribute("data-string-value") for c in cells]
                 break
             except StaleElementReferenceException:
@@ -1036,7 +1060,11 @@ def _scrape_drilldown_urls(driver, log_fn, debug_label=None, max_pages=20):
                 urls.append(u)
                 new_count += 1
         try:
-            next_btns = driver.find_elements(By.CSS_SELECTOR, "[data-paginate='next']")
+            table_el = _url_table()
+            if table_el is None:
+                break
+            next_btns = table_el.find_elements(
+                By.XPATH, "following::*[@data-paginate='next'][1]")
             if not next_btns or next_btns[0].get_attribute("aria-disabled") == "true":
                 break
             _robust_click(driver, next_btns[0])
