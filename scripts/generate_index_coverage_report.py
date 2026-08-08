@@ -295,19 +295,74 @@ def _safe_url(url):
         return url
 
 
+class _NoAutoRedirect(urllib.request.HTTPRedirectHandler):
+    """Disables urllib's normal silent-follow-and-hide-the-chain behavior -
+    returning None from redirect_request makes urllib raise the 3xx as an
+    HTTPError (with .code and a Location header) instead of quietly moving
+    on, so each hop can be recorded and inspected individually."""
+    def redirect_request(self, *a, **kw):
+        return None
+
+
+def follow_redirect_chain(url, max_hops=10, timeout=15):
+    """Walks the FULL redirect chain hop by hop - never trusts the "did it
+    eventually land on a 200" summary alone, since a page GSC lists as "Page
+    with redirect" or "Not found (404)" needs the real story: is it a clean
+    single 301 straight to a live page, a chain of several hops, a loop, or
+    a redirect that itself dead-ends in a 404? That distinction is exactly
+    what determines the real fix (leave it, consolidate the chain, or
+    redirect it directly to a genuinely live page).
+
+    Returns {"chain": [{"url":, "status":}, ...] (every hop actually
+    visited, in order), "final_url":, "final_status":, "hop_count":
+    (0 = no redirect at all), "html": <final page's HTML, if any>,
+    "loop": bool}. Never raises - a network failure on any hop ends the
+    chain there with status=None for that hop rather than crashing the run."""
+    opener = urllib.request.build_opener(_NoAutoRedirect)
+    chain = []
+    seen = set()
+    current = url
+    html = ""
+    loop = False
+    for _ in range(max_hops):
+        if current in seen:
+            loop = True
+            break
+        seen.add(current)
+        try:
+            req = urllib.request.Request(_safe_url(current), headers={"User-Agent": _UA}, method="GET")
+            with opener.open(req, timeout=timeout) as r:
+                chain.append({"url": current, "status": r.status})
+                html = r.read().decode("utf-8", "ignore")
+            break   # 2xx with no redirect handler firing - chain ends here
+        except urllib.error.HTTPError as e:
+            chain.append({"url": current, "status": e.code})
+            if e.code in (301, 302, 303, 307, 308):
+                loc = e.headers.get("Location")
+                if not loc:
+                    break
+                current = urllib.parse.urljoin(current, loc)
+                continue
+            try:
+                html = e.read().decode("utf-8", "ignore")
+            except Exception:
+                html = ""
+            break
+        except Exception as e:
+            log(f"   [warn] could not check {current}: {type(e).__name__}: {e}")
+            chain.append({"url": current, "status": None})
+            break
+    final = chain[-1] if chain else {"url": url, "status": None}
+    return {"chain": chain, "final_url": final["url"], "final_status": final["status"],
+            "hop_count": len(chain) - 1, "html": html, "loop": loop}
+
+
 def check_live_status(url):
-    """Real current HTTP status + final URL after following redirects. Never
-    raises - a network failure reports as status=None rather than crashing
-    the whole run over one bad URL."""
-    try:
-        req = urllib.request.Request(_safe_url(url), headers={"User-Agent": _UA}, method="GET")
-        with urllib.request.urlopen(req, timeout=15) as r:
-            return {"status": r.status, "final_url": r.geturl(), "html": r.read().decode("utf-8", "ignore")}
-    except urllib.error.HTTPError as e:
-        return {"status": e.code, "final_url": e.geturl() if hasattr(e, "geturl") else url, "html": ""}
-    except Exception as e:
-        log(f"   [warn] could not check {url}: {type(e).__name__}: {e}")
-        return {"status": None, "final_url": url, "html": ""}
+    """Real current HTTP status + final URL after following redirects -
+    thin wrapper over follow_redirect_chain() for callers that only need
+    the immediate/final picture, not the full hop-by-hop chain."""
+    result = follow_redirect_chain(url, max_hops=10)
+    return {"status": result["final_status"], "final_url": result["final_url"], "html": result["html"]}
 
 
 def classify_indexability(url, live):
@@ -349,24 +404,47 @@ def _slug_words(url):
     return set(_slug_word_re.findall(path.lower()))
 
 
-def suggest_redirect_target(dead_url, sitemap_urls, homepage_url):
-    """Best-matching REAL live page for a 404'd URL, by slug word overlap
-    against the site's own sitemap - never a fabricated URL. Falls back to
-    the homepage only when no sitemap match scores above the minimum
-    threshold, exactly like a human triaging redirects would."""
+def _ranked_redirect_candidates(dead_url, sitemap_urls, homepage_url):
+    """Sitemap URLs ranked by slug-word overlap with the dead URL (best
+    first), homepage appended last as the universal fallback - never a
+    fabricated URL, only real pages the site's own sitemap lists."""
     dead_words = _slug_words(dead_url)
-    if not dead_words or not sitemap_urls:
-        return homepage_url
-    best_url, best_score = None, 0
-    for cand in sitemap_urls:
-        cand_words = _slug_words(cand)
-        if not cand_words:
-            continue
-        overlap = len(dead_words & cand_words)
-        score = overlap / max(len(dead_words), 1)
-        if score > best_score:
-            best_score, best_url = score, cand
-    return best_url if best_score >= 0.34 else homepage_url
+    scored = []
+    if dead_words:
+        for cand in sitemap_urls:
+            cand_words = _slug_words(cand)
+            if not cand_words:
+                continue
+            score = len(dead_words & cand_words) / max(len(dead_words), 1)
+            if score >= 0.34:
+                scored.append((score, cand))
+    scored.sort(key=lambda t: -t[0])
+    ranked = [c for _, c in scored]
+    if homepage_url not in ranked:
+        ranked.append(homepage_url)
+    return ranked
+
+
+def find_live_redirect_target(dead_url, sitemap_urls, homepage_url, max_candidates=4):
+    """The best REAL, CONFIRMED-LIVE page to redirect a broken/dead-ending
+    URL to - not just the best slug match, but the best slug match that
+    itself actually resolves cleanly (live-checked, same as every other URL
+    in this report - a suggested redirect target that turns out to be
+    ANOTHER dead link or another redirect chain would just move the problem,
+    not fix it). Tries candidates best-match-first, stops at the first one
+    that resolves to a clean 200; the homepage is always the last resort and
+    checked too (a real hosting outage would otherwise silently recommend a
+    homepage that's ALSO down, without saying so).
+
+    Returns the winning follow_redirect_chain() result dict, or None if not
+    even the homepage could be confirmed live (report this honestly rather
+    than recommending an unconfirmed URL)."""
+    candidates = _ranked_redirect_candidates(dead_url, sitemap_urls, homepage_url)[:max_candidates]
+    for cand in candidates:
+        result = follow_redirect_chain(cand, max_hops=5)
+        if result["final_status"] == 200:
+            return result
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -430,20 +508,38 @@ def build_report(domain, reason_rows, out_path, brand=None):
         ws["A2"].alignment = WRAP
         ws.row_dimensions[2].height = 60
 
-        last_col_label = "Recommended Redirect URL" if reason == "Not found (404)" else "Action"
-        headers = ["Address", "Status Code", "Indexability", "Indexability Status", last_col_label]
-        ws.append(headers)
-        for c in ws[3]:
-            c.fill = HEADER_FILL
-            c.font = HEADER_FONT
+        is_redirect_sheet = bool(rows) and rows[0].get("kind") == "redirect"
+        if is_redirect_sheet:
+            # Full chain analysis - not just "is it a 200 now", but the whole
+            # story: this URL's own current status, exactly where it
+            # redirects to, what THAT resolves to, how many hops that took,
+            # and a concrete fix (consolidate the chain, or redirect
+            # straight to a confirmed-live 200 page).
+            headers = ["Address", "Current Status (Live)", "Redirects To",
+                      "Destination Status", "Hops", "Recommended Fix"]
+            ws.append(headers)
+            for c in ws[3]:
+                c.fill = HEADER_FILL
+                c.font = HEADER_FONT
+            for r in rows:
+                ws.append([r["url"], r.get("current_status") or "-", r.get("redirects_to") or "-",
+                          r.get("destination_status") or "-", r.get("hop_count", ""),
+                          r.get("recommended_fix", "")])
+            widths = (55, 18, 55, 18, 8, 75)
+        else:
+            headers = ["Address", "Status Code", "Indexability", "Indexability Status", "Action"]
+            ws.append(headers)
+            for c in ws[3]:
+                c.fill = HEADER_FILL
+                c.font = HEADER_FONT
+            for r in rows:
+                ws.append([r["url"], r.get("status") or "-", r.get("indexability", "-"),
+                          r.get("indexability_status", "-"), r.get("action", "")])
+            widths = (60, 16, 16, 16, 22)
 
-        for r in rows:
-            ws.append([r["url"], r.get("status") or "-", r.get("indexability", "-"),
-                      r.get("indexability_status", "-"), r.get("action", "")])
-
-        for i, h in enumerate(headers, 1):
+        for i, w in enumerate(widths, 1):
             col_letter = ws.cell(3, i).column_letter
-            ws.column_dimensions[col_letter].width = 60 if i == 1 else (22 if i == 5 else 16)
+            ws.column_dimensions[col_letter].width = w
         for row in ws.iter_rows(min_row=4):
             for cell in row:
                 cell.alignment = NO_WRAP
@@ -466,26 +562,65 @@ def process_reason(reason, urls, domain, sitemap_urls, homepage_url, stated_coun
     returned fewer URLs than that, a trailing note row says so explicitly
     rather than silently reporting a partial list as if it were complete."""
     info = _reason_info(reason)
+    redirect_relevant = reason.translate(str.maketrans(_UNICODE_PUNCT_NORMALIZE)) in (
+        "Not found (404)", "Page with redirect")
     out = []
     for i, url in enumerate(urls, 1):
         log(f"   [{i}/{len(urls)}] Checking {url}")
-        live = check_live_status(url)
-        indexability, indexability_status = classify_indexability(url, live)
-        if reason == "Not found (404)":
-            action = (suggest_redirect_target(url, sitemap_urls, homepage_url)
-                      if live.get("status") == 404 else "No action needed - page is live")
+        if redirect_relevant:
+            out.append(_build_redirect_row(url, reason, sitemap_urls, homepage_url))
         else:
+            live = check_live_status(url)
+            indexability, indexability_status = classify_indexability(url, live)
             action = info["default_action"] or "Check manually"
-        out.append({"url": url, "status": live.get("status"), "indexability": indexability,
-                   "indexability_status": indexability_status, "action": action})
+            out.append({"kind": "simple", "url": url, "status": live.get("status"),
+                       "indexability": indexability, "indexability_status": indexability_status,
+                       "action": action})
     if stated_count and len(urls) < stated_count:
         remaining = stated_count - len(urls)
-        out.append({"url": f"+ {remaining} more page(s) affected by this issue - Search Console's own "
-                           f"export only returned {len(urls)} of {stated_count} (GSC caps CSV exports "
-                           f"at 1,000 rows per reason). Use URL Inspection or a sitemap-based crawl for "
-                           f"the remaining pages.",
-                   "status": None, "indexability": "", "indexability_status": "", "action": ""})
+        note = (f"+ {remaining} more page(s) affected by this issue - Search Console's own "
+               f"export only returned {len(urls)} of {stated_count} (GSC caps CSV exports "
+               f"at 1,000 rows per reason). Use URL Inspection or a sitemap-based crawl for "
+               f"the remaining pages.")
+        if redirect_relevant:
+            out.append({"kind": "redirect", "url": note, "current_status": "", "redirects_to": "",
+                       "destination_status": "", "hop_count": "", "recommended_fix": ""})
+        else:
+            out.append({"kind": "simple", "url": note, "status": None, "indexability": "",
+                       "indexability_status": "", "action": ""})
     return out
+
+
+def _build_redirect_row(url, reason, sitemap_urls, homepage_url):
+    """Full redirect-chain analysis for one URL, for the two reasons where
+    it matters most (Not found (404), Page with redirect) - see
+    follow_redirect_chain()'s docstring for why the whole chain, not just
+    the final destination, is needed to tell a clean single-hop redirect
+    apart from a chain, a loop, or one that dead-ends somewhere else."""
+    chain = follow_redirect_chain(url, max_hops=10)
+    hop_count = chain["hop_count"]
+    final_status = chain["final_status"]
+    redirects_to = chain["chain"][1]["url"] if len(chain["chain"]) > 1 else "-"
+
+    if chain["loop"]:
+        fix = "Redirect loop detected - this URL is currently unreachable. Fix immediately."
+    elif final_status == 200 and hop_count <= 1:
+        fix = "No action needed - already resolves cleanly to a live 200 page."
+    elif final_status == 200 and hop_count > 1:
+        fix = (f"Resolves to a live 200 page but via {hop_count} redirect hops - consolidate to a "
+               f"single 301 straight to {chain['final_url']} (avoid redirect chains).")
+    else:
+        target = find_live_redirect_target(url, sitemap_urls, homepage_url)
+        if target:
+            fix = (f"Redirect this URL directly to {target['final_url']} (confirmed live, 200 OK) - "
+                   f"a single 301, not chained through the current broken/multi-hop path.")
+        else:
+            fix = ("Could not confirm any live replacement page automatically (even the homepage "
+                  "didn't resolve cleanly) - please choose a redirect target manually.")
+
+    return {"kind": "redirect", "url": url, "current_status": chain["chain"][0]["status"] if chain["chain"] else None,
+           "redirects_to": redirects_to, "destination_status": final_status,
+           "hop_count": hop_count, "recommended_fix": fix}
 
 
 def main():

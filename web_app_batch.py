@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.46"
+APP_VERSION = "4.12.47"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5768,8 +5768,8 @@ def api_index_coverage_upload_start():
 
 @app.route("/api/index-coverage/start", methods=["POST"])
 def api_index_coverage_start():
-    if not _require_tool("gsc"):
-        return jsonify({"error": "You don't have access to the GSC Audit tool."}), 403
+    if not _require_tool("indexcoverage"):
+        return jsonify({"error": "You don't have access to the Index Coverage Report tool."}), 403
     with ic_lock:
         if ic_state["status"] == "running":
             return jsonify({"error": "Index Coverage report already running."}), 400

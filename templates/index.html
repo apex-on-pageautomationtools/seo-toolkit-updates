@@ -3095,11 +3095,24 @@
             included and do the same there.</p>
           <div class="field">
             <label>Domain</label>
-            <input type="text" id="ic2-domain" placeholder="example.com" autocomplete="off">
+            <input type="text" id="ic2-domain" placeholder="example.com" autocomplete="off" onblur="icCheckDomain()">
+            <div id="ic2-domain-info"
+              style="display:none;margin-top:6px;padding:8px 12px;border-radius:8px;font-size:12px;line-height:1.5">
+            </div>
           </div>
           <div class="field">
             <label>Brand name <span class="hint">(optional)</span></label>
             <input type="text" id="ic2-brand" placeholder="e.g. Ace Abseiling" autocomplete="off">
+          </div>
+          <div class="note">With a connected Google account for this domain (see the box above, or the <a href="#"
+              onclick="switchTab('gscaccounts');return false;">Google Accounts</a> tab), just click <b>Start</b> - it
+            fetches the Pages report automatically. Google account connections aren't confirmed reliable against
+            every Search Console UI variant yet; if it doesn't work, use the manual upload option below instead.</div>
+
+          <div class="field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+            <label>Or upload the exports manually <span class="hint">(more reliable right now - in GSC's Pages
+                report, click Export → Download CSV on the summary page, then again on each reason you want
+                included)</span></label>
           </div>
           <div class="field">
             <label>Coverage export (summary) <span class="hint">(the ZIP from the main Pages report's Export →
@@ -3111,11 +3124,11 @@
                 self-identifies its reason, no need to label them)</span></label>
             <input type="file" id="ic2-drilldowns" accept=".zip" multiple>
           </div>
-          <div class="note">Each URL is checked live before the report is built, so a page GSC still classifies under
-            an old reason (e.g. "Page with redirect") but that's since been fixed shows up correctly rather than
-            repeating GSC's possibly-stale classification. GSC's own export caps each reason at 1,000 rows - if a
-            reason has more affected pages than that, the report says so explicitly rather than reporting a partial
-            list as if it were complete.</div>
+          <div class="note">Either way, each URL is checked live before the report is built, so a page GSC still
+            classifies under an old reason (e.g. "Page with redirect") but that's since been fixed shows up
+            correctly rather than repeating GSC's possibly-stale classification. GSC's own export caps each reason at
+            1,000 rows - if a reason has more affected pages than that, the report says so explicitly rather than
+            reporting a partial list as if it were complete.</div>
         </section>
 
         <section class="card panel" id="panel-geo" style="display:none">
@@ -5708,20 +5721,33 @@ https://example.com/page-2"></textarea>
           const icDomain = hostOnly($('ic2-domain').value.trim());
           const icSummary = $('ic2-summary').files[0];
           const icDrilldowns = $('ic2-drilldowns').files;
+          const icHasUploads = icSummary && icDrilldowns && icDrilldowns.length;
           if (!icDomain) { toast('Enter a domain'); return; }
-          if (!icSummary) { toast('Upload the Coverage (summary) export ZIP'); return; }
-          if (!icDrilldowns || !icDrilldowns.length) { toast('Upload at least one Coverage-Drilldown export ZIP'); return; }
-          const icFd = new FormData();
-          icFd.append('domain', icDomain);
-          icFd.append('brand', $('ic2-brand').value.trim());
-          icFd.append('summary', icSummary);
-          for (const f of icDrilldowns) icFd.append('drilldowns', f);
+          if (!icHasUploads && !_icEmail) {
+            toast('Connect a Google account for this domain (see the box above), or use the manual upload option below');
+            return;
+          }
           setButtons('starting', 'indexcoverage');   // instant feedback, before the network round-trip
           $('empty-indexcoverage').style.display = 'none';
           $('indexcoverage-active').classList.remove('hidden');
           $('ic-log').textContent = 'Starting...';
-          const ric = await fetch('/api/index-coverage/upload-start', { method: 'POST', body: icFd });
-          const dic = await ric.json();
+          let ric, dic;
+          if (icHasUploads) {
+            const icFd = new FormData();
+            icFd.append('domain', icDomain);
+            icFd.append('brand', $('ic2-brand').value.trim());
+            icFd.append('summary', icSummary);
+            for (const f of icDrilldowns) icFd.append('drilldowns', f);
+            ric = await fetch('/api/index-coverage/upload-start', { method: 'POST', body: icFd });
+          } else {
+            // Auto mode - fetches the Pages report itself via the connected
+            // Google account's already-authenticated browser session.
+            ric = await fetch('/api/index-coverage/start', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ domain: icDomain, email: _icEmail })
+            });
+          }
+          dic = await ric.json();
           if (dic.error) { toast(dic.error); setButtons('idle', 'indexcoverage'); $('empty-indexcoverage').style.display = 'block'; $('indexcoverage-active').classList.add('hidden'); return; }
           toast('Index Coverage report started');
           $('btn-ic-download').disabled = true;
@@ -8644,6 +8670,35 @@ https://example.com/page-2"></textarea>
             info.style.color = 'var(--md-on-error-container, #b71c1c)';
             info.innerHTML = '<b>' + esc(domain) + '</b> not found in GSC config.<br>' + (r.reason || 'Add it to the Google Sheet first.');
             window._gscConnectHint = '';
+          }
+        } catch (e) { info.style.display = 'none'; }
+      }
+
+      /* ===================== index coverage report - domain/account resolution ===================== */
+      let _icEmail = '';
+      async function icCheckDomain() {
+        $('ic2-domain').value = hostOnly($('ic2-domain').value);
+        const domain = $('ic2-domain').value.trim();
+        const info = $('ic2-domain-info');
+        if (!domain) { info.style.display = 'none'; _icEmail = ''; return; }
+        try {
+          const r = await (await fetch('/api/gsc/domain-check?domain=' + encodeURIComponent(domain))).json();
+          if (r.found) {
+            const connected = r.email && (window._gscAccounts || []).includes(String(r.email).toLowerCase());
+            info.style.display = 'block';
+            info.style.background = 'var(--md-surface-variant, #e8f5e9)';
+            info.style.color = 'var(--md-on-surface, #1b5e20)';
+            info.innerHTML = '<b>' + esc(domain) + '</b><br>Account: <b>' + esc(r.email) + '</b><br>Access: <b>' + esc(r.accessLevel) + '</b>'
+              + (connected ? '<br><span style="opacity:.85">✓ selected automatically for this domain</span>'
+                : '<br><span style="color:#b71c1c">Not connected yet - go to the <a href="#" onclick="switchTab(\'gscaccounts\');return false;" style="color:inherit;text-decoration:underline">Google Accounts</a> tab and click "+ Connect account" (it\'ll prefill this email) to sign in, or use the manual upload option below.</span>');
+            _icEmail = connected ? r.email : '';
+            window._gscConnectHint = connected ? '' : (r.email || '');
+          } else {
+            info.style.display = 'block';
+            info.style.background = 'var(--md-error-container, #fce4ec)';
+            info.style.color = 'var(--md-on-error-container, #b71c1c)';
+            info.innerHTML = '<b>' + esc(domain) + '</b> not found in GSC config - use the manual upload option below instead.<br>' + (r.reason || '');
+            _icEmail = '';
           }
         } catch (e) { info.style.display = 'none'; }
       }
