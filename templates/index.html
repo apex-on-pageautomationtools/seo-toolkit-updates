@@ -6178,6 +6178,18 @@ https://example.com/page-2"></textarea>
       // Either way this is a persistent popup with a one-click action button
       // that takes the user straight to the actual fix, not just a toast
       // describing where to go - shown until the user dismisses it.
+      // The small status pill (.tag - text-transform:capitalize, white-space:
+      // nowrap, meant for short labels like "Running"/"Completed") was
+      // getting the FULL error message stuffed into it, overflowing off the
+      // right edge of the screen as one unreadable capitalized line. The
+      // full message is already shown properly (wrapping, normal case) in
+      // both the persistent alert popup and the log panel below - the pill
+      // only needs a short preview.
+      function _shortErr(msg) {
+        msg = String(msg || 'failed');
+        const oneLine = msg.split('\n')[0].trim();
+        return oneLine.length > 50 ? oneLine.slice(0, 50) + '…' : oneLine;
+      }
       function showReconnectAwareAlert(errMsg) {
         if (!errMsg) return;
         const emailMatch = errMsg.match(/([\w.+-]+@[\w.-]+\.[a-z]{2,})/i);
@@ -6473,7 +6485,7 @@ https://example.com/page-2"></textarea>
             setButtons('completed', 'onpage'); stopOpPoll(); stopReportTimer('op'); toast('Report ready');
           } else if (d.status === 'error') {
             $('op-progress').className = 'tag t-not_found';
-            $('op-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
+            $('op-progress').textContent = 'Error: ' + _shortErr(d.error_msg);
             finishToolProgress('op', false);
             setButtons('stopped', 'onpage'); stopOpPoll(); stopReportTimer('op');
             showReconnectAwareAlert(d.error_msg);
@@ -6538,7 +6550,7 @@ https://example.com/page-2"></textarea>
             setButtons('completed', 'health'); stopHaPoll(); stopReportTimer('ha'); toast('Health audit report ready');
           } else if (d.status === 'error') {
             $('ha-progress').className = 'tag t-not_found';
-            $('ha-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
+            $('ha-progress').textContent = 'Error: ' + _shortErr(d.error_msg);
             finishToolProgress('ha', false);
             setButtons('stopped', 'health'); stopHaPoll(); stopReportTimer('ha');
             showReconnectAwareAlert(d.error_msg);
@@ -6611,7 +6623,7 @@ https://example.com/page-2"></textarea>
             toast('Site audit complete');
           } else if (d.status === 'error') {
             $('sa-progress').className = 'tag t-not_found';
-            $('sa-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
+            $('sa-progress').textContent = 'Error: ' + _shortErr(d.error_msg);
             finishToolProgress('sa', false);
             setButtons('stopped', 'siteaudit'); stopSaPoll(); stopReportTimer('sa');
             showReconnectAwareAlert(d.error_msg);
@@ -6725,7 +6737,7 @@ https://example.com/page-2"></textarea>
             setButtons('completed', 'gsc'); stopGscPoll(); stopReportTimer('gsc'); toast('GSC audit report ready');
           } else if (d.status === 'error') {
             $('gsc-progress').className = 'tag t-not_found';
-            $('gsc-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
+            $('gsc-progress').textContent = 'Error: ' + _shortErr(d.error_msg);
             finishToolProgress('gsc', false);
             setButtons('stopped', 'gsc'); stopGscPoll(); stopReportTimer('gsc');
             showReconnectAwareAlert(d.error_msg);
@@ -6768,7 +6780,7 @@ https://example.com/page-2"></textarea>
             setButtons('completed', 'brief'); stopBaPoll(); stopReportTimer('ba'); toast('Brief analysis report ready');
           } else if (d.status === 'error') {
             $('ba-progress').className = 'tag t-not_found';
-            $('ba-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
+            $('ba-progress').textContent = 'Error: ' + _shortErr(d.error_msg);
             finishToolProgress('ba', false);
             setButtons('stopped', 'brief'); stopBaPoll(); stopReportTimer('ba');
             showReconnectAwareAlert(d.error_msg);
@@ -6812,7 +6824,7 @@ https://example.com/page-2"></textarea>
             setButtons('completed', 'blogopt'); stopBoPoll(); stopReportTimer('bo'); toast('Blog optimization suggestions ready');
           } else if (d.status === 'error') {
             $('bo-progress').className = 'tag t-not_found';
-            $('bo-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
+            $('bo-progress').textContent = 'Error: ' + _shortErr(d.error_msg);
             finishToolProgress('bo', false);
             setButtons('stopped', 'blogopt'); stopBoPoll(); stopReportTimer('bo');
             showReconnectAwareAlert(d.error_msg);
@@ -6856,7 +6868,7 @@ https://example.com/page-2"></textarea>
             setButtons('completed', 'seranking'); stopSrPoll(); stopReportTimer('sr'); toast('SEranking audit ready');
           } else if (d.status === 'error') {
             $('sr-progress').className = 'tag t-not_found';
-            $('sr-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
+            $('sr-progress').textContent = 'Error: ' + _shortErr(d.error_msg);
             finishToolProgress('sr', false);
             setButtons('stopped', 'seranking'); stopSrPoll(); stopReportTimer('sr');
             showReconnectAwareAlert(d.error_msg);
@@ -6902,7 +6914,7 @@ https://example.com/page-2"></textarea>
           } else if (d.status === 'error') {
             $('ic-progress').className = 'tag t-not_found';
             const icErrMsg = d.error_msg || 'failed';
-            $('ic-progress').textContent = 'Error: ' + icErrMsg;
+            $('ic-progress').textContent = 'Error: ' + _shortErr(icErrMsg);
             finishToolProgress('ic', false);
             setButtons('stopped', 'indexcoverage'); stopIcPoll(); stopReportTimer('ic');
             // Persistent popup, not just a toast - a run failing in the background
@@ -6950,7 +6962,7 @@ https://example.com/page-2"></textarea>
             setButtons('completed', 'geo'); stopGeoPoll(); stopReportTimer('geo'); toast('GEO report ready');
           } else if (d.status === 'error') {
             $('geo-progress').className = 'tag t-not_found';
-            $('geo-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
+            $('geo-progress').textContent = 'Error: ' + _shortErr(d.error_msg);
             finishToolProgress('geo', false);
             setButtons('stopped', 'geo'); stopGeoPoll(); stopReportTimer('geo');
             showReconnectAwareAlert(d.error_msg);
@@ -6996,7 +7008,7 @@ https://example.com/page-2"></textarea>
             setButtons('completed', 'performance'); stopPerfPoll(); stopReportTimer('perf'); toast('Performance report ready');
           } else if (d.status === 'error') {
             $('perf-progress').className = 'tag t-not_found';
-            $('perf-progress').textContent = 'Error: ' + (d.error_msg || 'failed');
+            $('perf-progress').textContent = 'Error: ' + _shortErr(d.error_msg);
             finishToolProgress('perf', false);
             setButtons('stopped', 'performance'); stopPerfPoll(); stopReportTimer('perf');
             showReconnectAwareAlert(d.error_msg);

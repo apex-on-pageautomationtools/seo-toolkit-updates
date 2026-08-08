@@ -726,7 +726,7 @@ def _wait_for_drilldown_export_scope(driver, timeout=10):
     return False
 
 
-def _click_export_download_csv(driver, download_dir, log_fn, timeout=25, debug_label=None):
+def _click_export_download_csv(driver, download_dir, log_fn, timeout=25, debug_label=None, expected_scope=None):
     """Click GSC's own Export control and "Download CSV" - confirmed live
     (both on the summary page and a per-reason drilldown page) via the exact
     jsname/aria-label GSC itself uses:
@@ -736,7 +736,17 @@ def _click_export_download_csv(driver, download_dir, log_fn, timeout=25, debug_l
     change, same resilience pattern the rest of this app's GSC/GA4 scrapers
     use. Returns the downloaded ZIP's path, or None. Every GSC export is a
     ZIP (data-export-csv-as-zip="true" - confirmed on both the summary AND
-    drilldown export controls), never a bare .csv."""
+    drilldown export controls), never a bare .csv.
+
+    expected_scope (optional, e.g. "index/drilldown"): confirmed live via a
+    real failure's saved HTML - GSC can leave TWO Export buttons in the DOM
+    simultaneously right after an SPA route change, one still bound to the
+    PREVIOUS page's data-export-url (stale, e.g. "index/summary" on an
+    already-navigated drilldown page) and one correctly bound to the new
+    scope. Blindly clicking whichever export_btns[0] happened to be first in
+    DOM order silently clicked the stale one every time - this walks each
+    candidate button up to its own ancestor [data-export-url] wrapper and
+    picks the one actually matching the expected scope."""
     from selenium.webdriver.common.by import By
     export_btns = driver.find_elements(By.CSS_SELECTOR, "[jsname='Kl7ZDb'][aria-label='EXPORT']")
     if not export_btns:
@@ -747,8 +757,24 @@ def _click_export_download_csv(driver, download_dir, log_fn, timeout=25, debug_l
         if debug_label:
             _save_debug_artifacts(driver, f"{debug_label}_no_export_btn", log_fn)
         return None
+    target_btn = export_btns[0]
+    if expected_scope:
+        matched = None
+        for btn in export_btns:
+            try:
+                wrapper = btn.find_element(By.XPATH, "./ancestor::*[@data-export-url][1]")
+                if wrapper.get_attribute("data-export-url") == expected_scope:
+                    matched = btn
+                    break
+            except Exception:
+                continue
+        if matched is not None:
+            target_btn = matched
+        elif len(export_btns) > 1:
+            log_fn(f"    [warn] {len(export_btns)} Export button(s) found but none scoped to "
+                   f"'{expected_scope}' - using the first one (may be stale).")
     before = set(os.listdir(download_dir))
-    _robust_click(driver, export_btns[0])
+    _robust_click(driver, target_btn)
     time.sleep(1)
     csv_opts = driver.find_elements(By.CSS_SELECTOR, "[aria-label='Download CSV']")
     if not csv_opts:
@@ -927,7 +953,8 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
             # counts (confirmed live), far more reliable than scraping/
             # guessing reason names out of the rendered scorecard/table.
             log_fn("  Exporting the summary (reason list + counts)...")
-            summary_zip = _click_export_download_csv(driver, download_dir, log_fn, debug_label="summary")
+            summary_zip = _click_export_download_csv(driver, download_dir, log_fn, debug_label="summary",
+                                                      expected_scope="index/summary")
             if not summary_zip:
                 log_fn("  [warn] Could not export the summary - GSC's UI may have changed.")
                 return {"error": "export_failed", "session_id": session_id}
@@ -994,7 +1021,8 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
                         _save_debug_artifacts(driver, f"{reason_name}_stale_export_scope", log_fn)
                         continue
                     drilldown_zip = _click_export_download_csv(
-                        driver, download_dir, log_fn, debug_label=reason_name)
+                        driver, download_dir, log_fn, debug_label=reason_name,
+                        expected_scope="index/drilldown")
                     if not drilldown_zip:
                         log_fn(f"    [warn] Export failed for '{reason_name}'.")
                         continue
