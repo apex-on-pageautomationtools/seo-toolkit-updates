@@ -4132,6 +4132,46 @@ https://example.com/page-2"></textarea>
               <div id="adm-users-list" style="font-size:13px">Loading users...</div>
             </div>
 
+            <!-- Report Log (super admin only) - who generated which report, for
+             which domain, in what format, completed or failed, elapsed time -
+             across every teammate's own separate desktop install. -->
+            <div class="card" style="margin-bottom:16px;display:none" id="adm-reportlog-card">
+              <div class="card-t"
+                style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+                <span>Report Log</span>
+                <button class="btn btn-tonal" style="font-size:12px;padding:6px 16px" onclick="admLoadReportLog()">Refresh</button>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+                <input type="text" id="adm-rl-email" placeholder="Filter by user email..." autocomplete="off"
+                  oninput="admLoadReportLog()"
+                  style="flex:1;min-width:160px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px">
+                <input type="text" id="adm-rl-domain" placeholder="Filter by domain..." autocomplete="off"
+                  oninput="admLoadReportLog()"
+                  style="flex:1;min-width:150px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px">
+                <select id="adm-rl-tool" onchange="admLoadReportLog()"
+                  style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px">
+                  <option value="">All tools</option>
+                  <option value="onpage">On-Page</option>
+                  <option value="health">Health Audit</option>
+                  <option value="siteaudit">Site Audit</option>
+                  <option value="gsc">GSC Audit</option>
+                  <option value="brief">Brief Analysis</option>
+                  <option value="blogopt">Blog Optimizer</option>
+                  <option value="seranking">SE Ranking</option>
+                  <option value="indexcoverage">Index Coverage Report</option>
+                  <option value="geo">GEO Report</option>
+                  <option value="performance">Performance Report</option>
+                </select>
+                <select id="adm-rl-status" onchange="admLoadReportLog()"
+                  style="padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px">
+                  <option value="">All statuses</option>
+                  <option value="completed">Completed</option>
+                  <option value="failed">Failed</option>
+                </select>
+              </div>
+              <div id="adm-reportlog-list" style="font-size:12px;max-height:480px;overflow-y:auto"></div>
+            </div>
+
             <!-- Building Management (super admin only) -->
             <div class="card" style="margin-bottom:16px" id="adm-buildings-card">
               <div class="card-t"
@@ -7930,6 +7970,8 @@ https://example.com/page-2"></textarea>
             MY_ADMIN_ROLE = r.role || 'admin'; MY_ADMIN_BUILDING = r.building || '';
             $('adm-buildings-card').style.display = admIsSuper() ? '' : 'none';
             $('adm-bulkowner-card').style.display = admIsSuper() ? '' : 'none';
+            $('adm-reportlog-card').style.display = admIsSuper() ? '' : 'none';
+            if (admIsSuper()) admLoadReportLog();
             // Building admins (not super) get a self-service Office IPs card for their
             // own building. Super admin sets IPs per building in the building modal.
             $('adm-officeips-card').style.display = (MY_ADMIN_ROLE === 'admin') ? '' : 'none';
@@ -7948,6 +7990,61 @@ https://example.com/page-2"></textarea>
       }
       function admCheckAll(gridId, checked) {
         $(gridId).querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = checked);
+      }
+
+      // Debounced so the email/domain filter inputs don't fire a request on
+      // every keystroke - same "wait for a pause in typing" pattern other
+      // live-filter fields in this app already use.
+      let _admRlDebounce = null;
+      function admLoadReportLog() {
+        clearTimeout(_admRlDebounce);
+        _admRlDebounce = setTimeout(_admLoadReportLogNow, 300);
+      }
+      async function _admLoadReportLogNow() {
+        if (!admIsSuper()) return;
+        const el = $('adm-reportlog-list');
+        el.textContent = 'Loading report log...';
+        const qs = new URLSearchParams({
+          email: $('adm-rl-email').value.trim(),
+          domain: $('adm-rl-domain').value.trim(),
+          tool: $('adm-rl-tool').value,
+          status: $('adm-rl-status').value,
+          limit: '500',
+        });
+        try {
+          const r = await (await fetch('/api/admin/report-log?' + qs.toString())).json();
+          if (r.error) { el.textContent = r.error; return; }
+          const rows = r.rows || [];
+          if (!rows.length) { el.textContent = 'No report activity logged yet.'; return; }
+          const toolLabel = k => (ALL_TOOLS.find(t => t.key === k) || {}).label || admSentenceCase(k || '');
+          const fmtDuration = s => {
+            if (s === '' || s === null || s === undefined) return '-';
+            const n = Number(s); if (!isFinite(n)) return '-';
+            const m = Math.floor(n / 60), sec = Math.round(n % 60);
+            return m > 0 ? (m + 'm ' + sec + 's') : (sec + 's');
+          };
+          const fmtTs = t => { try { return new Date(t).toLocaleString(); } catch (e) { return t || '-'; } };
+          el.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:820px">' +
+            '<thead><tr style="text-align:left;border-bottom:2px solid var(--border)">' +
+            '<th style="padding:6px">When</th><th style="padding:6px">User</th><th style="padding:6px">Tool</th>' +
+            '<th style="padding:6px">Domain</th><th style="padding:6px">Format</th><th style="padding:6px">Status</th>' +
+            '<th style="padding:6px">Elapsed</th><th style="padding:6px">Error</th></tr></thead><tbody>' +
+            rows.map(row => {
+              const ok = (row.status || '').toLowerCase() === 'completed';
+              const statusPill = '<span class="tag ' + (ok ? 't-yes' : 't-no') + '">' + esc(admSentenceCase(row.status || '-')) + '</span>';
+              return '<tr style="border-bottom:1px solid var(--border)">' +
+                '<td style="padding:6px;white-space:nowrap;color:var(--text-3)">' + esc(fmtTs(row.timestamp)) + '</td>' +
+                '<td style="padding:6px">' + esc(row.email || '-') + '</td>' +
+                '<td style="padding:6px">' + esc(toolLabel(row.tool)) + '</td>' +
+                '<td style="padding:6px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(row.domain || '') + '">' + esc(row.domain || '-') + '</td>' +
+                '<td style="padding:6px">' + esc(row.format || '-') + '</td>' +
+                '<td style="padding:6px">' + statusPill + '</td>' +
+                '<td style="padding:6px;font-family:monospace;white-space:nowrap">' + esc(fmtDuration(row.duration_sec)) + '</td>' +
+                '<td style="padding:6px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--err)" title="' + esc(row.error || '') + '">' + esc(row.error || '') + '</td>' +
+                '</tr>';
+            }).join('') + '</tbody></table></div>' +
+            '<div style="margin-top:8px;font-size:11px;color:var(--text-3)">Showing ' + rows.length + ' of ' + (r.total_rows || rows.length) + ' total logged run(s).</div>';
+        } catch (e) { el.textContent = 'Failed to load report log.'; }
       }
 
       const ADM_USERS_PAGE_SIZE = 10;

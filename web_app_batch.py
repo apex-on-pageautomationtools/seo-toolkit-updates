@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.58"
+APP_VERSION = "4.12.59"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4031,8 +4031,12 @@ def api_onpage_start():
             # (either column order) into the flat form the phase-2 loader reads.
             targets = _parse_onpage_targets(targets_raw)
 
-    t = threading.Thread(target=_run_onpage_report,
-                         args=(domain, targets, fmt, no_capture), daemon=True)
+    def _op_status():
+        with onpage_lock:
+            return onpage_state.get("status"), onpage_state.get("error_msg")
+    t = threading.Thread(target=_instrument_report_run,
+                         args=("onpage", domain, fmt, _run_onpage_report,
+                              (domain, targets, fmt, no_capture), _op_status), daemon=True)
     t.start()
     return jsonify({"status": "started", "domain": domain})
 
@@ -4513,7 +4517,12 @@ def api_seranking_start():
     if zf and zf.filename:
         zip_path = os.path.join(UPLOADS_DIR, f"seranking_{ts}_{os.path.basename(zf.filename)}")
         zf.save(zip_path)
-    t = threading.Thread(target=_run_seranking_audit, args=(in_path, pdf_path, brand, zip_path), daemon=True)
+    def _sr_status():
+        with sr_lock:
+            return sr_state.get("status"), sr_state.get("error_msg")
+    t = threading.Thread(target=_instrument_report_run,
+                         args=("seranking", brand, "", _run_seranking_audit,
+                              (in_path, pdf_path, brand, zip_path), _sr_status), daemon=True)
     t.start()
     return jsonify({"status": "started"})
 
@@ -4680,8 +4689,13 @@ def api_geo_start():
         os.makedirs(UPLOADS_DIR, exist_ok=True)
         targets_path = os.path.join(UPLOADS_DIR, f"geo_{int(time.time())}_{os.path.basename(tf.filename)}")
         tf.save(targets_path)
-    t = threading.Thread(target=_run_geo_report,
-                          args=(domain, targets_path, check_visibility, keywords, pages, faqs_per_page), daemon=True)
+    def _geo_status():
+        with geo_lock:
+            return geo_state.get("status"), geo_state.get("error_msg")
+    t = threading.Thread(target=_instrument_report_run,
+                         args=("geo", domain, "", _run_geo_report,
+                              (domain, targets_path, check_visibility, keywords, pages, faqs_per_page),
+                              _geo_status), daemon=True)
     t.start()
     return jsonify({"status": "started"})
 
@@ -4846,8 +4860,12 @@ def api_performance_start():
         days = max(7, min(90, int(data.get("days", 28))))
     except (TypeError, ValueError):
         days = 28
-    t = threading.Thread(target=_run_performance_report,
-                          args=(domain, gsc_account, ga4_account, ga4_property, days), daemon=True)
+    def _perf_status():
+        with perf_lock:
+            return perf_state.get("status"), perf_state.get("error_msg")
+    t = threading.Thread(target=_instrument_report_run,
+                         args=("performance", domain, "", _run_performance_report,
+                              (domain, gsc_account, ga4_account, ga4_property, days), _perf_status), daemon=True)
     t.start()
     return jsonify({"status": "started"})
 
@@ -5054,9 +5072,13 @@ def api_ha_start():
     psi_key = CONFIG.get("psi_api_key", "").strip() or None
     if not include_psi:
         psi_key = None
-    t = threading.Thread(target=_run_health_audit,
-                         args=(domain, fmt, target_pages, no_capture, headless, browser_name, psi_key),
-                         daemon=True)
+    def _ha_status():
+        with ha_lock:
+            return ha_state.get("status"), ha_state.get("error_msg")
+    t = threading.Thread(target=_instrument_report_run,
+                         args=("health", domain, fmt, _run_health_audit,
+                              (domain, fmt, target_pages, no_capture, headless, browser_name, psi_key),
+                              _ha_status), daemon=True)
     t.start()
     activity(f"Health audit started - {domain} ({fmt})")
     return jsonify({"status": "started", "domain": domain})
@@ -5232,7 +5254,12 @@ def api_sa_report_start():
             return jsonify({"error": "Report generation already running."}), 400
     data = request.get_json(silent=True) or {}
     brand = (data.get("brand") or domain or "").strip()
-    t = threading.Thread(target=_run_sa_report, args=(domain, results, brand), daemon=True)
+    def _sar_status():
+        with sar_lock:
+            return sar_state.get("status"), sar_state.get("error_msg")
+    t = threading.Thread(target=_instrument_report_run,
+                         args=("siteaudit", domain, "", _run_sa_report,
+                              (domain, results, brand), _sar_status), daemon=True)
     t.start()
     return jsonify({"status": "started"})
 
@@ -5514,9 +5541,12 @@ def api_gsc_start():
     headless = data.get("headless", True)
     browser_name = data.get("browser", "edge")
 
-    t = threading.Thread(target=_run_gsc_audit,
-                         args=(domain, email, fmt, headless, browser_name),
-                         daemon=True)
+    def _gsc_status():
+        with gsc_lock:
+            return gsc_state.get("status"), gsc_state.get("error_msg")
+    t = threading.Thread(target=_instrument_report_run,
+                         args=("gsc", domain, fmt, _run_gsc_audit,
+                              (domain, email, fmt, headless, browser_name), _gsc_status), daemon=True)
     t.start()
     return jsonify({"status": "started", "domain": domain})
 
@@ -5794,8 +5824,12 @@ def api_index_coverage_upload_start():
         p = os.path.join(UPLOADS_DIR, f"ic_{ts}_drilldown_{i}_{os.path.basename(f.filename)}")
         f.save(p)
         drilldown_paths.append(p)
-    t = threading.Thread(target=_run_index_coverage_from_uploads,
-                         args=(domain, summary_path, drilldown_paths, brand), daemon=True)
+    def _ic_status():
+        with ic_lock:
+            return ic_state.get("status"), ic_state.get("error_msg")
+    t = threading.Thread(target=_instrument_report_run,
+                         args=("indexcoverage", domain, "", _run_index_coverage_from_uploads,
+                              (domain, summary_path, drilldown_paths, brand), _ic_status), daemon=True)
     t.start()
     return jsonify({"status": "started", "domain": domain})
 
@@ -5814,7 +5848,12 @@ def api_index_coverage_start():
         return jsonify({"error": "Domain is required."}), 400
     if not email:
         return jsonify({"error": "Please connect a Google account first."}), 400
-    t = threading.Thread(target=_run_index_coverage, args=(domain, email), daemon=True)
+    def _ic_status2():
+        with ic_lock:
+            return ic_state.get("status"), ic_state.get("error_msg")
+    t = threading.Thread(target=_instrument_report_run,
+                         args=("indexcoverage", domain, "", _run_index_coverage,
+                              (domain, email), _ic_status2), daemon=True)
     t.start()
     return jsonify({"status": "started", "domain": domain})
 
@@ -5991,6 +6030,71 @@ def activity(msg, level="info"):
 def api_activity_log():
     with _activity_lock:
         return jsonify(list(_activity_log))
+
+# --------------------------------------------------------------------------- #
+# Report Log - centralized (via the central login gateway's own Report_Log
+# sheet, same backend auth.py already talks to for login) so a superadmin can
+# see which user generated which report, for which domain, in what format,
+# and whether it completed - across every teammate's OWN separate desktop
+# install, not just whichever machine happens to be running right now. The
+# existing in-memory _activity_log above is per-machine and resets on
+# restart; this is the persistent, cross-machine version of that same idea.
+# --------------------------------------------------------------------------- #
+def _log_report_event(tool, domain, format_="", status="started", error=None, duration_sec=None):
+    """Fire-and-forget - runs its own network call in a background thread so
+    a gateway hiccup (or the gateway being unreachable at all) can NEVER
+    delay or interrupt an actual report run. "who" is the app's own
+    currently logged-in operator (auth.check_saved_auth(), no email arg ->
+    whichever saved account is currently valid on this machine) - NOT a
+    tool's own GSC-account parameter, which is a different "email" (whose
+    Google account the tool used to fetch data, not who ran the tool)."""
+    def _send():
+        try:
+            auth_result = auth.check_saved_auth()
+            email = auth_result.get("email") if isinstance(auth_result, dict) else None
+            if not email:
+                return
+            payload = {"action": "log_report_event", "email": email, "tool": tool,
+                      "domain": domain or "", "format": format_ or "", "status": status}
+            if duration_sec is not None:
+                payload["duration_sec"] = round(duration_sec, 1)
+            if error:
+                payload["error"] = str(error)[:500]
+            auth._api_call(payload, timeout=10)
+        except Exception:
+            pass
+    threading.Thread(target=_send, daemon=True).start()
+
+
+def _instrument_report_run(tool_key, domain, format_, fn, args, status_getter):
+    """Wraps a report-generation thread's target function: times it, then
+    logs ONE row - 'completed' or 'failed', with elapsed time - once it's
+    actually done, based on status_getter() - a small per-tool callback
+    returning (final_status, error_message_or_None) read from that tool's
+    OWN state dict under its own lock. That's the only reliable
+    success/failure signal here: every one of these _run_* functions already
+    converts its internal exceptions into its own state['status']='error'
+    rather than letting them propagate, so "did fn() raise" alone would miss
+    almost every real failure. A 'stopped' status (user cancelled) is
+    deliberately NOT logged as a failure - it isn't one."""
+    t0 = time.time()
+    try:
+        fn(*args)
+    except Exception as e:
+        _log_report_event(tool_key, domain, format_, status="failed", error=str(e),
+                          duration_sec=time.time() - t0)
+        raise
+    try:
+        final_status, err = status_getter()
+    except Exception:
+        final_status, err = None, None
+    dur = time.time() - t0
+    if final_status == "completed":
+        _log_report_event(tool_key, domain, format_, status="completed", duration_sec=dur)
+    elif final_status == "stopped":
+        pass
+    else:
+        _log_report_event(tool_key, domain, format_, status="failed", error=err, duration_sec=dur)
 
 # --------------------------------------------------------------------------- #
 # Auth - is_admin
@@ -6473,6 +6577,25 @@ def _admin_call(action, **params):
 @app.route("/api/admin/users")
 def api_admin_users():
     return jsonify(_admin_call("admin_list"))
+
+@app.route("/api/admin/report-log")
+def api_admin_report_log():
+    """Superadmin-only view of every desktop install's report-generation
+    activity - who ran which report, for which domain, in what format,
+    completed or failed, how long it took. _require_superadmin() gates this
+    route itself (same as every other admin_* route); the gateway's own
+    get_report_log action ALSO checks role === 'superadmin' server-side
+    (never trust a client-side-only gate for another user's data)."""
+    if not _require_superadmin():
+        return jsonify({"error": "Superadmin only."}), 403
+    return jsonify(_admin_call(
+        "get_report_log",
+        limit=request.args.get("limit", "500"),
+        filter_email=request.args.get("email", ""),
+        filter_tool=request.args.get("tool", ""),
+        filter_domain=request.args.get("domain", ""),
+        filter_status=request.args.get("status", ""),
+    ))
 
 @app.route("/api/admin/buildings")
 def api_admin_buildings():
@@ -7115,7 +7238,11 @@ def api_brief_start():
         finally:
             with _brief_lock:
                 _brief_state["running"] = False
-    t = threading.Thread(target=_run, daemon=True)
+    def _brief_status():
+        with _brief_lock:
+            return _brief_state.get("status"), _brief_state.get("error_msg") or _brief_state.get("error")
+    t = threading.Thread(target=_instrument_report_run,
+                         args=("brief", domain, fmt, _run, (), _brief_status), daemon=True)
     t.start()
     activity(f"Brief analysis started for {domain}")
     return jsonify({"started": True})
@@ -7255,9 +7382,13 @@ def api_blogopt_start():
     target_pages = [ln.strip() for ln in (data.get("target_pages") or "").splitlines() if ln.strip()]
     target_keywords = [k.strip() for k in (data.get("target_keywords") or "").split(",") if k.strip()]
     no_capture = bool(data.get("no_capture"))
-    t = threading.Thread(target=_run_blogopt_report, args=(url,
-                         {"target_pages": target_pages, "target_keywords": target_keywords}, no_capture),
-                         daemon=True)
+    def _bo_status():
+        with blogopt_lock:
+            return blogopt_state.get("status"), blogopt_state.get("error_msg")
+    t = threading.Thread(target=_instrument_report_run,
+                         args=("blogopt", url, "", _run_blogopt_report,
+                              (url, {"target_pages": target_pages, "target_keywords": target_keywords}, no_capture),
+                              _bo_status), daemon=True)
     t.start()
     return jsonify({"started": True})
 
