@@ -1,5 +1,5 @@
 {
-  "version": "4.12.56",
+  "version": "4.12.57",
   "files": [
     {
       "path": "da_checker.py",
@@ -18,7 +18,7 @@
     },
     {
       "path": "gsc_audit.py",
-      "hash": "736ecc51d07cdeb42eb5bfec80ecd021def2f03f6ffe234356d5312b68778bc0",
+      "hash": "cba2ac0e1e2c058932f9d18b1068853a861e53f1ea1ec510b67347af098cd36b",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/gsc_audit.py"
     },
     {
@@ -33,7 +33,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "ce136b0f559885ae470dbff405c871b00bba93791fec5f4493af9cc18b62b211",
+      "hash": "59deae07e92852456f2140057e9c909905fd129fa584ffb322a9a66e60739db8",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -273,7 +273,7 @@
     },
     {
       "path": "scripts/generate_index_coverage_report.py",
-      "hash": "a82517d302e03fe76095fa18b2c25f71bc4012ae9926ecbe437cba172453ae74",
+      "hash": "a20abc48c13179e97d3ac2e92a5038c286c42973407bdec433770aadc62d08f4",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_index_coverage_report.py"
     }
   ]

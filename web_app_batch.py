@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.56"
+APP_VERSION = "4.12.57"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5615,7 +5615,8 @@ def _run_index_coverage(domain, email):
             _log(f"  '{reason}' ({len(urls)} URL(s))...")
             reason_rows[reason] = index_coverage.process_reason(
                 reason, urls, domain, sitemap_urls, homepage_url,
-                stated_count=stated_counts.get(reason))
+                stated_count=stated_counts.get(reason),
+                api_token=token, api_property_url=property_url)
         if ic_stop.is_set():
             with ic_lock:
                 ic_state["status"] = "stopped"

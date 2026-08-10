@@ -37,6 +37,7 @@ import os
 import re
 import sys
 import json
+import time
 import argparse
 import urllib.parse
 import urllib.request
@@ -330,29 +331,52 @@ def follow_redirect_chain(url, max_hops=10, timeout=15):
             loop = True
             break
         seen.add(current)
-        try:
-            req = urllib.request.Request(_safe_url(current), headers={"User-Agent": _UA}, method="GET")
-            with opener.open(req, timeout=timeout) as r:
-                chain.append({"url": current, "status": r.status})
-                html = r.read().decode("utf-8", "ignore")
-            break   # 2xx with no redirect handler firing - chain ends here
-        except urllib.error.HTTPError as e:
-            chain.append({"url": current, "status": e.code})
-            if e.code in (301, 302, 303, 307, 308):
-                loc = e.headers.get("Location")
-                if not loc:
-                    break
-                current = urllib.parse.urljoin(current, loc)
-                continue
+        # 429 (Too Many Requests) gets a couple of short, backed-off retries
+        # before being recorded as a real status - confirmed live this can be
+        # SELF-inflicted: this report checks many URLs on the same origin
+        # concurrently (see process_reason()'s thread pool), which can trip a
+        # site's own rate limiter even though the page itself is perfectly
+        # healthy. Honors a real Retry-After header when the server sends one.
+        rate_limited = False
+        for retry in range(3):
             try:
-                html = e.read().decode("utf-8", "ignore")
-            except Exception:
-                html = ""
-            break
-        except Exception as e:
-            log(f"   [warn] could not check {current}: {type(e).__name__}: {e}")
-            chain.append({"url": current, "status": None})
-            break
+                req = urllib.request.Request(_safe_url(current), headers={"User-Agent": _UA}, method="GET")
+                with opener.open(req, timeout=timeout) as r:
+                    chain.append({"url": current, "status": r.status})
+                    html = r.read().decode("utf-8", "ignore")
+                rate_limited = False
+                break   # 2xx with no redirect handler firing - chain ends here
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and retry < 2:
+                    rate_limited = True
+                    try:
+                        wait = float(e.headers.get("Retry-After", 2 * (retry + 1)))
+                    except (TypeError, ValueError):
+                        wait = 2 * (retry + 1)
+                    time.sleep(min(wait, 5))
+                    continue
+                rate_limited = False
+                chain.append({"url": current, "status": e.code})
+                if e.code in (301, 302, 303, 307, 308):
+                    loc = e.headers.get("Location")
+                    if not loc:
+                        break
+                    current = urllib.parse.urljoin(current, loc)
+                    rate_limited = "redirect"
+                    break
+                try:
+                    html = e.read().decode("utf-8", "ignore")
+                except Exception:
+                    html = ""
+                break
+            except Exception as e:
+                rate_limited = False
+                log(f"   [warn] could not check {current}: {type(e).__name__}: {e}")
+                chain.append({"url": current, "status": None})
+                break
+        if rate_limited == "redirect":
+            continue
+        break
     final = chain[-1] if chain else {"url": url, "status": None}
     return {"chain": chain, "final_url": final["url"], "final_status": final["status"],
             "hop_count": len(chain) - 1, "html": html, "loop": loop}
@@ -367,20 +391,25 @@ def check_live_status(url):
 
 
 def classify_indexability(url, live):
-    """(Indexability, Indexability Status) columns - derived from the REAL
-    live check just performed, never from GSC's own possibly-stale reason."""
+    """(Indexability, Indexability Status, Canonical Target) - derived from
+    the REAL live check just performed, never from GSC's own possibly-stale
+    reason. Canonical Target is only populated when Indexability Status is
+    "Canonicalised" (the live page itself points elsewhere via its own
+    canonical tag) - None otherwise, so callers can show "what does this
+    page's canonical actually say right now" instead of just flagging that
+    one exists."""
     status = live.get("status")
     final_url = live.get("final_url") or url
     if status is None:
-        return "Unknown", "Could not check - please verify manually"
+        return "Unknown", "Could not check - please verify manually", None
     if 300 <= status < 400 or (final_url and final_url.rstrip("/") != url.rstrip("/")):
-        return "Non-Indexable", "Redirected"
+        return "Non-Indexable", "Redirected", None
     if status in (401, 403):
-        return "Non-Indexable", "Blocked"
+        return "Non-Indexable", "Blocked", None
     if status == 404 or status == 410:
-        return "Non-Indexable", "Client Error"
+        return "Non-Indexable", "Client Error", None
     if status >= 500:
-        return "Non-Indexable", "Server Error"
+        return "Non-Indexable", "Server Error", None
     if status == 200:
         html = live.get("html") or ""
         pd = onpage2._parse_html(html, final_url, status) if html else None
@@ -388,13 +417,13 @@ def classify_indexability(url, live):
             robots_meta = re.search(r'<meta[^>]+name=["\']robots["\'][^>]+content=["\']([^"\']*noindex[^"\']*)',
                                     html, re.I)
             if robots_meta:
-                return "Non-Indexable", "noindex"
+                return "Non-Indexable", "noindex", None
             canon = pd.get("canonical") or ""
             m = re.search(r'href="([^"]+)"', canon)
             if m and m.group(1).rstrip("/") != url.rstrip("/"):
-                return "Non-Indexable", "Canonicalised"
-        return "Indexable", "-"
-    return "Unknown", "Could not check - please verify manually"
+                return "Non-Indexable", "Canonicalised", m.group(1)
+        return "Indexable", "-", None
+    return "Unknown", "Could not check - please verify manually", None
 
 
 _slug_word_re = re.compile(r"[a-z0-9]+")
@@ -470,9 +499,14 @@ def _safe_sheet_name(name, used):
 
 
 def build_report(domain, reason_rows, out_path, brand=None):
-    """reason_rows: {reason: [{"url":, "status":, "indexability":,
-    "indexability_status":, "action":}, ...], ...} - already live-checked
-    (see process_reason() below, which is how main() builds this)."""
+    """reason_rows: {reason: [row, ...], ...} - already live-checked (see
+    process_reason() below, which is how main() builds this). Each row is
+    either a "simple" row ({"url":, "last_crawled":, "status":,
+    "indexability":, "indexability_status":, "canonical_target":, "action":})
+    or, for "Not found (404)"/"Page with redirect", a "redirect" row
+    ({"url":, "last_crawled":, "current_status":, "redirects_to":,
+    "destination_status":, "hop_count":, "recommendation":,
+    "redirect_target":, "target_status":})."""
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
     used_names = set()
@@ -513,30 +547,36 @@ def build_report(domain, reason_rows, out_path, brand=None):
         if is_redirect_sheet:
             # Full chain analysis - not just "is it a 200 now", but the whole
             # story: this URL's own current status, exactly where it
-            # redirects to, what THAT resolves to, how many hops that took,
-            # and a concrete fix (consolidate the chain, or redirect
-            # straight to a confirmed-live 200 page).
-            headers = ["Address", "Current Status (Live)", "Redirects To",
-                      "Destination Status", "Hops", "Recommended Fix"]
+            # currently redirects to, what THAT resolves to, how many hops
+            # that took, then the suggestion as 3 separate columns
+            # (recommendation / target URL / target's own live status)
+            # rather than one text blob, so the target URL is directly
+            # usable instead of buried in a sentence.
+            headers = ["Address", "Last Crawled", "Current Status (Live)", "Redirects To",
+                      "Destination Status", "Hops", "Recommendation",
+                      "Suggested Redirect To", "Suggested Target Status"]
             ws.append(headers)
             for c in ws[3]:
                 c.fill = HEADER_FILL
                 c.font = HEADER_FONT
             for r in rows:
-                ws.append([r["url"], r.get("current_status") or "-", r.get("redirects_to") or "-",
-                          r.get("destination_status") or "-", r.get("hop_count", ""),
-                          r.get("recommended_fix", "")])
-            widths = (55, 18, 55, 18, 8, 75)
+                ws.append([r["url"], r.get("last_crawled") or "-", r.get("current_status") or "-",
+                          r.get("redirects_to") or "-", r.get("destination_status") or "-",
+                          r.get("hop_count", ""), r.get("recommendation", ""),
+                          r.get("redirect_target") or "-", r.get("target_status") or "-"])
+            widths = (55, 14, 18, 55, 18, 8, 45, 55, 22)
         else:
-            headers = ["Address", "Status Code", "Indexability", "Indexability Status", "Action"]
+            headers = ["Address", "Last Crawled", "Status Code", "Indexability",
+                      "Indexability Status", "Canonical Points To", "Action"]
             ws.append(headers)
             for c in ws[3]:
                 c.fill = HEADER_FILL
                 c.font = HEADER_FONT
             for r in rows:
-                ws.append([r["url"], r.get("status") or "-", r.get("indexability", "-"),
-                          r.get("indexability_status", "-"), r.get("action", "")])
-            widths = (60, 16, 16, 16, 22)
+                ws.append([r["url"], r.get("last_crawled") or "-", r.get("status") or "-",
+                          r.get("indexability", "-"), r.get("indexability_status", "-"),
+                          r.get("canonical_target") or "-", r.get("action", "")])
+            widths = (60, 14, 16, 16, 16, 55, 30)
 
         for i, w in enumerate(widths, 1):
             col_letter = ws.cell(3, i).column_letter
@@ -550,8 +590,80 @@ def build_report(domain, reason_rows, out_path, brand=None):
     log(f"[DONE] {out_path}")
 
 
+# Reasons whose default action text implicitly assumes the page still
+# resolves 200 today ("add a canonical tag", "index this page", "improve
+# internal linking", "remove the noindex tag") - GSC's recorded reason can be
+# stale; if today's live check shows the page no longer even returns 200,
+# that default action doesn't apply until the real, current problem
+# (a 404/redirect/5xx) is dealt with first.
+_ASSUMES_LIVE_200 = {
+    "Discovered - currently not indexed",
+    "Crawled - currently not indexed",
+    "Soft 404",
+    "Duplicate without user-selected canonical",
+    "Excluded by 'noindex' tag",
+}
+
+
+def _derive_action(reason, info, status, indexability_status):
+    """The Action column - grounded in the LIVE check just performed, not
+    just the reason's static default text, so it never tells someone to fix
+    something that's already resolved (or recommends an action that makes no
+    sense for a page that doesn't even return 200 anymore)."""
+    normalized = reason.translate(str.maketrans(_UNICODE_PUNCT_NORMALIZE))
+    default = info["default_action"] or "Check manually"
+
+    if status is None:
+        return default
+
+    if normalized == "Excluded by 'noindex' tag" and status == 200 and indexability_status != "noindex":
+        return ("No longer noindex on today's live check - Search Console's record may be stale. "
+                "Verify with URL Inspection before assuming this still needs fixing.")
+
+    if "Add a canonical tag" in default and status == 200:
+        return "Add a canonical tag to the preferred version, if this page is useful enough to keep indexed."
+
+    if normalized in _ASSUMES_LIVE_200 and status != 200:
+        return (f"This URL now returns {status} live (not 200) - Search Console's record may be "
+               f"stale. Verify and resolve the {status} first; \"{default}\" doesn't apply until it does.")
+
+    return default
+
+
+def _url_and_crawled(item):
+    """urls entries can be a plain string (older callers, the CLI JSON path)
+    or a {"url":, "last_crawled":} dict (gsc_audit's live table scrape,
+    which reads the "Last crawled" column right off GSC's own drilldown
+    table) - normalize either shape to (url, last_crawled_text_or_'')."""
+    if isinstance(item, dict):
+        return item.get("url"), item.get("last_crawled") or ""
+    return item, ""
+
+
+def _inspect_fallback(url, api_token, api_property_url):
+    """Best-effort fallback via Search Console's OWN URL Inspection API,
+    used only when a direct live HTTP check couldn't get any result at all
+    (persistent network failure/block, not a real 429 - those are already
+    retried directly in follow_redirect_chain()). Real per-property daily
+    quota on Google's side, so this must stay a rare fallback, not a
+    per-URL default. Returns None (silently) if unconfigured or the
+    fallback call itself fails - the caller keeps the original "could not
+    check" result either way, this only adds detail when it succeeds."""
+    if not api_token or not api_property_url:
+        return None
+    try:
+        import gsc_audit
+        result = gsc_audit.inspect_url(api_token, api_property_url, url)
+        idx = result.get("indexStatusResult") or {}
+        return {"verdict": idx.get("verdict") or "", "coverage": idx.get("coverageState") or "",
+                "last_crawl": idx.get("lastCrawlTime") or "", "robots_state": idx.get("robotsTxtState") or ""}
+    except Exception as e:
+        log(f"   [warn] URL Inspection fallback failed for {url}: {type(e).__name__}: {e}")
+        return None
+
+
 def process_reason(reason, urls, domain, sitemap_urls, homepage_url, stated_count=None,
-                    max_workers=15):
+                    max_workers=15, api_token=None, api_property_url=None):
     """Live-check every URL for one reason and build its row list - the
     shared per-reason pipeline main() and any other caller (e.g. a future
     web_app_batch.py route) should both use, so the live-check/redirect-
@@ -574,83 +686,113 @@ def process_reason(reason, urls, domain, sitemap_urls, homepage_url, stated_coun
     info = _reason_info(reason)
     redirect_relevant = reason.translate(str.maketrans(_UNICODE_PUNCT_NORMALIZE)) in (
         "Not found (404)", "Page with redirect")
+    norm_urls = [_url_and_crawled(u) for u in urls]
 
-    def _check_one(url):
+    def _check_one(url, last_crawled):
         if redirect_relevant:
-            return _build_redirect_row(url, reason, sitemap_urls, homepage_url)
+            return _build_redirect_row(url, reason, sitemap_urls, homepage_url, last_crawled=last_crawled)
         live = check_live_status(url)
-        indexability, indexability_status = classify_indexability(url, live)
-        action = info["default_action"] or "Check manually"
-        return {"kind": "simple", "url": url, "status": live.get("status"),
+        if live.get("status") is None:
+            insp = _inspect_fallback(url, api_token, api_property_url)
+            if insp:
+                label = insp["coverage"] or insp["verdict"] or "no verdict"
+                return {"kind": "simple", "url": url, "last_crawled": last_crawled, "status": None,
+                        "indexability": "Unknown",
+                        "indexability_status": f"Live check failed - Search Console's URL Inspection: {label}",
+                        "canonical_target": "-",
+                        "action": (f"Could not verify live directly; Search Console's own URL Inspection "
+                                  f"says '{label}'" + (f" (last crawled {insp['last_crawl']})"
+                                  if insp["last_crawl"] else "") + " - verify manually before acting.")}
+        indexability, indexability_status, canonical_target = classify_indexability(url, live)
+        action = _derive_action(reason, info, live.get("status"), indexability_status)
+        return {"kind": "simple", "url": url, "last_crawled": last_crawled, "status": live.get("status"),
                 "indexability": indexability, "indexability_status": indexability_status,
-                "action": action}
+                "canonical_target": canonical_target or "-", "action": action}
 
-    out = [None] * len(urls)
+    out = [None] * len(norm_urls)
     done = 0
-    with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(urls)))) as pool:
-        futures = {pool.submit(_check_one, url): i for i, url in enumerate(urls)}
+    with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(norm_urls)))) as pool:
+        futures = {pool.submit(_check_one, url, last_crawled): i
+                  for i, (url, last_crawled) in enumerate(norm_urls)}
         for fut in as_completed(futures):
             i = futures[fut]
+            url, last_crawled = norm_urls[i]
             try:
                 out[i] = fut.result()
             except Exception as e:
                 err = f"Check manually - live check failed ({type(e).__name__})"
                 if redirect_relevant:
-                    out[i] = {"kind": "redirect", "url": urls[i], "current_status": "",
-                              "redirects_to": "", "destination_status": "", "hop_count": "",
-                              "recommended_fix": err}
+                    out[i] = {"kind": "redirect", "url": url, "last_crawled": last_crawled,
+                              "current_status": "", "redirects_to": "", "destination_status": "",
+                              "hop_count": "", "recommendation": err, "redirect_target": "-",
+                              "target_status": "-"}
                 else:
-                    out[i] = {"kind": "simple", "url": urls[i], "status": None,
-                              "indexability": "", "indexability_status": "", "action": err}
+                    out[i] = {"kind": "simple", "url": url, "last_crawled": last_crawled, "status": None,
+                              "indexability": "", "indexability_status": "", "canonical_target": "-",
+                              "action": err}
             done += 1
-            if done % 25 == 0 or done == len(urls):
-                log(f"   [{done}/{len(urls)}] checked")
+            if done % 25 == 0 or done == len(norm_urls):
+                log(f"   [{done}/{len(norm_urls)}] checked")
 
-    if stated_count and len(urls) < stated_count:
-        remaining = stated_count - len(urls)
+    if stated_count and len(norm_urls) < stated_count:
+        remaining = stated_count - len(norm_urls)
         note = (f"+ {remaining} more page(s) affected by this issue - Search Console's own "
-               f"export only returned {len(urls)} of {stated_count} (GSC caps CSV exports "
+               f"export only returned {len(norm_urls)} of {stated_count} (GSC caps CSV exports "
                f"at 1,000 rows per reason). Use URL Inspection or a sitemap-based crawl for "
                f"the remaining pages.")
         if redirect_relevant:
-            out.append({"kind": "redirect", "url": note, "current_status": "", "redirects_to": "",
-                       "destination_status": "", "hop_count": "", "recommended_fix": ""})
+            out.append({"kind": "redirect", "url": note, "last_crawled": "", "current_status": "",
+                       "redirects_to": "", "destination_status": "", "hop_count": "",
+                       "recommendation": "", "redirect_target": "", "target_status": ""})
         else:
-            out.append({"kind": "simple", "url": note, "status": None, "indexability": "",
-                       "indexability_status": "", "action": ""})
+            out.append({"kind": "simple", "url": note, "last_crawled": "", "status": None,
+                       "indexability": "", "indexability_status": "", "canonical_target": "", "action": ""})
     return out
 
 
-def _build_redirect_row(url, reason, sitemap_urls, homepage_url):
+def _build_redirect_row(url, reason, sitemap_urls, homepage_url, last_crawled=""):
     """Full redirect-chain analysis for one URL, for the two reasons where
     it matters most (Not found (404), Page with redirect) - see
     follow_redirect_chain()'s docstring for why the whole chain, not just
     the final destination, is needed to tell a clean single-hop redirect
-    apart from a chain, a loop, or one that dead-ends somewhere else."""
+    apart from a chain, a loop, or one that dead-ends somewhere else.
+
+    The fix is 3 separate columns rather than one text blob - "Recommendation"
+    (what to do, short), "Suggested Redirect To" (the actual target URL, if
+    one is being suggested), "Suggested Target Status" (that target's own
+    live-confirmed status) - so the target URL is directly usable/copyable
+    instead of buried in a sentence."""
     chain = follow_redirect_chain(url, max_hops=10)
     hop_count = chain["hop_count"]
     final_status = chain["final_status"]
     redirects_to = chain["chain"][1]["url"] if len(chain["chain"]) > 1 else "-"
+    is_404_reason = reason.translate(str.maketrans(_UNICODE_PUNCT_NORMALIZE)) == "Not found (404)"
 
     if chain["loop"]:
-        fix = "Redirect loop detected - this URL is currently unreachable. Fix immediately."
+        recommendation = "Redirect loop detected - unreachable. Fix immediately."
+        redirect_target, target_status = "-", "-"
     elif final_status == 200 and hop_count <= 1:
-        fix = "No action needed - already resolves cleanly to a live 200 page."
+        recommendation = "No action needed - already resolves cleanly to a live 200 page."
+        redirect_target, target_status = "-", "-"
     elif final_status == 200 and hop_count > 1:
-        fix = (f"Resolves to a live 200 page but via {hop_count} redirect hops - consolidate to a "
-               f"single 301 straight to {chain['final_url']} (avoid redirect chains).")
+        recommendation = (f"Resolves live but via {hop_count} redirect hops - consolidate to a "
+                          f"single 301 directly to →")
+        redirect_target, target_status = chain["final_url"], "200 OK (confirmed live)"
     else:
         target = find_live_redirect_target(url, sitemap_urls, homepage_url)
         if target:
-            fix = (f"Redirect this URL directly to {target['final_url']} (confirmed live, 200 OK) - "
-                   f"a single 301, not chained through the current broken/multi-hop path.")
+            recommendation = (f"Redirect the {'404' if is_404_reason else 'broken redirect'} page to →")
+            redirect_target, target_status = target["final_url"], "200 OK (confirmed live)"
         else:
-            fix = ("Could not confirm any live replacement page automatically (even the homepage "
-                  "didn't resolve cleanly) - please choose a redirect target manually.")
+            recommendation = ("Could not confirm any live replacement page automatically (even the "
+                              "homepage didn't resolve cleanly) - choose a redirect target manually.")
+            redirect_target, target_status = "-", "-"
 
-    return {"kind": "redirect", "url": url, "current_status": chain["chain"][0]["status"] if chain["chain"] else None,
-           "redirects_to": redirects_to, "destination_status": final_status,
-           "hop_count": hop_count, "recommended_fix": fix}
+    return {"kind": "redirect", "url": url, "last_crawled": last_crawled,
+           "current_status": chain["chain"][0]["status"] if chain["chain"] else None,
+           "redirects_to": redirects_to, "destination_status": final_status, "hop_count": hop_count,
+           "recommendation": recommendation, "redirect_target": redirect_target,
+           "target_status": target_status}
 
 
 def main():

@@ -1036,28 +1036,46 @@ def _scrape_drilldown_urls(driver, log_fn, debug_label=None, max_pages=20):
     except Exception:
         pass
 
-    urls = []
+    items = []
     seen = set()
     for _page in range(max_pages):
-        page_urls = []
+        page_items = []
         for attempt in range(3):
             try:
                 table_el = _url_table()
                 if table_el is None:
                     break
-                cells = table_el.find_elements(By.CSS_SELECTOR, "tr[data-rowid] td[data-string-value]")
-                page_urls = [c.get_attribute("data-string-value") for c in cells]
+                page_items = []
+                for row in table_el.find_elements(By.CSS_SELECTOR, "tr[data-rowid]"):
+                    try:
+                        url_val = row.find_element(
+                            By.CSS_SELECTOR, "td[data-string-value]").get_attribute("data-string-value")
+                    except Exception:
+                        continue
+                    if not url_val:
+                        continue
+                    last_crawled = ""
+                    try:
+                        # Confirmed live: the "Last crawled" cell (the URL
+                        # table's own 2nd column) carries its epoch-ms value
+                        # on data-numeric-value but shows a human date
+                        # ("Jul 31, 2026") as its visible text - grab the text.
+                        last_crawled = row.find_element(
+                            By.CSS_SELECTOR, "td[data-numeric-value]").text.strip()
+                    except Exception:
+                        pass
+                    page_items.append({"url": url_val, "last_crawled": last_crawled})
                 break
             except StaleElementReferenceException:
                 time.sleep(0.5)
                 continue
-        if not page_urls:
+        if not page_items:
             break
         new_count = 0
-        for u in page_urls:
-            if u and u not in seen:
-                seen.add(u)
-                urls.append(u)
+        for item in page_items:
+            if item["url"] not in seen:
+                seen.add(item["url"])
+                items.append(item)
                 new_count += 1
         try:
             table_el = _url_table()
@@ -1076,7 +1094,7 @@ def _scrape_drilldown_urls(driver, log_fn, debug_label=None, max_pages=20):
         if new_count == 0:
             # Paginated but got the exact same rows back - stop rather than loop forever.
             break
-    return urls
+    return items
 
 
 def capture_index_coverage_urls(session_id, property_url, email, browser_pref="edge", log_fn=None):
