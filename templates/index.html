@@ -2750,7 +2750,8 @@
             <div>
               <label>Report format</label>
               <select id="op-format">
-                <option value="james" selected>James</option>
+                <option value="" selected disabled>-- Select format --</option>
+                <option value="james">James</option>
                 <option value="omega">Omega</option>
                 <option value="neon">Neon</option>
                 <option value="xenon">Xenon</option>
@@ -2805,7 +2806,8 @@
             <div>
               <label>Report format</label>
               <select id="ha-format">
-                <option value="james" selected>James (Full DOCX)</option>
+                <option value="" selected disabled>-- Select format --</option>
+                <option value="james">James (Full DOCX)</option>
                 <option value="sigma">Sigma (PPTX)</option>
                 <option value="omega">Omega (PPTX)</option>
                 <option value="neon">Neon (DOCX)</option>
@@ -2888,7 +2890,8 @@
           <div class="field">
             <label>Report Format</label>
             <select id="gsc-format">
-              <option value="james" selected>James New (Full, 19 slides)</option>
+              <option value="" selected disabled>-- Select format --</option>
+              <option value="james">James New (Full, 19 slides)</option>
               <option value="james_short">James Short (8 slides)</option>
               <option value="sigma">Sigma (10 slides)</option>
               <option value="omega">Omega (8 slides)</option>
@@ -3371,7 +3374,8 @@ https://example.com/page-2"></textarea>
           <div class="field">
             <label>Report format</label>
             <select id="ba-format">
-              <option value="james" selected>James (table-based PPTX)</option>
+              <option value="" selected disabled>-- Select format --</option>
+              <option value="james">James (table-based PPTX)</option>
               <option value="xenon">Xenon (badge-based PPTX)</option>
               <option value="omega">Omega (dark navy PPTX)</option>
               <option value="neon">Neon (clean white PPTX)</option>
@@ -5571,6 +5575,7 @@ https://example.com/page-2"></textarea>
           p.format = $('op-format').value;
           p.no_capture = $('op-capture').value === 'no';
           if (!p.domain) { toast('Enter a website URL'); return; }
+          if (!p.format) { toast('Select a report format'); return; }
           setButtons('starting', 'onpage');   // instant feedback, before the network round-trip
           // Panel switch happens immediately too, not just the badge - previously
           // this waited on saveEngineOpts() + the actual start request, leaving a
@@ -5603,6 +5608,7 @@ https://example.com/page-2"></textarea>
           p.no_capture = $('ha-capture').value === 'no';
           p.include_psi = $('ha-include-psi').checked;
           if (!p.domain) { toast('Enter a domain'); return; }
+          if (!p.format) { toast('Select a report format'); return; }
           setButtons('starting', 'health');   // instant feedback, before the network round-trip
           // Switch the panel over to the active/log view IMMEDIATELY too, not just
           // the top badge - previously this only happened after BOTH the GSC
@@ -5667,6 +5673,7 @@ https://example.com/page-2"></textarea>
           p.targets = $('ba-targets').value.trim();
           p.format = $('ba-format').value;
           if (!p.domain) { toast('Enter a domain'); return; }
+          if (!p.format) { toast('Select a report format'); return; }
           setButtons('starting', 'brief');   // instant feedback, before the network round-trip
           $('empty-brief').style.display = 'none';
           $('brief-active').classList.remove('hidden');
@@ -5889,6 +5896,7 @@ https://example.com/page-2"></textarea>
           p.email = _gscEmail;
           p.format = $('gsc-format').value;
           if (!p.domain) { toast('Enter a domain'); return; }
+          if (!p.format) { toast('Select a report format'); return; }
           if (!p.email) { toast('Connect a Google account first'); gscConnect(); return; }
           setButtons('starting', 'gsc');   // instant feedback, before the network round-trip
           $('empty-gsc').style.display = 'none';
@@ -8820,12 +8828,23 @@ https://example.com/page-2"></textarea>
           ['op-format', 'ha-format', 'gsc-format', 'ba-format'].forEach(id => {
             const sel = $(id); if (!sel) return;
             const opts = sel.querySelectorAll('option');
-            let hasSelected = false;
+            const current = sel.value;
             opts.forEach(o => {
-              if (allowed.includes(o.value)) { o.style.display = ''; if (o.selected) hasSelected = true; }
-              else { o.style.display = 'none'; o.selected = false; }
+              // The "-- Select format --" placeholder (value="") stays visible no
+              // matter what's allowed - it's the deliberate default (no format
+              // auto-picked on the user's behalf), not a real format choice.
+              if (o.value === '') { o.style.display = ''; return; }
+              if (allowed.includes(o.value)) { o.style.display = ''; }
+              else { o.style.display = 'none'; if (o.selected) o.selected = false; }
             });
-            if (!hasSelected) { const first = sel.querySelector('option[style=""]') || sel.querySelector('option:not([style*="none"])'); if (first) first.selected = true; }
+            // Only fall back to a different allowed format if the CURRENTLY
+            // selected one just got hidden by this permission change - never
+            // auto-select a format when nothing was selected to begin with
+            // (an empty current value is the deliberate unselected state).
+            if (current && !allowed.includes(current)) {
+              const firstAllowed = sel.querySelector('option:not([style*="none"]):not([value=""])');
+              sel.value = firstAllowed ? firstAllowed.value : '';
+            }
           });
         } catch (e) { }
       }

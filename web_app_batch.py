@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.57"
+APP_VERSION = "4.12.58"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -3794,12 +3794,33 @@ def _parse_target_line(line):
     return page, keywords, ranks
 
 
+def _looks_like_header_row(line):
+    """A pasted row that's just column LABELS ("Keywords", "Target Page",
+    "URL", ...) rather than real data, e.g. a header row copy-pasted along
+    with the data underneath it (the Excel-upload path already skips its own
+    header row - see _lines_from_excel - but raw pasted text had no such
+    check). Confirmed live: without this, a pasted "Keywords<TAB>Target
+    Page" header line was silently parsed as if "Keywords" were itself a
+    real (relative) target page - neither token looks like a URL, so
+    _parse_target_line's "nothing url-like -> first field is the page"
+    fallback made the header's own label the page - then normalized into a
+    bogus https://<domain>/Keywords and reported as "missing from sitemap"
+    despite never being an intended target page at all."""
+    low = (line or "").strip().lower()
+    if not low:
+        return False
+    return ("keyword" in low or "target" in low) and ("page" in low or "url" in low) \
+        and "http" not in low and "/" not in low
+
+
 def _parse_onpage_targets(raw_text):
     """Pasted text -> flat [{"keyword":k, "page":url, "rank":r}] rows. This is the
     phase-2 loader's native form, which (unlike the grouped form) correctly keeps
     URL-only pages that have no keyword. De-duplicated, first-seen order."""
     rows, seen = [], set()
     for line in (raw_text or "").splitlines():
+        if _looks_like_header_row(line):
+            continue
         page, kws, ranks = _parse_target_line(line)
         if not page:
             continue
