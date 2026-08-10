@@ -616,9 +616,29 @@ def _derive_action(reason, info, status, indexability_status):
     if status is None:
         return default
 
-    if normalized == "Excluded by 'noindex' tag" and status == 200 and indexability_status != "noindex":
-        return ("No longer noindex on today's live check - Search Console's record may be stale. "
-                "Verify with URL Inspection before assuming this still needs fixing.")
+    # A live canonical pointing elsewhere is DELIBERATE and self-explanatory -
+    # it's not "we forgot to index this", it's "this URL is explicitly
+    # telling Google to index a different one instead". Confirmed live: GSC's
+    # cached "Crawled - currently not indexed" reason can lag what the page
+    # actually says today, producing the nonsensical "Need to index this
+    # page" on a URL whose own canonical tag says otherwise. This check comes
+    # BEFORE the reason-specific ones below since it's true regardless of
+    # which reason GSC originally recorded.
+    if indexability_status == "Canonicalised":
+        return ("Already canonicalized to a different URL - that's a deliberate signal telling "
+                "Google to index the canonical target instead, not a gap to fix by indexing this "
+                "one. No action needed unless the canonical target itself is wrong.")
+
+    if normalized == "Excluded by 'noindex' tag":
+        if indexability_status == "noindex":
+            return default
+        if status == 200:
+            return ("No longer noindex on today's live check - Search Console's record may be "
+                    "stale. Verify with URL Inspection before assuming this still needs fixing.")
+    elif indexability_status == "noindex":
+        # Same "GSC's cached reason is stale" story, but for any OTHER reason
+        # where the live check found a noindex tag GSC hasn't caught up to yet.
+        return "This page now has a noindex tag on a live check - remove it if it should be indexed."
 
     if "Add a canonical tag" in default and status == 200:
         return "Add a canonical tag to the preferred version, if this page is useful enough to keep indexed."
