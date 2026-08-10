@@ -434,6 +434,27 @@ def _slug_words(url):
     return set(_slug_word_re.findall(path.lower()))
 
 
+# Static resource files GSC's Page Indexing report can list right alongside
+# real content pages (a theme's own JS/CSS, images, fonts, sitemap/robots
+# files) - confirmed live via a real report recommending "redirect the
+# broken page to → homepage" for a WordPress emoji script
+# (wp-emoji-release.min.js) returning 403. That's nonsensical: a JS file
+# isn't a content page competing for a search ranking, it doesn't need to be
+# indexed, and redirecting it to the homepage doesn't fix anything - the
+# actual question (why does a static asset 403, if that's even a real
+# problem) is a totally different, usually non-SEO issue.
+_STATIC_ASSET_EXTS = (
+    ".js", ".mjs", ".css", ".map", ".json", ".xml",
+    ".woff", ".woff2", ".ttf", ".eot", ".otf",
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp", ".avif",
+)
+
+
+def _is_static_asset(url):
+    path = urllib.parse.urlparse(url).path.lower()
+    return path.endswith(_STATIC_ASSET_EXTS)
+
+
 def _ranked_redirect_candidates(dead_url, sitemap_urls, homepage_url):
     """Sitemap URLs ranked by slug-word overlap with the dead URL (best
     first), homepage appended last as the universal fallback - never a
@@ -605,7 +626,7 @@ _ASSUMES_LIVE_200 = {
 }
 
 
-def _derive_action(reason, info, status, indexability_status):
+def _derive_action(reason, info, status, indexability_status, url=None):
     """The Action column - grounded in the LIVE check just performed, not
     just the reason's static default text, so it never tells someone to fix
     something that's already resolved (or recommends an action that makes no
@@ -615,6 +636,15 @@ def _derive_action(reason, info, status, indexability_status):
 
     if status is None:
         return default
+
+    # A static resource file (JS/CSS/image/font) isn't a content page - none
+    # of the reason-specific "index it"/"add a canonical"/"remove noindex"
+    # advice below is meaningful for one, regardless of which reason GSC
+    # filed it under. See _is_static_asset()'s docstring for the real
+    # example (a WordPress emoji script) that surfaced this.
+    if url and _is_static_asset(url):
+        return ("This is a static resource file (script/style/image/font), not a content page - "
+                "it's not meant to be indexed and none of the usual indexing advice applies here.")
 
     # A live canonical pointing elsewhere is DELIBERATE and self-explanatory -
     # it's not "we forgot to index this", it's "this URL is explicitly
@@ -724,7 +754,7 @@ def process_reason(reason, urls, domain, sitemap_urls, homepage_url, stated_coun
                                   f"says '{label}'" + (f" (last crawled {insp['last_crawl']})"
                                   if insp["last_crawl"] else "") + " - verify manually before acting.")}
         indexability, indexability_status, canonical_target = classify_indexability(url, live)
-        action = _derive_action(reason, info, live.get("status"), indexability_status)
+        action = _derive_action(reason, info, live.get("status"), indexability_status, url=url)
         return {"kind": "simple", "url": url, "last_crawled": last_crawled, "status": live.get("status"),
                 "indexability": indexability, "indexability_status": indexability_status,
                 "canonical_target": canonical_target or "-", "action": action}
@@ -798,6 +828,17 @@ def _build_redirect_row(url, reason, sitemap_urls, homepage_url, last_crawled=""
         recommendation = (f"Resolves live but via {hop_count} redirect hops - consolidate to a "
                           f"single 301 directly to →")
         redirect_target, target_status = chain["final_url"], "200 OK (confirmed live)"
+    elif _is_static_asset(url):
+        # A dead/erroring JS, CSS, image, or font file isn't a content page
+        # competing for a ranking - it doesn't need a redirect to the
+        # homepage (which would just be wrong/misleading) or any other
+        # content page. If it's genuinely needed by the site, fix it where
+        # it's referenced/hosted; if not, it can be safely ignored here.
+        recommendation = ("This is a static resource file (script/style/image/font), not a "
+                          "content page - redirecting it to another page wouldn't be meaningful. "
+                          "If the site actually needs this file, fix where it's hosted directly; "
+                          "otherwise no SEO action needed.")
+        redirect_target, target_status = "-", "-"
     else:
         target = find_live_redirect_target(url, sitemap_urls, homepage_url)
         if target:
