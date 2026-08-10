@@ -1056,12 +1056,22 @@ def _scrape_drilldown_urls(driver, log_fn, debug_label=None, max_pages=20):
                         continue
                     last_crawled = ""
                     try:
-                        # Confirmed live: the "Last crawled" cell (the URL
-                        # table's own 2nd column) carries its epoch-ms value
-                        # on data-numeric-value but shows a human date
-                        # ("Jul 31, 2026") as its visible text - grab the text.
-                        last_crawled = row.find_element(
-                            By.CSS_SELECTOR, "td[data-numeric-value]").text.strip()
+                        # The "Last crawled" cell (the URL table's own 2nd
+                        # column) carries its value on data-numeric-value as
+                        # a raw epoch-ms timestamp AND shows a human date
+                        # ("Jul 31, 2026") as its visible text - confirmed
+                        # live the visible TEXT is only populated for
+                        # whatever's currently scrolled into view (the first
+                        # ~10 rows right after selecting "500 rows per page",
+                        # since nothing scrolls the long table afterward),
+                        # silently leaving every row past that with an empty
+                        # Last Crawled column. The data-numeric-value
+                        # ATTRIBUTE has no such rendering dependency - read
+                        # and format that instead of the rendered text.
+                        raw_ms = row.find_element(
+                            By.CSS_SELECTOR, "td[data-numeric-value]").get_attribute("data-numeric-value")
+                        if raw_ms:
+                            last_crawled = datetime.fromtimestamp(int(raw_ms) / 1000).strftime("%b %d, %Y")
                     except Exception:
                         pass
                     page_items.append({"url": url_val, "last_crawled": last_crawled})
