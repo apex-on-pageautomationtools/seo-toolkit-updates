@@ -103,7 +103,13 @@ REASON_INFO = {
                       "alternatives), deleted URLs redirected to the homepage instead of returning 404, "
                       "or content hidden from bots by JavaScript or CSS. Fix it by enriching the content "
                       "if the page should live, or removing it properly with a 404 or 410, or a 301 to "
-                      "a relevant page.",
+                      "a relevant page. NOTE on this tab's own Status Code/Indexability columns: they "
+                      "reflect the raw server response from a quick check, same as every other tab - a "
+                      "'200 / Indexable' row here does NOT mean the page is actually fine. Google's own "
+                      "crawler renders JavaScript and judges the real visible content (which is exactly "
+                      "why it flagged this URL as Soft 404 in the first place, even though the server "
+                      "says 200) - this report's fast check can't replicate that render step, so treat a "
+                      "200 here as 'the server responds' only, not as 'this page is actually healthy'.",
         "needs_action": True,
         "fix_summary": "Enrich the content if the page should exist, or remove it properly (404/410, "
                        "or a 301 to a relevant page).",
@@ -562,7 +568,14 @@ def build_report(domain, reason_rows, out_path, brand=None):
         ws["A1"].font = TITLE_FONT
         ws.append([info["definition"]])
         ws["A2"].alignment = WRAP
-        ws.row_dimensions[2].height = 60
+        # Scales with the definition's own length instead of a fixed 60 -
+        # confirmed the Soft 404 entry's definition (which carries an extra
+        # caveat paragraph about this report's own Status Code/Indexability
+        # columns) runs noticeably longer than the others and would
+        # otherwise get visually cut off in Excel's fixed-height wrap.
+        # ~95 chars/line at this column width, ~15px/line - never smaller
+        # than the original 60 for the shorter definitions.
+        ws.row_dimensions[2].height = max(60, 15 * (len(info["definition"]) // 95 + 2))
 
         is_redirect_sheet = bool(rows) and rows[0].get("kind") == "redirect"
         if is_redirect_sheet:
