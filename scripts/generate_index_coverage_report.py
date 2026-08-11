@@ -79,21 +79,30 @@ def log(msg):
 # Index tab lists only 4 of its 9 reasons).
 REASON_INFO = {
     "Discovered - currently not indexed": {
-        "definition": "Google has found this URL (via a link or sitemap) but has not crawled it yet, "
-                      "so it cannot appear in search. Often a sign of crawl-budget limits, weak internal "
-                      "linking, or thin value.",
+        "definition": "Google found this URL (via a link or sitemap) but hasn't crawled it yet - per "
+                      "Google's own docs, this specifically means Google WANTED to crawl the URL but "
+                      "held off because crawling it was expected to overload the site, so it got "
+                      "rescheduled (that's also why this report's own 'Last crawled' column is often "
+                      "empty for these rows - they've genuinely never been crawled). Also happens for "
+                      "weak-value pages Google deprioritizes.",
         "needs_action": True,
-        "fix_summary": "Strengthen internal linking to these pages and confirm they carry real value - "
-                       "weak/thin pages rarely get crawled.",
-        "default_action": "Improve internal linking and page value so Google prioritizes crawling this URL.",
+        "fix_summary": "Confirm the server/hosting can handle Googlebot's crawl rate without slowing "
+                       "down (crawl budget is partly a function of server health, not just page value), "
+                       "and strengthen internal linking to these pages - weak/thin pages with few "
+                       "internal links rarely get prioritized. Re-requesting indexing won't help until "
+                       "the underlying cause is actually fixed.",
+        "default_action": "Improve internal linking/page value and confirm the server isn't rate-limiting Googlebot.",
     },
     "Crawled - currently not indexed": {
-        "definition": "Google crawled the page but decided not to index it, so it will not appear in "
-                      "search. Usually means the content is thin, near-duplicate, or low value in "
-                      "Google's judgement.",
+        "definition": "Google crawled the page but decided not to index it - per Google's own docs, it "
+                      "may or may not get indexed later on its own, and there's no need to resubmit it "
+                      "for crawling. Usually means the content is thin, a near-duplicate of a page "
+                      "Google already indexed, or low value in Google's judgement.",
         "needs_action": True,
-        "fix_summary": "Google crawled the page but chose not to index it. Enhance the content to make "
-                       "it more useful, original, and distinct from other pages.",
+        "fix_summary": "Enhance the content to make it more useful, original, and distinct from other "
+                       "pages - and specifically check whether this page is a near-duplicate of another "
+                       "URL Google already indexes (if so, consolidate them with a redirect or canonical "
+                       "rather than trying to get both indexed separately).",
         "default_action": "Need to index this page",
     },
     "Soft 404": {
@@ -116,12 +125,16 @@ REASON_INFO = {
         "default_action": "Enrich the content, or remove it properly (404/410, or 301 to a relevant page)",
     },
     "Not found (404)": {
-        "definition": "The URL returns 404 Not Found, so it cannot be indexed or ranked. Any inbound "
-                      "links and past ranking value are lost unless the URL is redirected to a relevant "
-                      "live page.",
+        "definition": "The URL returns 404 Not Found, so it cannot be indexed or ranked. Per Google's "
+                      "own guidance, a real 404 for genuinely-removed content is NORMAL and FINE - it is "
+                      "not automatically a problem to fix. It's only worth acting on when this URL still "
+                      "carries real value (inbound links, past rankings/traffic, or other pages still "
+                      "link to it) that a redirect would preserve; a 404 on content that's simply gone "
+                      "and unlinked needs no action at all.",
         "needs_action": True,
-        "fix_summary": "The URL returns 404. Redirect it to the closest relevant live page, or restore "
-                       "the page if it should exist.",
+        "fix_summary": "Only redirect URLs that still carry real value (backlinks/traffic/internal "
+                       "links) to the closest relevant live page, or restore the page if it should still "
+                       "exist. A 404 on content with no remaining value doesn't need fixing.",
         "default_action": None,   # per-row: filled from the real redirect suggestion, see build_report()
     },
     "Not found (410)": {
@@ -134,10 +147,15 @@ REASON_INFO = {
         "default_action": "No action needed if deliberate - otherwise redirect to a relevant live page",
     },
     "Duplicate without user-selected canonical": {
-        "definition": "Google found multiple near-identical URLs and no canonical tag told it which one "
-                      "you prefer, so it picked one itself (which may not be the one you want ranked).",
+        "definition": "Google found multiple near-identical URLs (e.g. with/without trailing slash, "
+                      "http/https, tracking parameters, or genuinely duplicate content) and no canonical "
+                      "signal told it which one you prefer, so it picked one itself - which may not be "
+                      "the one you actually want ranked.",
         "needs_action": True,
-        "fix_summary": "Add a self-referencing canonical tag on the version you want indexed.",
+        "fix_summary": "Add rel=canonical tags on every duplicate/variant URL pointing to your one "
+                       "preferred version, make that preferred version self-referencing, and make sure "
+                       "internal links/sitemap entries consistently point to the same preferred URL too "
+                       "(mixed signals are why Google picked its own answer in the first place).",
         "default_action": "Add a canonical tag pointing to the preferred version of this page",
     },
     "Duplicate, Google chose different canonical than user": {
@@ -166,13 +184,21 @@ REASON_INFO = {
         "default_action": "No action needed",
     },
     "Blocked by robots.txt": {
-        "definition": "robots.txt tells Googlebot not to crawl this URL, so Google cannot read it (it "
-                      "may still show as a bare link). Fine when intentional; a problem only if it "
-                      "blocks pages you want ranked.",
+        "definition": "robots.txt tells Googlebot not to CRAWL this URL. Fine when intentional - but per "
+                      "Google's own documented behavior, a robots.txt block does NOT reliably keep a URL "
+                      "out of search results: if other pages link to it, Google can still index the bare "
+                      "URL with no title/snippet (since it was never allowed to read the page to know "
+                      "what's on it). If the real goal is 'never show this in search results at all', "
+                      "robots.txt is the WRONG tool - use a noindex meta tag/X-Robots-Tag instead, with "
+                      "crawling ALLOWED (a noindex tag on a page Google can't crawl is invisible to "
+                      "Google and does nothing).",
         "needs_action": False,
-        "fix_summary": "No action needed for pages you don't want crawled - otherwise remove the "
-                       "robots.txt rule blocking this URL.",
-        "default_action": "Not Important Page - No action needed",
+        "fix_summary": "No action needed for pages you genuinely don't want crawled AND are fine "
+                       "appearing as a bare URL in search. If the goal is keeping this out of search "
+                       "results entirely, switch to a noindex tag (with crawling allowed) instead of "
+                       "robots.txt - otherwise remove the robots.txt rule if this page should be "
+                       "crawled and ranked normally.",
+        "default_action": "Not Important Page - No action needed (use noindex, not robots.txt, if it must stay out of search entirely)",
     },
     "Blocked due to unauthorized request (401)": {
         "definition": "The page returned 401 Unauthorized to Googlebot, so it couldn't be crawled or "
@@ -227,11 +253,15 @@ REASON_INFO = {
     },
     "Server error (5xx)": {
         "definition": "The server returned a 5xx error when Googlebot requested this URL, so it "
-                      "couldn't be crawled or indexed. Usually a server-side problem, not the page "
-                      "itself.",
+                      "couldn't be crawled or indexed. Usually a server-side problem (overload, "
+                      "timeout, misconfiguration), not the page itself. Repeated 5xx errors across a "
+                      "site also make Google slow down its OWN crawl rate to avoid making the problem "
+                      "worse - so frequent server errors can quietly reduce how much of the whole site "
+                      "gets crawled, not just this one URL.",
         "needs_action": True,
-        "fix_summary": "Investigate the server error (check server logs / hosting) - this is a hosting "
-                       "issue, not a content issue.",
+        "fix_summary": "Investigate the server error (check server logs / hosting, look for overload or "
+                       "rate-limiting during Googlebot's crawl windows) - this is a hosting issue, not a "
+                       "content issue. Fixing it also helps the rest of the site's crawl rate recover.",
         "default_action": "Investigate the server error with your hosting provider",
     },
     "Excluded by 'noindex' tag": {
