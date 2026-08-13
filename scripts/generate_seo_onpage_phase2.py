@@ -2213,6 +2213,57 @@ def _strip_scheme_www(url):
     return host + parts.path.rstrip("/")
 
 
+_FAQ_LINK_RE = re.compile(r"/faq", re.I)
+_FAQ_TEXT_RE = re.compile(r"\bfaqs?\b|frequently asked questions", re.I)
+
+
+def _detect_faq(pages_data, root, dry_run=False):
+    """Real FAQ detection - not just the homepage's first 10,000 characters
+    of raw HTML (confirmed real gap: a long/heavy homepage's own FAQ link or
+    section sitting further down the page used to be silently missed,
+    producing a false "no FAQ page" note even though one genuinely exists).
+
+    Two ways a site can genuinely have an FAQ, both checked now:
+      1. An on-page FAQ SECTION embedded directly in a page already crawled
+         (homepage or any other target page) - scans that page's FULL
+         already-fetched HTML, not a truncated slice. No extra network call
+         needed to confirm it's real: the page's content is already in hand.
+      2. A SEPARATE linked FAQ page - found via any crawled page's own
+         internal links containing "/faq". Unlike before, this is now
+         LIVE-VERIFIED (fetched fresh, checked for an actual 200 and a
+         minimum amount of real content) before counting it - a stale or
+         broken /faq link in the nav shouldn't count as "the site has an
+         FAQ" any more than a dead link anywhere else would.
+
+    Returns (has_faq: bool, faq_url: str|None, detail: str) - detail is
+    kept even when nothing found, so a caller/log can say WHY, not just
+    report a bare False."""
+    for pd in pages_data or []:
+        html = pd.get("html") or ""
+        if _FAQ_TEXT_RE.search(html):
+            return True, pd.get("url"), "FAQ section found directly on a crawled page"
+
+    if dry_run:
+        return False, None, "not checked (dry run)"
+
+    candidates, seen = [], set()
+    for pd in pages_data or []:
+        for href in pd.get("internal_links") or []:
+            if href not in seen and _FAQ_LINK_RE.search(href):
+                seen.add(href)
+                candidates.append(href)
+
+    for href in candidates[:5]:   # cap - a site with many /faq-ish links shouldn't mean 5x the live fetches
+        url = href if href.startswith(("http://", "https://")) else urllib.parse.urljoin(root + "/", href)
+        status, body, final_url = _http(url)
+        if status == 200 and len((body or "").strip()) > 500:
+            return True, final_url or url, f"linked FAQ page confirmed live (HTTP {status})"
+
+    if candidates:
+        return False, candidates[0], "a /faq-style link was found but didn't resolve to a real live page"
+    return False, None, "no FAQ section or /faq-style link found"
+
+
 def audit_site(domain, pages_data, dry_run=False):
     """Detect the real per-site findings that drive the narrative report."""
     d = safe_domain(domain)
@@ -2283,7 +2334,7 @@ def audit_site(domain, pages_data, dry_run=False):
     # a "blog" can also be a News / Articles / Insights / Media section
     f["has_blog"] = bool(re.search(r"/(blog|news|article|insight|press|media-?news)", links)) \
         or bool(re.search(r"\b(blog|latest news|our news)\b", text_all[:8000]))
-    f["has_faq"] = "/faq" in links or "faq" in text_all[:10000]
+    f["has_faq"], f["faq_url"], f["faq_detail"] = _detect_faq(pages_data, root, dry_run=dry_run)
 
     socials = [u for u in home.get("external_links", [])
                if re.search(r"facebook|instagram|twitter|linkedin|x\.com|youtube|t\.me|tiktok", u, re.I)]
