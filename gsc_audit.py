@@ -1367,6 +1367,7 @@ def request_indexing_via_session(session_id, property_url, email, urls,
 
     import engine
     from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
     profile_dir = os.path.join(_sessions_dir(), session_id, "chrome_profile")
     lock = _profile_lock(profile_dir)
     acquired = lock.acquire(timeout=180)
@@ -1390,13 +1391,57 @@ def request_indexing_via_session(session_id, property_url, email, urls,
             return [{"url": u, "ok": False, "message": "session_expired"} for u in urls] \
                 + [{"url": u, "ok": False, "message": "skipped_daily_cap"} for u in skipped]
 
+        base_inspect_url = build_gsc_url("inspect", property_url)
+
+        def _find_inspect_searchbox():
+            """The 'Inspect any URL in...' search box in GSC's own persistent
+            header - confirmed live this is the ONLY real way to reach a
+            specific URL's inspection page. The "id" query param on
+            /search-console/inspect?...&id=<value> is an OPAQUE INTERNAL
+            TOKEN Google generates server-side once an inspection actually
+            runs (e.g. id=LjS6-O7Wd4wMCl205YeevA) - NOT the target URL.
+            Directly building &id=<url-encoded target URL> (what this used
+            to do) 404s immediately, confirmed live via a real user report
+            with the exact broken URL and Google's own 404 page - meaning
+            every Request Indexing fallback attempt was silently failing at
+            the very first navigation, before any of the polling/quota
+            detection below ever had a chance to run."""
+            try:
+                return driver.execute_script(
+                    "var els=document.querySelectorAll('input');"
+                    "for(var i=0;i<els.length;i++){"
+                    "var ph=(els[i].getAttribute('placeholder')||'').toLowerCase();"
+                    "var al=(els[i].getAttribute('aria-label')||'').toLowerCase();"
+                    "if(ph.indexOf('inspect any url')>-1||al.indexOf('inspect any url')>-1){return els[i];}}"
+                    "return null;")
+            except Exception:
+                return None
+
         for url in to_attempt:
             if quota_hit:
                 results.append({"url": url, "ok": False, "message": "google_quota_exceeded"})
                 continue
             try:
-                inspect_url = build_gsc_url("inspect", property_url) + "&id=" + urllib.parse.quote(url, safe="")
-                driver.get(inspect_url)
+                driver.get(base_inspect_url)
+                box = None
+                for _ in range(8):
+                    box = _find_inspect_searchbox()
+                    if box:
+                        break
+                    time.sleep(1)
+                if not box:
+                    results.append({"url": url, "ok": False, "message":
+                        "Could not find GSC's own 'Inspect any URL' search box - Google may have "
+                        "changed the page layout, or the session needs re-login."})
+                    continue
+                try:
+                    box.click()
+                    box.send_keys(Keys.CONTROL, "a")
+                    box.send_keys(url)
+                    box.send_keys(Keys.RETURN)
+                except Exception as e:
+                    results.append({"url": url, "ok": False, "message": f"could not type into search box: {e}"})
+                    continue
                 # URL Inspection pulls live data from the Google index (routinely
                 # 10-30s); the "Request indexing" control only renders once that
                 # finishes. Poll up to ~48s instead of a fixed 6s sleep, bailing early
