@@ -5407,12 +5407,18 @@ https://example.com/page-2"></textarea>
         // (no mode==='indexing' branch exists) - clicking Start there silently did
         // nothing, so hide the bar entirely on this tab instead of showing a
         // "Start" button with no effect.
-        // Google Accounts is pure account/session management, no batch job or
-        // report to show - the right-hand Results column has nothing to display
-        // for it, so hide the whole column instead of showing an empty "Results"
-        // header with nothing under it.
+        // Google Accounts and Report History are pure list/management views, no
+        // batch job or report to run - the right-hand Results column has nothing
+        // to display for either, so hide the whole column (rather than showing
+        // an empty "Results" header with nothing under it) AND let the left
+        // panel use the FULL width instead of staying pinned to its normal
+        // 380px - confirmed real complaint: Report History's own table (Tool/
+        // Domain/File/Date/Size/Download) squeezed into 380px next to a
+        // useless empty Results panel forced horizontal scrolling.
         document.querySelector('.actionbar').style.display = (m === 'indexing' || m === 'gscaccounts' || m === 'overview') ? 'none' : '';
-        $('right-col').style.display = m === 'gscaccounts' ? 'none' : '';
+        const WIDE_TABS = ['gscaccounts', 'history'];
+        $('right-col').style.display = WIDE_TABS.includes(m) ? 'none' : '';
+        $('main-wrap').style.gridTemplateColumns = WIDE_TABS.includes(m) ? '1fr' : '';
         if (m === 'admin') { admLoadUsers(); admLoadBuildings(); admLoadProxies(); admLoadCities(); admLoadConfig(); admLoadKeysStatus(); fetchActivityLog(); }
         if (m === 'crawl') { crawlLoadUrls(); }
         if (m === 'performance') { perfLoadGscAccounts(); }

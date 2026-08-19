@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.66"
+APP_VERSION = "4.12.67"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1763,12 +1763,25 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                 ss_name = f"{safe_kw}_{ts}.png"
                 ss_path = os.path.join(_domain_folder(domain, "ranking"), ss_name)
                 _save_full_page_screenshot(sess.driver, ss_path)
-                add_log(f"SERP screenshot saved: {ss_name}")
                 ss_url = _upload_ranking_screenshot(ss_path)
                 if ss_url:
+                    # Uploaded successfully - the screenshot's already reachable
+                    # via ss_url (embedded in the CSV below), so the local copy
+                    # is redundant. Confirmed real complaint: one Rank Checker
+                    # run was leaving a separate PNG per keyword in Report
+                    # History/Downloads, on top of the rankings CSV, when the
+                    # whole point of one run should read as ONE report. Only
+                    # keep the local file when the upload actually failed, so
+                    # the evidence isn't lost entirely in that case.
                     add_log(f"Screenshot URL: {ss_url}")
+                    try:
+                        os.remove(ss_path)
+                    except Exception:
+                        pass
+                else:
+                    add_log(f"SERP screenshot saved locally: {ss_name} (ImgBB upload failed - kept as fallback)")
                 for m in page_matches:
-                    m["screenshot"] = ss_name
+                    m["screenshot"] = ss_name if not ss_url else ""
                     if ss_url:
                         m["screenshot_url"] = ss_url
             except Exception as e:
@@ -2239,7 +2252,16 @@ def _shot_index_or_count(driver, folder_domain, folder_mode, name_seed):
         _save_full_page_screenshot(driver, ss_path)
         ss_url = _upload_ranking_screenshot(ss_path)
         if ss_url:
+            # Same reasoning as the Rank Checker's own screenshot path: once
+            # ImgBB has it, the local copy is redundant and just clutters
+            # Report History with one file per keyword/URL on top of the
+            # actual CSV report. Only kept locally when the upload failed.
             add_log(f"Screenshot URL: {ss_url}")
+            try:
+                os.remove(ss_path)
+            except Exception:
+                pass
+            return "", ss_url
         return ss_name, ss_url
     except Exception as e:
         add_log(f"Screenshot failed: {e}")
