@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.67"
+APP_VERSION = "4.12.68"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -500,19 +500,97 @@ def _autosave_file(mode=None):
     mode = mode or _current_job().mode
     return os.path.join(DATA_DIR, f"autosave_{mode}.json")
 
+def _csv_fields_for_mode(mode, results):
+    """Column list for a batch-checker CSV - shared between the on-demand
+    Export CSV download and autosave's own live-updating snapshot (below),
+    so both always agree on the exact same shape instead of two copies of
+    this logic silently drifting apart."""
+    if mode == "ranking":
+        # Collect all column names across all rows (handles multiple matches)
+        has_targets = any(r.get("target_page") for r in results)
+        base = ["keyword", "target_page", "status", "position", "serp_url"] if has_targets else ["keyword", "status", "position", "serp_url"]
+        extra = set()
+        for r in results:
+            for k in r:
+                if k not in base and k not in extra:
+                    extra.add(k)
+        # Sort extra columns: position_2, serp_url_2, position_3, ...; screenshot
+        # columns fixed at the end (filename then its shareable URL) instead of
+        # relying on set-iteration order, which isn't deterministic.
+        def _col_sort(c):
+            for i, prefix in enumerate(["position_", "serp_url_"]):
+                if c.startswith(prefix):
+                    num = c[len(prefix):]
+                    return (int(num) if num.isdigit() else 99, i)
+            if c == "screenshot":
+                return (100, 0)
+            if c == "screenshot_url":
+                return (100, 1)
+            return (99, 99)
+        return base + sorted(extra, key=_col_sort)
+    if mode == "backlink":
+        return ["url", "domain_found", "meta_robots", "link_type", "da", "dr", "pa", "da_source", "link_url", "status", "checked_at"]
+    if mode == "count":
+        return ["keyword", "results_count", "screenshot", "screenshot_url"]
+    return ["url", "indexed", "found_url", "status", "screenshot", "screenshot_url", "checked_at"]
+
+
+def _build_csv_text(mode, results):
+    """BOM-prefixed CSV text for a batch checker's results - shared by the
+    Export CSV download route and autosave's live-updating snapshot. The BOM
+    prefix is required for Excel to open a UTF-8 CSV as UTF-8 instead of the
+    system ANSI codepage (otherwise any non-ASCII character mojibakes)."""
+    out = io.StringIO()
+    fields = _csv_fields_for_mode(mode, results)
+    w = csv.DictWriter(out, fieldnames=fields, extrasaction="ignore")
+    w.writeheader(); w.writerows(results); out.seek(0)
+    return "﻿" + out.getvalue()
+
+
+def _csv_report_name(mode, domain, ts):
+    _dslug = (domain or "report").lower().replace("https://", "").replace("http://", "").replace("www.", "").strip("/").split("/")[0].replace(":", "_") or "report"
+    if mode == "ranking":
+        return f"{_dslug}_rankings_{ts}.csv"
+    if mode == "backlink":
+        return f"{_dslug}_backlink_check_{ts}.csv"
+    if mode == "count":
+        return f"search_results_{ts}.csv"
+    return f"index_check_{ts}.csv"
+
+
 def autosave():
     try:
         with state_lock:
             mode = state.get("mode", "ranking")
+            results = list(state["results"])
+            domain = state.get("domain", "")
             data = {"mode": mode,
-                    "results": list(state["results"]),
+                    "results": results,
                     "serp_lists": list(state.get("serp_lists", [])),
                     "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+            # A STABLE filename for this run, generated once and reused for
+            # every autosave write during it, so the CSV in Downloads updates
+            # IN PLACE as the run progresses - a real, always-current,
+            # directly downloadable report the user can grab even if the
+            # app/system shuts down mid-run - instead of a new timestamped
+            # file piling up on every save (confirmed real complaint: wanted
+            # ONE report for one task, not scattered per-item artifacts).
+            run_name = state.get("csv_run_name")
+            if not run_name and mode in ("ranking", "backlink", "count", "index"):
+                run_name = _csv_report_name(mode, domain, datetime.now().strftime("%Y%m%d_%H%M%S"))
+                state["csv_run_name"] = run_name
         with open(_autosave_file(mode), "w", encoding="utf-8") as f:
             json.dump(data, f)   # compact (no indent) - this file is only ever read back by
                                   # load_autosave(), never by a human, and it's rewritten on
                                   # every item in a run so skipping pretty-printing keeps that
                                   # per-item write cheap without changing what's saved
+        if run_name and results:
+            try:
+                folder = _domain_folder(domain, mode)
+                with open(os.path.join(folder, run_name), "w", encoding="utf-8", newline="") as f:
+                    f.write(_build_csv_text(mode, results))
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -1760,7 +1838,12 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     time.sleep(0.3)
                 safe_kw = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in keyword)[:50]
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                ss_name = f"{safe_kw}_{ts}.png"
+                # Leading "_" - Report History's own scan already skips
+                # "_"-prefixed files by convention (see _HISTORY_SKIP_PREFIXES)
+                # for exactly this reason: a per-keyword screenshot is
+                # supporting evidence for the one CSV report, not itself a
+                # separate report entry to clutter that list with.
+                ss_name = f"_{safe_kw}_{ts}.png"
                 ss_path = os.path.join(_domain_folder(domain, "ranking"), ss_name)
                 _save_full_page_screenshot(sess.driver, ss_path)
                 ss_url = _upload_ranking_screenshot(ss_path)
@@ -2247,7 +2330,10 @@ def _shot_index_or_count(driver, folder_domain, folder_mode, name_seed):
             return "", ""
         safe = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in name_seed)[:60]
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        ss_name = f"{safe}_{ts}.png"
+        # Leading "_" - excluded from Report History's own listing by
+        # convention (_HISTORY_SKIP_PREFIXES), same reasoning as the Rank
+        # Checker's own screenshots: supporting evidence, not itself a report.
+        ss_name = f"_{safe}_{ts}.png"
         ss_path = os.path.join(_domain_folder(folder_domain, folder_mode), ss_name)
         _save_full_page_screenshot(driver, ss_path)
         ss_url = _upload_ranking_screenshot(ss_path)
@@ -3217,7 +3303,7 @@ def api_start():
         state.update({"status": "starting", "current_keyword": "", "current_index": 0,
                       "total": len(keywords), "results": [], "serp_lists": [], "captcha_msg": "",
                       "error_msg": "", "mode": mode, "log": [], "domain": domain,
-                      "start_time": time.time()})
+                      "start_time": time.time(), "csv_run_name": None})
     pause_event.set(); stop_event.clear(); clear_autosave()
 
     if city and latitude is not None:
@@ -3514,52 +3600,15 @@ def api_export_csv():
     with state_lock:
         results = list(state["results"]); m = state.get("mode", "ranking")
         domain = state.get("domain", "")
-    out = io.StringIO()
-    if m == "ranking":
-        # Collect all column names across all rows (handles multiple matches)
-        has_targets = any(r.get("target_page") for r in results)
-        base = ["keyword", "target_page", "status", "position", "serp_url"] if has_targets else ["keyword", "status", "position", "serp_url"]
-        extra = set()
-        for r in results:
-            for k in r:
-                if k not in base and k not in extra:
-                    extra.add(k)
-        # Sort extra columns: position_2, serp_url_2, position_3, ...; screenshot
-        # columns fixed at the end (filename then its shareable URL) instead of
-        # relying on set-iteration order, which isn't deterministic.
-        def _col_sort(c):
-            for i, prefix in enumerate(["position_", "serp_url_"]):
-                if c.startswith(prefix):
-                    num = c[len(prefix):]
-                    return (int(num) if num.isdigit() else 99, i)
-            if c == "screenshot":
-                return (100, 0)
-            if c == "screenshot_url":
-                return (100, 1)
-            return (99, 99)
-        fields = base + sorted(extra, key=_col_sort)
-    elif m == "backlink":
-        fields = ["url", "domain_found", "meta_robots", "link_type", "da", "dr", "pa", "da_source", "link_url", "status", "checked_at"]
-    elif m == "count":
-        fields = ["keyword", "results_count", "screenshot", "screenshot_url"]
-    else:
-        fields = ["url", "indexed", "found_url", "status", "screenshot", "screenshot_url", "checked_at"]
-    w = csv.DictWriter(out, fieldnames=fields, extrasaction="ignore")
-    w.writeheader(); w.writerows(results); out.seek(0)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    _dslug = (domain or "report").lower().replace("https://", "").replace("http://", "").replace("www.", "").strip("/").split("/")[0].replace(":", "_") or "report"
-    if m == "ranking":
-        name = f"{_dslug}_rankings_{ts}.csv"
-    elif m == "backlink":
-        name = f"{_dslug}_backlink_check_{ts}.csv"
-    elif m == "count":
-        name = f"search_results_{ts}.csv"
-    else:
-        name = f"index_check_{ts}.csv"
-    # Save to domain folder. UTF-8 BOM prefix - without it, Excel opens a UTF-8 CSV
-    # using the system ANSI codepage instead, garbling any non-ASCII character
-    # (em-dashes, accented characters in domains/URLs) into mojibake like "a€"".
-    csv_data = "﻿" + out.getvalue()
+        # Reuse the SAME filename autosave() has already been writing to
+        # during this run (if any), instead of stamping a fresh timestamp on
+        # every manual Export CSV click - one task should read as one report
+        # file, not one autosave copy plus N separate manual-export copies.
+        name = state.get("csv_run_name")
+        if not name:
+            name = _csv_report_name(m, domain, datetime.now().strftime("%Y%m%d_%H%M%S"))
+            state["csv_run_name"] = name
+    csv_data = _build_csv_text(m, results)
     try:
         folder = _domain_folder(domain, m)
         with open(os.path.join(folder, name), "w", encoding="utf-8", newline="") as f:
