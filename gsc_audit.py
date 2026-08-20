@@ -1517,9 +1517,14 @@ def request_indexing_via_session(session_id, property_url, email, urls,
                 # The request runs a live indexability test (~30-90s) before confirming;
                 # poll for the confirmation / quota text rather than a fixed 5s sleep
                 # that reported "unconfirmed" for requests that did go through.
+                # Confirmed live: GSC's own "Testing if live URL can be indexed"
+                # modal explicitly says "this might take a minute or two" (up to
+                # ~120s) - the old 90s cap could time out just short of a real
+                # confirmation, wrongly falling back to "submitted, not
+                # confirmed" for a request that was actually still succeeding.
                 done = False
                 cwaited = 0
-                while cwaited < 90:
+                while cwaited < 150:
                     time.sleep(5); cwaited += 5
                     try:
                         confirm_text = driver.find_element(By.TAG_NAME, "body").text.lower()
