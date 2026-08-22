@@ -679,6 +679,15 @@ def _extract_json(text):
 _AI_BROKEN_PROVIDERS = set()
 _PERMANENT_HTTP_CODES = {401, 403, 404}
 
+# Set once the FIRST OpenAI call in a run 400s specifically because the
+# configured model rejects a non-default temperature (newer reasoning-tier
+# models only accept temperature=1) - every subsequent call then skips
+# straight to the no-temperature request instead of repeating the same
+# guaranteed-to-fail-then-retry round trip. Confirmed live: a real run hit
+# this on 10 separate items in a row, each one wasting a full failed request
+# + retry instead of learning after the first.
+_OPENAI_NO_TEMPERATURE = False
+
 # A 429 (rate limit) isn't necessarily permanent - a short burst can clear up
 # mid-run. But a free-tier daily quota being fully exhausted also returns 429,
 # and that will NOT clear up before the run ends - confirmed live (a Delta FI
@@ -856,22 +865,27 @@ def _ai_suggest_openai(prompt):
         with urllib.request.urlopen(req, timeout=40) as r:
             return json.loads(r.read())
 
+    global _OPENAI_NO_TEMPERATURE
     try:
         try:
-            data = _call(True)
+            data = _call(not _OPENAI_NO_TEMPERATURE)
         except urllib.error.HTTPError as e:
             # Newer reasoning-tier models (this one included) reject any
             # temperature other than their default (1) with a 400 - confirmed
             # real case where a paid OPENAI_API_KEY still 400'd on every call
             # because of this, not a billing/quota issue. Retry once without
-            # the param before giving up on this provider for the request.
-            if e.code == 400:
+            # the param before giving up on this provider for the request,
+            # and remember it for the REST of this run so every later item
+            # skips straight to the no-temperature call instead of repeating
+            # the same guaranteed-to-fail-then-retry round trip every time.
+            if e.code == 400 and not _OPENAI_NO_TEMPERATURE:
                 body_snippet = ""
                 try:
                     body_snippet = e.read().decode("utf-8", "replace")[:300]
                 except Exception:
                     pass
-                log(f"   [warn] OpenAI 400, retrying without temperature: {body_snippet}")
+                log(f"   [warn] OpenAI 400, retrying without temperature (won't send it again this run): {body_snippet}")
+                _OPENAI_NO_TEMPERATURE = True
                 data = _call(False)
             else:
                 raise
