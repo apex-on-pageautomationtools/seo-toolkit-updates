@@ -2922,7 +2922,20 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
                     # doesn't balloon into a multi-thousand-pixel image), with
                     # a small floor so a near-empty page is still readable.
                     try:
+                        # Chrome renders a plain-text response (robots.txt) as
+                        # a single <pre> element - measure THAT element's own
+                        # rendered bottom edge directly (getBoundingClientRect,
+                        # not scrollHeight) rather than body/documentElement,
+                        # since a <pre>'s own content box is what actually
+                        # holds the real text; body/html can report a taller
+                        # scrollHeight than the visible content actually needs
+                        # in some render states. Falls back to body/
+                        # documentElement scrollHeight for a normal HTML page
+                        # (no <pre> present).
                         content_h = driver.execute_script(
+                            "var pre = document.querySelector('pre');"
+                            "if (pre) { var r = pre.getBoundingClientRect();"
+                            " return r.top + r.height; }"
                             "return Math.max(document.body.scrollHeight||0,"
                             " document.documentElement.scrollHeight||0);")
                         if content_h:

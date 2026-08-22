@@ -527,7 +527,18 @@ def capture_brief_screenshots(domain, sitemap_url=None, log_fn=print):
                     # actual content. `height` becomes an upper cap instead, with
                     # a small floor so a near-empty page is still readable.
                     try:
+                        # Chrome renders a plain-text response (robots.txt) as
+                        # a single <pre> element - measure THAT element's own
+                        # rendered bottom edge directly (getBoundingClientRect,
+                        # not scrollHeight) rather than body/documentElement,
+                        # since body/html can report a taller scrollHeight than
+                        # the visible content actually needs. Falls back to
+                        # body/documentElement scrollHeight for a normal HTML
+                        # page (no <pre> present).
                         content_h = driver.execute_script(
+                            "var pre = document.querySelector('pre');"
+                            "if (pre) { var r = pre.getBoundingClientRect();"
+                            " return r.top + r.height; }"
                             "return Math.max(document.body.scrollHeight||0,"
                             " document.documentElement.scrollHeight||0);")
                         if content_h:
