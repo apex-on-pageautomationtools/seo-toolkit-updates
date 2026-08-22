@@ -9373,6 +9373,25 @@ def main():
         if homepage is None or urllib.parse.urlparse(pd["url"]).path in ("", "/"):
             homepage = pd
     _close_op_driver()          # done crawling - free the render browser
+    # Dedupe by the FINAL resolved URL (pd["url"] is the post-redirect URL,
+    # not the original target text) - confirmed real complaint: a target list
+    # with both a bare-domain and www variant of the homepage (or any other
+    # trivial URL variant that redirects to the same destination) produced an
+    # IDENTICAL row twice in every sheet - Meta, Alt, Canonical, all of them -
+    # since they all read from this same pages_data list. Keep the first
+    # occurrence (preserves the original target-list order).
+    seen_final_urls, deduped = set(), []
+    for pd in pages_data:
+        key = (pd.get("url") or "").rstrip("/")
+        if key and key in seen_final_urls:
+            continue
+        seen_final_urls.add(key)
+        deduped.append(pd)
+    if len(deduped) < len(pages_data):
+        log(f"   [info] {len(pages_data) - len(deduped)} duplicate page(s) removed "
+            f"(different target URL, same page after redirect)")
+        pages_data = deduped
+        total = len(pages_data)
     log(f"[2/5] Crawled {total} page(s)")
     # No page-count cap for On-Page: every target page the team explicitly shared
     # should get a real shot at the paid OpenAI tier, not just the first 20 - see
