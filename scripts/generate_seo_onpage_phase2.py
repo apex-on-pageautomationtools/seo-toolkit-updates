@@ -1181,7 +1181,11 @@ def check_content_keyword_match(page_data, keywords):
                 extra.append("H1")
             suffix = f", also in {'/'.join(extra)}" if extra else ""
             parts.append(f'"{kw}" - found {count}x in body content{suffix}')
-    return "; ".join(parts) if parts else "No target keyword(s) assigned"
+    # One keyword per LINE, not "; "-joined into one dense run-on paragraph -
+    # confirmed real complaint: a page with 20+ target keywords produced a
+    # single wall-of-text cell that read as illegible even with wrap_text on.
+    # write_meta_xlsx()'s row-height calc below accounts for these newlines.
+    return "\n".join(parts) if parts else "No target keyword(s) assigned"
 
 
 # Tracking pixels, font icons, analytics - skip entirely (not real images)
@@ -1452,13 +1456,19 @@ def write_meta_xlsx(metas, out_path, fmt=None):
     # 6=existing H1.
     existing_cols = {2, 4, 6}
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=ws.max_column):
-        max_len = 1
+        max_lines = 1
         for cell in row:
             cell.alignment = left
-            max_len = max(max_len, len(str(cell.value or "")))
+            val = str(cell.value or "")
+            # A real newline (Content-Keyword Match's one-keyword-per-line
+            # format) always starts a new line regardless of character count,
+            # so this can't just measure the whole cell's raw length anymore -
+            # sum each actual line's own wrapped-line need instead of using
+            # one flat char-count/45 over the entire cell.
+            cell_lines = sum(max(1, -(-len(seg) // 45)) for seg in val.split("\n")) if val else 1
+            max_lines = max(max_lines, cell_lines)
             if cell.column in existing_cols:
-                val = str(cell.value or "").strip()
-                flagged = (not val) or val == MISSING
+                flagged = (not val.strip()) or val.strip() == MISSING
                 f = copy(cell.font)
                 cell.font = Font(name=f.name, size=f.size, bold=f.bold, italic=f.italic,
                                  color=("FFC00000" if flagged else "FF000000"))
@@ -1466,8 +1476,7 @@ def write_meta_xlsx(metas, out_path, fmt=None):
         # that on open, and inconsistently) - without this, long suggested title/desc
         # text overflowed into the row below and visually overlapped it. ~45 chars/line
         # at this template's column widths, 15pt per wrapped line, floor of 30pt.
-        lines = max(1, -(-max_len // 45))
-        ws.row_dimensions[row[0].row].height = max(30, lines * 15)
+        ws.row_dimensions[row[0].row].height = max(30, max_lines * 15)
     wb.save(out_path)
 
 
