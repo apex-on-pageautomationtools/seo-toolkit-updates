@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.71"
+APP_VERSION = "4.12.72"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -3778,6 +3778,14 @@ def _looks_like_url(tok):
         return False
     if t.startswith(("http://", "https://", "www.")):
         return True
+    # A real URL/path never contains a raw space (a browser/server would see
+    # it as %20 or a hyphen) - confirmed live a page TITLE, "24/7 Black Car
+    # Service Tampa", was misidentified as a relative path purely because the
+    # phrase "24/7" happens to contain a "/" - producing a bogus crawled URL
+    # (domain + "/24/7 Black Car Service Tampa") that 404s and pollutes the
+    # report. Reject anything with whitespace before the "/" check below.
+    if " " in t:
+        return False
     if "/" in t:                                  # relative path e.g. 'gold-coast/'
         return True
     return bool(_re.match(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$", t))   # bare domain
@@ -3838,6 +3846,14 @@ def _parse_target_line(line):
         else:
             kw_fields.append(tok)
     if page is None:                              # nothing url-like -> first field is the page
+        # ...UNLESS that first field itself contains a space, which means
+        # it's a page TITLE/description that just happens to have no real
+        # URL anywhere on this line, not a bare relative path with no
+        # leading slash - accepting it as "the page" would fabricate a
+        # bogus URL (domain + "/" + the literal title text) that 404s.
+        # Skip the whole line rather than crawl garbage.
+        if " " in parts[0]:
+            return None, [], {}
         page, kw_fields = parts[0], parts[1:]
 
     # A trailing lone field that's purely a ranking value (e.g. a separate Ranking
