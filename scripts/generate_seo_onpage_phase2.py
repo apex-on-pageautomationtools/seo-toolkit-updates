@@ -1459,6 +1459,15 @@ def write_meta_xlsx(metas, out_path, fmt=None):
              m["suggested_description"], m["existing_h1"], m["suggested_h1"],
              m.get("content_match", "")] for m in metas]
     _write_rows(ws, proto, rows)
+    # The template never set a width for column H (Content-Keyword Match, added
+    # after the original 7-column template was built) - confirmed real complaint:
+    # it fell back to Excel's tiny ~8-character default, so even a single
+    # keyword's own status line wrapped into 5-6 near-vertical lines despite the
+    # one-keyword-per-line formatting already being correct. Every other data
+    # column here (A-D, G) already has an explicit width in the 37-50 range;
+    # this one needs to be wider since each line is a full keyword + status
+    # sentence, not a short label.
+    ws.column_dimensions["H"].width = 80
     spec = FORMAT_META_XLSX.get(str(fmt or "").strip().lower())
     if spec:
         sheet_name, labels, color_hex = spec
