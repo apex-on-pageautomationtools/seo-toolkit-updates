@@ -2822,7 +2822,7 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
         except Exception:
             return None
 
-    def _shot(key, url, height=900, view_source=False, sucuri=False, highlight=None, _attempt=1):
+    def _shot(key, url, height=900, view_source=False, sucuri=False, highlight=None, auto_height=False, _attempt=1):
         p = path(key)
         try:
             driver.get(("view-source:" + url) if view_source else url)
@@ -2889,6 +2889,23 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
                 # card itself instead of also pulling in the Malware & Security /
                 # Blacklist Status detail cards further down.
                 h = 700.0 if sucuri else float(height)
+                if auto_height and not sucuri:
+                    # Fit the capture to the page's REAL rendered content
+                    # height instead of a fixed box - confirmed real complaint:
+                    # a short robots.txt (2-3 lines of text) still got a fixed
+                    # 700px-tall screenshot, almost entirely blank whitespace
+                    # below the actual content. `height` above becomes an
+                    # upper cap instead (so a genuinely huge robots.txt still
+                    # doesn't balloon into a multi-thousand-pixel image), with
+                    # a small floor so a near-empty page is still readable.
+                    try:
+                        content_h = driver.execute_script(
+                            "return Math.max(document.body.scrollHeight||0,"
+                            " document.documentElement.scrollHeight||0);")
+                        if content_h:
+                            h = max(120.0, min(float(height), float(content_h) + 40))
+                    except Exception:
+                        pass
                 cdp = {"format": "png", "captureBeyondViewport": True,
                        "clip": {"x": 0, "y": 0, "width": float(_w or 1366), "height": h, "scale": 1}}
             result = driver.execute_cdp_cmd("Page.captureScreenshot", cdp)
@@ -2903,7 +2920,7 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
                 # slot empty - one retry catches most flaky failures.
                 _t.sleep(1.5)
                 return _shot(key, url, height=height, view_source=view_source,
-                             sucuri=sucuri, highlight=highlight, _attempt=_attempt + 1)
+                             sucuri=sucuri, highlight=highlight, auto_height=auto_height, _attempt=_attempt + 1)
             try:                                   # last resort: plain viewport shot
                 driver.save_screenshot(p)
                 out[key] = p
@@ -2912,7 +2929,7 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
                 pass
 
     _shot("homepage",  root + "/", height=900)
-    _shot("robots",    root + "/robots.txt", height=700)
+    _shot("robots",    root + "/robots.txt", height=700, auto_height=True)
     _shot("canonical", root + "/", highlight="canonical")
     _shot("noindex",   root + "/", highlight="robots")
     _shot("lang",      root + "/", highlight="lang")

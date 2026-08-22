@@ -487,7 +487,7 @@ def capture_brief_screenshots(domain, sitemap_url=None, log_fn=print):
     out_dir = tempfile.mkdtemp(prefix="brief_shots_")
     root = f"https://{domain}"
 
-    def _shot(key, url, height, view_source=False, serp=False):
+    def _shot(key, url, height, view_source=False, serp=False, auto_height=False):
         try:
             try:
                 driver.get(("view-source:" + url) if view_source else url)
@@ -518,8 +518,24 @@ def capture_brief_screenshots(domain, sitemap_url=None, log_fn=print):
                         "return Math.max(document.documentElement.clientWidth||0, window.innerWidth||0, 1366);")
                 except Exception:
                     _w = 1366
+                h = float(height)
+                if auto_height:
+                    # Fit the capture to the page's REAL rendered content height
+                    # instead of a fixed box - confirmed real complaint: a short
+                    # robots.txt (2-3 lines of text) still got a fixed 700px-tall
+                    # screenshot, almost entirely blank whitespace below the
+                    # actual content. `height` becomes an upper cap instead, with
+                    # a small floor so a near-empty page is still readable.
+                    try:
+                        content_h = driver.execute_script(
+                            "return Math.max(document.body.scrollHeight||0,"
+                            " document.documentElement.scrollHeight||0);")
+                        if content_h:
+                            h = max(120.0, min(float(height), float(content_h) + 40))
+                    except Exception:
+                        pass
                 cdp = {"format": "png", "captureBeyondViewport": True,
-                       "clip": {"x": 0, "y": 0, "width": float(_w or 1366), "height": float(height), "scale": 1}}
+                       "clip": {"x": 0, "y": 0, "width": float(_w or 1366), "height": h, "scale": 1}}
             res = driver.execute_cdp_cmd("Page.captureScreenshot", cdp)
             p = os.path.join(out_dir, f"{key}.png")
             with open(p, "wb") as f:
@@ -541,7 +557,7 @@ def capture_brief_screenshots(domain, sitemap_url=None, log_fn=print):
     else:
         _shot("serp", f"https://www.google.com/search?q=site:{domain}", 900, serp=True)
     _shot("sitemap", sitemap_url or (root + "/sitemap.xml"), 850)
-    _shot("robots", root + "/robots.txt", 700)
+    _shot("robots", root + "/robots.txt", 700, auto_height=True)
     return out
 
 
