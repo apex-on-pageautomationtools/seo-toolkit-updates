@@ -2106,15 +2106,30 @@ def _analyse_robots_txt(text):
         lc = line.lower()
         if lc.startswith("user-agent:"):
             agent = line.split(":", 1)[1].strip().lower()
+            # Per the real robots.txt spec, consecutive User-agent lines only
+            # share ONE rule group when NO directive of any kind has appeared
+            # between them yet - once ANY directive (Allow, Disallow,
+            # Crawl-delay, Content-Signal, whatever) appears, that group is
+            # closed and the next User-agent line starts a fresh one.
+            # Confirmed real false-positive: this used to only track
+            # "disallow:" lines, so "User-agent: *\nAllow: /" (a real,
+            # intentional 'allow everything' rule with zero disallows) still
+            # looked empty to this check - the NEXT block, "User-agent:
+            # Amazonbot\nDisallow: /", got wrongly merged into the SAME
+            # group as "*", reporting "Disallow: / for all crawlers (*)"
+            # even though the wildcard rule actually said Allow: / and only
+            # a specific AI-scraper bot was ever disallowed.
             if current is None:
-                current = {"agents": [agent], "disallows": []}
-            elif not current["disallows"]:
+                current = {"agents": [agent], "disallows": [], "has_directive": False}
+            elif not current["has_directive"]:
                 current["agents"].append(agent)
             else:
                 blocks.append(current)
-                current = {"agents": [agent], "disallows": []}
-        elif lc.startswith("disallow:") and current is not None:
-            current["disallows"].append(line.split(":", 1)[1].strip())
+                current = {"agents": [agent], "disallows": [], "has_directive": False}
+        elif current is not None:
+            current["has_directive"] = True
+            if lc.startswith("disallow:"):
+                current["disallows"].append(line.split(":", 1)[1].strip())
     if current is not None:
         blocks.append(current)
 

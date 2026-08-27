@@ -1,5 +1,5 @@
 {
-  "version": "4.12.78",
+  "version": "4.12.79",
   "files": [
     {
       "path": "da_checker.py",
@@ -18,7 +18,7 @@
     },
     {
       "path": "gsc_audit.py",
-      "hash": "0ea28c4b1e4fd5824c5cf8ab0c057c9119ef45c32a92988dd7aaee83a8020f37",
+      "hash": "8234cab2f0f80a5fe2db0cabe2db9b3e2e90d303c4cf7f1fec6b61d035d1a1b2",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/gsc_audit.py"
     },
     {
@@ -33,7 +33,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "0136bcc25aa0a667a5af03c454172e12390fee5fc8ec93659d274193055f2b7e",
+      "hash": "5acc0182d529a144281511477d28f445b7b6e1d5d604c7440f7ba7c14beee2ba",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
