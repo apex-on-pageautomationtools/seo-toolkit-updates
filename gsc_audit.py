@@ -3776,7 +3776,18 @@ def _send_gsc_alert(webapp_url, domain, statuses, email, log_fn=None,
             status = (statuses.get("removals_detail") or statuses.get(key) or "").strip()
         else:
             status = (statuses.get(key) or "").strip()
-        if status and status.lower() not in _GSC_STATUS_OK:
+        # "Could not check ..." (session signed out mid-capture, or the
+        # account has no access to this property) is the AUDIT SYSTEM
+        # failing to verify something - not a real GSC finding. Confirmed
+        # real false-positive: two separate alert emails for amplusac.com,
+        # each claiming "3 issue(s) require attention" that were all just
+        # "Could not check - GSC account not connected/no access to this
+        # property" for every single check, three times in a row - not one
+        # of them a genuine manual action, security issue, or removal. This
+        # was already excluded from the PPTX report's own findings (which
+        # shows the honest "please check manually" note); it should never
+        # have been treated as an actionable alert-worthy issue either.
+        if status and status.lower() not in _GSC_STATUS_OK and not status.lower().startswith("could not check"):
             issues.append({"type": label, "detail": status})
     issues.extend(extra_issues or [])
     if not issues:
