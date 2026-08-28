@@ -464,8 +464,19 @@ CITY_GEO = CITY_COORDS
 
 
 def google_domain(country: str) -> str:
-    # Bare domain (no leading www) - callers prepend "www." themselves.
-    return GOOGLE_DOMAINS.get((country or "us").lower(), "google.com")
+    # Always google.com now, regardless of country - Google retired ccTLD
+    # domains (google.fr, google.co.uk, etc.) as the primary user experience
+    # years ago; real traffic today overwhelmingly hits google.com with
+    # gl=/hl= query params for region/language targeting (confirmed live via
+    # a real manual google.com/search?...&gl=fr&hl=fr request returning
+    # normal French results with no block). Every caller here already sets
+    # gl=/hl= on its own alongside this domain, so region targeting is
+    # unaffected - only the domain itself changes. Navigating to a ccTLD is
+    # now an UNUSUAL pattern real users rarely hit, which plausibly made
+    # automated ccTLD traffic stand out more to Google's abuse detection
+    # than the far more common google.com pattern. GOOGLE_DOMAINS is kept
+    # only as a historical reference, no longer read by this function.
+    return "google.com"
 
 
 
@@ -1779,16 +1790,16 @@ def _apply_stealth(driver, country, latitude=None, longitude=None):
     except Exception:
         pass
     if latitude is not None and longitude is not None:
-        # Grant geolocation permission to Google so it uses our overridden location
-        dom = google_domain(country)
-        for origin in [f"https://www.{dom}", "https://www.google.com"]:
-            try:
-                driver.execute_cdp_cmd("Browser.grantPermissions", {
-                    "permissions": ["geolocation"],
-                    "origin": origin
-                })
-            except Exception:
-                pass
+        # Grant geolocation permission to Google so it uses our overridden
+        # location - only ever google.com now (google_domain() always
+        # returns that), so a single origin covers every country.
+        try:
+            driver.execute_cdp_cmd("Browser.grantPermissions", {
+                "permissions": ["geolocation"],
+                "origin": "https://www.google.com"
+            })
+        except Exception:
+            pass
     set_geolocation(driver, country, latitude, longitude)
 
 
