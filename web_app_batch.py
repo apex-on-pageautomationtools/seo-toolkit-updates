@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.82"
+APP_VERSION = "4.12.83"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1049,6 +1049,31 @@ def _kill_stale_profile_processes(profile_dir):
         pass
 
 
+def _deep_reset_profile(profile_dir):
+    """Fully wipe a browser profile directory - not just cache/cookies (those
+    already get cleared via CDP on every single launch regardless, see
+    Session.start()'s Network.clearBrowserCookies call) but everything else
+    that survives that: IndexedDB, Local Storage, and critically Chrome's own
+    "Local State" file, which carries a stable per-profile installation ID
+    that Chrome sends to Google as the X-Client-Data header on every request -
+    a signal Google specifically designed to survive cookie-clearing, so it
+    can still catch automation that clears cookies to evade detection. A
+    profile that keeps getting soft-blocked despite an already-clean cookie
+    jar can still be carrying a burned identity through this file alone.
+    Used by _recover() so a genuinely fresh identity - not just a fresh
+    cache - happens automatically, without a user ever having to manually
+    delete a profile folder themselves."""
+    import shutil
+    try:
+        shutil.rmtree(profile_dir, ignore_errors=True)
+    except Exception:
+        pass
+    try:
+        os.makedirs(profile_dir, exist_ok=True)
+    except Exception:
+        pass
+
+
 def _clear_stale_proxy_preference(profile_dir):
     """Strip any leftover "proxy" key from this profile's saved Preferences (and
     Secure Preferences) files before launch.
@@ -1300,6 +1325,15 @@ def _recover(sess, kind):
             time.sleep(1); slept += 1
         if stop_event.is_set():
             return False
+        # soft_block/http_403 mean Google itself is flagging this specific
+        # identity, not just a transient hiccup - the cache/cookie clear
+        # start() already does on every launch isn't enough (Chrome's own
+        # Local State file carries a stable per-profile ID that survives
+        # that and keeps getting sent to Google regardless). Actually wipe
+        # the whole profile directory before retrying so "fresh identity"
+        # is genuinely fresh, not just fresh-looking.
+        if kind in ("soft_block", "http_403") and getattr(sess, "profile", None):
+            _deep_reset_profile(sess.profile)
         try:
             sess.start(rotate=bool(sess.pool), force_no_proxy=skip_proxy)
         except BrowserClosedError:
