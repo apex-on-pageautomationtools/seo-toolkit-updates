@@ -2254,6 +2254,13 @@ def human_search(driver, keyword, country, logger=print, city=None, lang="en"):
             pass
 
     if box is not None:
+        # This whole sequence used to be nothing but type-then-Enter - the one
+        # thing a real person never does. A human always moves the cursor
+        # around and reads before/after searching; warm_up() already calls
+        # human_mouse()/human_scroll() for exactly that reason, but this
+        # function - the one that actually submits the query - never called
+        # either. Bracket the search with the same real activity here.
+        human_mouse(driver)
         try:
             box.click()
             human_pause(0.3, 0.8)
@@ -2275,6 +2282,14 @@ def human_search(driver, keyword, country, logger=print, city=None, lang="en"):
             box.submit()
         logger(f"Typed & submitted: '{keyword}'" + (f" (city: {city})" if city else ""))
         human_pause(2.0, 3.5)
+        # Scroll and glance around the results the way a real person reading
+        # a SERP would, instead of the page just sitting untouched the
+        # instant it loads.
+        try:
+            human_scroll(driver, steps=random.randint(2, 4))
+            human_mouse(driver)
+        except Exception:
+            pass
         return True
 
     # Fallback: go to homepage first (sets referer + session), then search URL
