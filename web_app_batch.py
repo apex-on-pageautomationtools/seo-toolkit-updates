@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.83"
+APP_VERSION = "4.12.84"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1148,12 +1148,24 @@ class Session:
             add_log("SERP Counter loaded - results will show position numbers")
         return exts
 
-    def start(self, rotate=False, force_no_proxy=False):
+    def start(self, rotate=False, force_no_proxy=False, deep_reset=False):
         self.quit()
         self.profile = mode_profile(self.profile_key) if self.profile_key else pick_profile()
+        # Must kill any process still holding this profile's files BEFORE a
+        # deep_reset wipe - self.quit() only closes THIS session's own
+        # driver handle; a still-running orphaned browser process from an
+        # earlier crashed/killed run keeps the profile's files locked on
+        # Windows regardless. A wipe attempted while anything still holds
+        # those locks silently fails (rmtree(ignore_errors=True) swallows
+        # the failure) and leaves the "burned" identity fully intact -
+        # confirmed live: an earlier version of this deep-reset ran before
+        # this kill step and visibly made no difference across retries.
         _kill_stale_profile_processes(self.profile)
+        if deep_reset:
+            _deep_reset_profile(self.profile)
         _clear_stale_proxy_preference(self.profile)
-        add_log(f"Using profile: {os.path.basename(self.profile)}")
+        add_log(f"Using profile: {os.path.basename(self.profile)}"
+                + (" (fully reset - fresh identity)" if deep_reset else ""))
 
         # Every install is based in India - if the system's own current exit IP is
         # already OUTSIDE India, the user has their own VPN connected. Proxies are a
@@ -1329,13 +1341,13 @@ def _recover(sess, kind):
         # identity, not just a transient hiccup - the cache/cookie clear
         # start() already does on every launch isn't enough (Chrome's own
         # Local State file carries a stable per-profile ID that survives
-        # that and keeps getting sent to Google regardless). Actually wipe
-        # the whole profile directory before retrying so "fresh identity"
-        # is genuinely fresh, not just fresh-looking.
-        if kind in ("soft_block", "http_403") and getattr(sess, "profile", None):
-            _deep_reset_profile(sess.profile)
+        # that and keeps getting sent to Google regardless). Ask start()
+        # for a genuine deep_reset (AFTER it kills any stale process still
+        # holding the profile's files locked) so "fresh identity" is
+        # actually fresh, not just fresh-looking.
+        deep_reset = kind in ("soft_block", "http_403")
         try:
-            sess.start(rotate=bool(sess.pool), force_no_proxy=skip_proxy)
+            sess.start(rotate=bool(sess.pool), force_no_proxy=skip_proxy, deep_reset=deep_reset)
         except BrowserClosedError:
             raise
         except Exception as e:
