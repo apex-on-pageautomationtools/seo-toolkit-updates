@@ -1773,7 +1773,7 @@ def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logg
     return args
 
 
-def _apply_stealth(driver, country, latitude=None, longitude=None):
+def _apply_stealth(driver, country, latitude=None, longitude=None, lang="en"):
     try:
         driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument",
                                {"source": _STEALTH_JS})
@@ -1785,8 +1785,38 @@ def _apply_stealth(driver, country, latitude=None, longitude=None):
     except Exception:
         pass
     try:
+        # Confirmed real root cause of block risk on non-English-speaking
+        # targets: this used to hardcode "en-US,en" regardless of the actual
+        # target language, so a France/Germany/Japan/etc. check (hl=fr and
+        # friends in the search URL, --lang=fr already passed to Chromium at
+        # launch) still sent a genuine HTTP request with "I want English"
+        # baked into every single request's Accept-Language header - a real,
+        # verifiable inconsistency between what the URL asks for and what
+        # the browser's own wire-level header says, that a real French-
+        # region searcher's browser would never produce (it would send
+        # fr-FR/fr, not en-US/en). Matches exactly why English-speaking
+        # targets (US/UK/India/Australia) never showed this problem - their
+        # real Accept-Language already happened to agree with the hardcoded
+        # value, no mismatch to notice. Primary language first, English as
+        # a secondary/fallback preference - a realistic real-browser shape,
+        # not English-only for a French target either.
+        lc = (lang or "en").strip()
+        parts = lc.split("-") if lc else ["en"]
+        primary = (parts[0] or "en").lower()
+        if primary == "en":
+            accept_lang = "en-US,en;q=0.9"
+        elif len(parts) > 1 and parts[1]:
+            # Caller already supplied a region-qualified tag (e.g. "fr-CA",
+            # "zh-CN" from the language dropdown) - use it verbatim rather
+            # than fabricating a region (an "{lc}-{lc.upper()}" shortcut
+            # would turn "ja" into the non-existent "ja-JA" instead of the
+            # real "ja-JP", and would double-break on inputs that already
+            # contain a hyphen).
+            accept_lang = f"{primary}-{parts[1].upper()},{primary};q=0.9,en;q=0.8"
+        else:
+            accept_lang = f"{primary};q=0.9,en;q=0.8"
         driver.execute_cdp_cmd("Network.setExtraHTTPHeaders",
-                               {"headers": {"Accept-Language": "en-US,en;q=0.9"}})
+                               {"headers": {"Accept-Language": accept_lang}})
     except Exception:
         pass
     if latitude is not None and longitude is not None:
@@ -1803,7 +1833,7 @@ def _apply_stealth(driver, country, latitude=None, longitude=None):
     set_geolocation(driver, country, latitude, longitude)
 
 
-def _build_edge_driver(args, country, binary, logger, latitude=None, longitude=None):
+def _build_edge_driver(args, country, binary, logger, latitude=None, longitude=None, lang="en"):
     """Edge via Selenium's native WebDriver (msedgedriver auto-resolved)."""
     from selenium.webdriver import Edge, EdgeOptions
     opts = EdgeOptions()
@@ -1850,13 +1880,13 @@ def _build_edge_driver(args, country, binary, logger, latitude=None, longitude=N
                 time.sleep(2 + attempt * 2)
     if driver is None:
         raise last_err
-    _apply_stealth(driver, country, latitude, longitude)
+    _apply_stealth(driver, country, latitude, longitude, lang)
     _block_downloads(driver)
     driver.set_page_load_timeout(45)
     return driver
 
 
-def _build_chrome_driver(args, country, binary, logger, latitude=None, longitude=None):
+def _build_chrome_driver(args, country, binary, logger, latitude=None, longitude=None, lang="en"):
     """Chrome via undetected-chromedriver."""
     import undetected_chromedriver as uc
     options = uc.ChromeOptions()
@@ -1884,7 +1914,7 @@ def _build_chrome_driver(args, country, binary, logger, latitude=None, longitude
                 time.sleep(2 + attempt * 2)
     if driver is None:
         raise last_err
-    _apply_stealth(driver, country, latitude, longitude)
+    _apply_stealth(driver, country, latitude, longitude, lang)
     _block_downloads(driver)
     driver.set_page_load_timeout(45)
     return driver
@@ -1906,12 +1936,12 @@ def build_driver(profile_dir, proxy=None, headless=False, country="us",
 
     if btype == "edge":
         try:
-            return _build_edge_driver(args, country, binary, logger, latitude, longitude)
+            return _build_edge_driver(args, country, binary, logger, latitude, longitude, lang)
         except Exception as e:
             logger(f"Edge launch failed ({e}); falling back to Chrome...")
             cbin, _ = find_browser_binary("chrome")
-            return _build_chrome_driver(args, country, cbin, logger, latitude, longitude)
-    return _build_chrome_driver(args, country, binary, logger, latitude, longitude)
+            return _build_chrome_driver(args, country, cbin, logger, latitude, longitude, lang)
+    return _build_chrome_driver(args, country, binary, logger, latitude, longitude, lang)
 
 
 def _block_downloads(driver):
