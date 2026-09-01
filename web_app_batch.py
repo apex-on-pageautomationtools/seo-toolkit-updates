@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.85"
+APP_VERSION = "4.12.86"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -2222,6 +2222,23 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
                 if not _browser_closed_pause(sess):
                     raise BrowserClosedError("Browser closed and the run was stopped")
 
+            # With a real multi-proxy pool, restart on a freshly rotated IP for
+            # EVERY keyword instead of running the whole batch on one IP and
+            # only rotating reactively after a block. Confirmed live tonight:
+            # hammering one IP with dozens of automated searches gets it
+            # flagged regardless of how clean each individual request looks -
+            # spreading load thin across many distinct IPs (one per search,
+            # the same principle a dedicated traffic tool uses) is the
+            # actual mitigation, not anything about a single request's own
+            # stealth. Only kicks in with >1 proxy - a single manually-typed
+            # proxy has nothing to rotate to, so restarting on it every
+            # keyword would just add launch overhead for no benefit. Skips
+            # keyword 0 - the initial sess.start() before this loop already
+            # rotated onto a proxy, so restarting again here would just be a
+            # redundant extra launch for the very first keyword.
+            if i > 0 and len(sess.pool.proxies) > 1:
+                sess.start(rotate=True)
+
             if not target_pages:
                 target_pages = {}
             kw_target = target_pages.get(kw, "")
@@ -3331,10 +3348,8 @@ def api_start():
     proxies = _proxies_from_request(data, country=country)
 
     if vpn_method == "proxy" and not proxies:
-        add_log(f"Fetching a free proxy for {country.upper()}...")
-        p = engine.fetch_free_proxy(country, add_log)
-        if p:
-            proxies = [p]
+        add_log(f"Fetching free proxies for {country.upper()}...")
+        proxies = engine.fetch_free_proxy_pool(country, count=15, logger=add_log)
 
     if mode == "ranking" and (not domain or not keywords):
         return jsonify({"error": "Domain and at least one keyword required."}), 400

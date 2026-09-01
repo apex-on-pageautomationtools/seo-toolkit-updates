@@ -1668,36 +1668,69 @@ def find_browser_binary(pref="auto"):
 
 def fetch_free_proxy(country_code="us", logger=print):
     """Fetch + verify a free public proxy for a country. Returns dict or None."""
+    pool = fetch_free_proxy_pool(country_code, count=1, logger=logger)
+    return pool[0] if pool else None
+
+
+def fetch_free_proxy_pool(country_code="us", count=15, logger=print):
+    """Fetch + verify up to `count` working free public proxies for a country.
+
+    fetch_free_proxy() (above) used to stop at the first working proxy, which
+    meant the "Free proxy" option never actually behaved like a pool at all -
+    every keyword in a run reused that one single IP the entire time, same as
+    running with no proxy. Real per-search IP rotation (spreading load thin
+    across many distinct IPs instead of hammering one) needs an actual pool
+    of several working proxies to rotate through, not just one."""
     import urllib.request
     cc = (country_code or "us").upper()
     apis = [
         f"https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=5000&country={cc}&ssl=all&anonymity=all",
         f"https://www.proxy-list.download/api/v1/get?type=http&anon=elite&country={cc}",
     ]
+    found = []
+    seen = set()
     for api in apis:
+        if len(found) >= count:
+            break
         try:
             req = urllib.request.Request(api, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 text = resp.read().decode("utf-8", "ignore").strip()
             lines = [l.strip() for l in text.splitlines() if l.strip() and ":" in l]
             random.shuffle(lines)
-            for line in lines[:5]:
+            # Check more candidates than we need since free proxy lists have a
+            # high dead/already-blacklisted rate - verifying only 5 (the old
+            # single-proxy behavior's limit) rarely yields enough survivors
+            # for a real pool.
+            for line in lines[:60]:
+                if len(found) >= count:
+                    break
                 parts = line.split(":")
-                if len(parts) == 2:
-                    host, port = parts
-                    try:
-                        ph = urllib.request.ProxyHandler({"https": f"http://{host}:{port}"})
-                        opener = urllib.request.build_opener(ph)
-                        with opener.open("https://httpbin.org/ip", timeout=8) as tr:
-                            if tr.status == 200:
-                                logger(f"Free proxy found: {host}:{port} ({cc})")
-                                return {"host": host, "port": port, "type": "http"}
-                    except Exception:
-                        continue
+                if len(parts) != 2:
+                    continue
+                host, port = parts
+                key = f"{host}:{port}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                try:
+                    ph = urllib.request.ProxyHandler({"https": f"http://{host}:{port}"})
+                    opener = urllib.request.build_opener(ph)
+                    with opener.open("https://httpbin.org/ip", timeout=8) as tr:
+                        if tr.status == 200:
+                            found.append({"host": host, "port": port, "type": "http"})
+                            logger(f"Free proxy found: {host}:{port} ({cc}) "
+                                   f"[{len(found)}/{count}]")
+                except Exception:
+                    continue
         except Exception:
             continue
-    logger(f"No working free proxy for {cc} - continuing without one")
-    return None
+    if not found:
+        logger(f"No working free proxy for {cc} - continuing without one")
+    elif len(found) < count:
+        logger(f"Found {len(found)} working free proxy(s) for {cc} "
+               f"(wanted up to {count}) - continuing with what's available")
+    return found
 
 
 # --------------------------------------------------------------------------- #
