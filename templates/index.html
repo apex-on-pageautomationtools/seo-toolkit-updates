@@ -2321,18 +2321,19 @@
             <div>
               <label>VPN method</label>
               <select id="r-vpn">
-                <option value="none" selected>No VPN (recommended - uses city geolocation)</option>
+                <option value="none">No VPN (uses city geolocation)</option>
                 <option value="pause">Pause to connect VPN manually</option>
                 <option value="windscribe">Windscribe extension</option>
                 <option value="edge_secure">Edge Secure Network</option>
-                <option value="system">System VPN (your own app)</option>
+                <option value="system" selected>System VPN (your own app) - recommended</option>
                 <option value="proxy">Free proxy (auto-fetched)</option>
               </select>
             </div>
           </div>
           <div class="note" style="line-height:1.6">
-            <b style="color:var(--ok)">Recommended:</b> Use <b>No VPN</b> + select a <b>City</b> above. This spoofs the
-            browser's geolocation to the target city - more stable, faster, and avoids VPN-related blocks.<br><br>
+            <b style="color:var(--ok)">Recommended:</b> Connect a real VPN on your system (not just spoofed
+            geolocation) - Click <b>Start</b>, then connect your VPN app when prompted, then click <b>Resume</b>.
+            City-only geolocation spoofing is faster but more block-prone on its own.<br><br>
             <b style="color:var(--warn)">If using VPN (Pause / System / Windscribe):</b><br>
             1. Click <b>Start</b> - the browser will open and the tool will pause.<br>
             2. Connect your VPN to the target country/city in your VPN app.<br>
