@@ -2616,7 +2616,7 @@ def _get_organic_links(src):
     # _strip_tracking/_TRACKING_PARAMS are defined at module level above
     # (shared with _get_organic_links_via_js).
 
-    def add(href):
+    def add(href, anchor=None):
         if not href:
             return
         # Some SERP renders serve the title anchor's href as a relative
@@ -2633,11 +2633,37 @@ def _get_organic_links(src):
             real = (qs.get("q") or qs.get("url") or [""])[0]
             if real:
                 href = real
-        if not href.startswith("http"):
-            return
         low = href.lower()
-        if "google." in low or "/search?" in low or "webcache" in low:
-            return
+        if (not href.startswith("http")) or "google." in low or "/search?" in low or "webcache" in low:
+            # Confirmed live: Google now also wraps many results in an opaque
+            # /goto?url=<encoded blob> redirect - no real URL in cleartext
+            # anywhere in the href at all, unlike the old /url?q= form above.
+            # The <cite> under the title still shows the real visible domain
+            # exactly as a user sees it - same fallback as the live-DOM JS
+            # path (_JS_VISIBLE_ORGANIC_LINKS) already uses.
+            cite = None
+            if anchor is not None:
+                cite = anchor.find("cite")
+                if not cite:
+                    node = anchor
+                    for _ in range(6):
+                        node = node.parent
+                        if not node:
+                            break
+                        cite = node.find("cite")
+                        if cite:
+                            break
+            if not cite:
+                return
+            t = cite.get_text().strip()
+            t = re.sub(r"^https?://", "", t, flags=re.I)
+            t = re.split(r"[›»/\s]", t)[0].strip().lower()
+            if not re.match(r"^([a-z0-9-]+\.)+[a-z]{2,}$", t):
+                return
+            href = "https://" + t
+            low = href.lower()
+            if "google." in low:
+                return
         href = _strip_tracking(href)
         if href in seen:
             return
@@ -2669,33 +2695,33 @@ def _get_organic_links(src):
     # 1. jsname="UWckNb" - Google's primary title anchor attribute
     for a in rso.select('a[jsname="UWckNb"]'):
         if _near_h3(a):
-            add(a.get("href", ""))
+            add(a.get("href", ""), anchor=a)
 
     # 2. zReHs class - alternative Google title anchor class
     if not links:
         for a in rso.select("a.zReHs"):
             if _near_h3(a):
-                add(a.get("href", ""))
+                add(a.get("href", ""), anchor=a)
 
     # 3. h3-parent: walk up from heading to parent <a> (works across all Google layouts)
     if not links:
         for h3 in rso.select("h3"):
             a = h3.find_parent("a") or h3.find("a")
             if a:
-                add(a.get("href", ""))
+                add(a.get("href", ""), anchor=a)
 
     # 4. ping attribute: Google sets ping on every organic title link
     if not links:
         for a in rso.select("a[ping]"):
             # Only count if it wraps or is near an h3
             if a.find("h3") or (a.parent and a.parent.find("h3")):
-                add(a.get("href", ""))
+                add(a.get("href", ""), anchor=a)
 
     # 5. Any <a> directly containing an <h3> (broadest fallback)
     if not links:
         for a in soup.select("a"):
             if a.find("h3"):
-                add(a.get("href", ""))
+                add(a.get("href", ""), anchor=a)
 
     return links
 

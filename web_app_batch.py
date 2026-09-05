@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.90"
+APP_VERSION = "4.12.91"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1614,7 +1614,22 @@ def _highlight_domain_in_serp(driver, domain_clean, first_only=False):
         // merely appearing in another site's URL path (e.g. trustpilot.com/review/
         // exactprint.co.uk must not highlight for exactprint.co.uk).
         var host = (a.hostname || '').toLowerCase().replace(/^www\./, '');
-        if (host !== dom && !(host.length > dom.length && host.slice(-(dom.length + 1)) === '.' + dom)) continue;
+        var hostMatches = host === dom || (host.length > dom.length && host.slice(-(dom.length + 1)) === '.' + dom);
+        if (!hostMatches) {
+            // Google now routes many organic results through an opaque
+            // /goto?url=<encoded blob> redirect, so a.hostname resolves to
+            // google.com for those - not the real destination - exactly the
+            // same gap extract_organic() hit. The <cite> under the title
+            // still shows the real visible domain; check that too before
+            // giving up on this result.
+            var box0 = a.closest('.yuRUbf') || a.closest('[data-hveid]') || a.parentElement;
+            var cite = box0 ? box0.querySelector('cite') : null;
+            if (!cite) continue;
+            var t = cite.textContent.trim().replace(/^https?:\/\//i, '');
+            t = t.split(/[›»\/\s]/)[0].trim().toLowerCase();
+            hostMatches = t === dom || (t.length > dom.length && t.slice(-(dom.length + 1)) === '.' + dom);
+            if (!hostMatches) continue;
+        }
         var box = a.closest('[data-hveid]') || a.closest('.g') || a.closest('.MjjYud') || a.parentElement;
         if (!box || box.getAttribute('data-stp-hl')) continue;
         box.setAttribute('data-stp-hl', '1');
@@ -1995,15 +2010,17 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                             else:
                                 add_log(f"Page {page_num}: 0 links - reached end of results")
                             break
-                    prev_total = total_links   # organic results counted on all prior pages
                     total_links += len(page_links)
                     all_serp_urls.extend(page_links)
                     add_log(f"Page {page_num}: {len(page_links)} links")
-                    # Rank = results on prior pages + position on THIS page. Use the ACTUAL
-                    # cumulative count, not page_num*10 - Google frequently shows fewer than
-                    # 10 organic results per page (ads/snippets/local pack take slots; page 1
-                    # here had 9), and assuming 10/page inflates the reported position.
-                    page_matches = find_domain_in_page(sess.driver, domain_clean, page_offset=prev_total)
+                    # Rank = standard Google page position (page 2 always starts at 11,
+                    # page 3 at 21, etc.) - the client-facing convention every rank tracker
+                    # reports against, regardless of how many organic slots a given page
+                    # actually rendered (local pack/AI overview/etc. can take some of a
+                    # page's 10 slots without shifting what "page 2" means to a reader
+                    # comparing this report against Google itself or another tool).
+                    page_matches = find_domain_in_page(sess.driver, domain_clean,
+                                                        page_offset=(page_num - 1) * 10)
                     if page_matches:
                         all_matches.extend(page_matches)
                         add_log(f"  Found at position {page_matches[0]['position']}")
@@ -2034,11 +2051,12 @@ def rank_one(sess, keyword, domain, country, max_pages, search_mode="stop_on_fou
                     page_links, reason = _recover_page(sess, page_num + 1)
                     if page_links:
                         page_num += 1
-                        prev_total = total_links
                         total_links += len(page_links)
                         all_serp_urls.extend(page_links)
                         add_log(f"Page {page_num}: {len(page_links)} links (recovered after timeout)")
-                        page_matches = find_domain_in_page(sess.driver, domain_clean, page_offset=prev_total)
+                        # Standard Google page position - see the matching comment above.
+                        page_matches = find_domain_in_page(sess.driver, domain_clean,
+                                                            page_offset=(page_num - 1) * 10)
                         if page_matches:
                             all_matches.extend(page_matches)
                             add_log(f"  Found at position {page_matches[0]['position']}")
