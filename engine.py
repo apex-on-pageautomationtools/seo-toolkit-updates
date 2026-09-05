@@ -42,6 +42,7 @@ import re
 import time
 import random
 import logging
+import base64
 
 log = logging.getLogger("grc.engine")
 
@@ -461,6 +462,51 @@ CITY_COORDS = {
 }
 # Backward compat alias
 CITY_GEO = CITY_COORDS
+
+# Full country names for every country code CITY_COORDS uses - needed to build a
+# real canonical location string ("Austin,United States") for uule below. Google's
+# own real uule values are keyed off full place names, not ISO codes.
+COUNTRY_NAMES = {
+    "ae": "United Arab Emirates", "ar": "Argentina", "at": "Austria",
+    "au": "Australia", "bd": "Bangladesh", "be": "Belgium", "br": "Brazil",
+    "ca": "Canada", "ch": "Switzerland", "cl": "Chile", "co": "Colombia",
+    "cz": "Czechia", "de": "Germany", "dk": "Denmark", "eg": "Egypt",
+    "es": "Spain", "fi": "Finland", "fr": "France", "gb": "United Kingdom",
+    "gr": "Greece", "hk": "Hong Kong", "hu": "Hungary", "id": "Indonesia",
+    "ie": "Ireland", "il": "Israel", "in": "India", "it": "Italy",
+    "jp": "Japan", "ke": "Kenya", "kr": "South Korea", "lk": "Sri Lanka",
+    "mx": "Mexico", "my": "Malaysia", "ng": "Nigeria", "nl": "Netherlands",
+    "no": "Norway", "np": "Nepal", "nz": "New Zealand", "pe": "Peru",
+    "ph": "Philippines", "pk": "Pakistan", "pl": "Poland", "pt": "Portugal",
+    "ro": "Romania", "ru": "Russia", "sa": "Saudi Arabia", "se": "Sweden",
+    "sg": "Singapore", "th": "Thailand", "tr": "Turkey", "tw": "Taiwan",
+    "us": "United States", "vn": "Vietnam", "za": "South Africa",
+}
+
+
+def make_uule(canonical_name):
+    """Google's real uule param encodes a canonical place name. This is the
+    same community-reverse-engineered form the reference tool that inspired
+    this fix uses (confirmed live tonight: their tool's real uule-bearing
+    request came back clean on the exact keyword/IP this app's own
+    box-typing + JS-geolocation-only approach kept getting soft-blocked on -
+    no uule at all was the actual gap, not anything about how the query got
+    typed)."""
+    key = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    encoded = base64.b64encode(canonical_name.encode("utf-8")).decode("ascii")
+    return "w+CAIQICI" + key[len(canonical_name) % len(key)] + encoded
+
+
+def canonical_location(city, country):
+    """Build a real 'City,Country' canonical name from a CITY_COORDS key
+    (e.g. "Austin, US" + "us" -> "Austin,United States") for make_uule()."""
+    if not city:
+        return None
+    name = city.split(",")[0].strip()
+    country_name = COUNTRY_NAMES.get((country or "").lower())
+    if not country_name:
+        return None
+    return f"{name},{country_name}"
 
 
 def google_domain(country: str) -> str:
@@ -2283,134 +2329,58 @@ def accept_google_consent(driver, logger=print):
 # --------------------------------------------------------------------------- #
 # Human search + continuous-scroll pagination
 # --------------------------------------------------------------------------- #
-def human_search(driver, keyword, country, logger=print, city=None, lang="en"):
-    """Type the keyword into the live Google search box and submit.
-    When a city is selected, navigates via URL with UULE so Google's server
-    localises results to that city. Falls back to URL nav if box not found."""
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.common.keys import Keys
-    from urllib.parse import quote_plus  # used in fallback URL
+def build_search_url(dom, keyword, country, lang, uule=None, start=None):
+    """A real search URL, kept as close to a NORMAL one as possible - gl/hl +
+    pws=0 (personalisation off) always, uule ONLY for city-level targeting,
+    start only when paginating. Confirmed live tonight: this exact shape
+    (from the reference tool that inspired this fix) came back clean on the
+    identical keyword/IP this app's old box-typing approach kept getting
+    soft-blocked on - the old approach's extra scraper-shaped signals
+    (typed keystrokes into a homepage search box, no pws=0, no uule) were
+    the real gap, not anything about how "human-like" the interaction felt."""
+    from urllib.parse import quote_plus, quote
+    u = f"https://www.{dom}/search?q={quote_plus(keyword)}&gl={country}&hl={lang}&pws=0"
+    if uule:
+        u += f"&uule={quote(uule, safe='')}"
+    if start:
+        u += f"&start={start}"
+    return u
 
+
+def human_search(driver, keyword, country, logger=print, city=None, lang="en"):
+    """Navigate directly to a real, minimally-shaped Google search URL -
+    q/gl/hl/pws=0, plus a real uule for city-level targeting. See
+    build_search_url()'s docstring for why this replaced the previous
+    type-into-the-search-box approach."""
     if not is_alive(driver):
         raise BrowserClosedError("Browser closed before search")
 
-    # Apply geolocation CDP override for JS-level location APIs
+    # Apply geolocation CDP override for JS-level location APIs (still worth
+    # doing alongside uule - matches what a real visitor's browser would
+    # actually report if asked).
+    uule = None
     if city and city in CITY_COORDS:
         lat, lng = CITY_COORDS[city]
         set_geolocation(driver, latitude=lat, longitude=lng)
+        loc = canonical_location(city, country)
+        if loc:
+            uule = make_uule(loc)
 
     dom = google_domain(country)
+    url = build_search_url(dom, keyword, country, lang, uule=uule)
 
-    def _find_box():
-        for sel in ["textarea[name='q']", "input[name='q']", "textarea#APjFqb"]:
-            try:
-                els = driver.find_elements(By.CSS_SELECTOR, sel)
-                if els and els[0].is_displayed():
-                    return els[0]
-            except Exception:
-                continue
-        return None
-
-    def _dismiss_consent():
-        """Click through Google's cookie consent page if it appears."""
-        try:
-            src = driver.page_source or ""
-            if "consent" not in src.lower():
-                return
-            for sel in [
-                "button[id*='accept']", "button[aria-label*='Accept']",
-                "button[aria-label*='accept']", "form[action*='consent'] button",
-                "#L2AGLb", ".tHlp8d",
-            ]:
-                btns = driver.find_elements(By.CSS_SELECTOR, sel)
-                if btns:
-                    btns[0].click()
-                    human_pause(1.0, 2.0)
-                    return
-        except Exception:
-            pass
-
-    # Make sure we're on a Google page with a search box
-    cur = ""
-    try:
-        cur = driver.current_url or ""
-    except Exception:
-        pass
-    if "google." not in cur:
-        try:
-            safe_get(driver, f"https://www.{dom}/")
-            human_pause(1.5, 2.5)
-        except Exception:
-            warm_up(driver, country, logger)
-
-    # Try to find search box; dismiss consent page if blocking it
-    box = _find_box()
-    if box is None:
-        _dismiss_consent()
-        human_pause(0.8, 1.5)
-        box = _find_box()
-
-    # Still not found - reload Google homepage and try once more
-    if box is None:
-        try:
-            safe_get(driver, f"https://www.{dom}/")
-            human_pause(2.0, 3.0)
-            _dismiss_consent()
-            human_pause(0.8, 1.5)
-            box = _find_box()
-        except Exception:
-            pass
-
-    if box is not None:
-        # This whole sequence used to be nothing but type-then-Enter - the one
-        # thing a real person never does. A human always moves the cursor
-        # around and reads before/after searching; warm_up() already calls
-        # human_mouse()/human_scroll() for exactly that reason, but this
-        # function - the one that actually submits the query - never called
-        # either. Bracket the search with the same real activity here.
-        human_mouse(driver)
-        try:
-            box.click()
-            human_pause(0.3, 0.8)
-            box.send_keys(Keys.CONTROL + "a")
-            human_pause(0.1, 0.2)
-            box.send_keys(Keys.DELETE)
-            human_pause(0.2, 0.4)
-        except Exception:
-            try:
-                box.clear()
-            except Exception:
-                pass
-        human_type(box, keyword)
-        human_pause(0.4, 1.0)
-
-        try:
-            box.send_keys(Keys.ENTER)
-        except Exception:
-            box.submit()
-        logger(f"Typed & submitted: '{keyword}'" + (f" (city: {city})" if city else ""))
-        human_pause(2.0, 3.5)
-        # Scroll and glance around the results the way a real person reading
-        # a SERP would, instead of the page just sitting untouched the
-        # instant it loads.
-        try:
-            human_scroll(driver, steps=random.randint(2, 4))
-            human_mouse(driver)
-        except Exception:
-            pass
-        return True
-
-    # Fallback: go to homepage first (sets referer + session), then search URL
-    logger("Search box not found - using URL fallback via homepage")
-    try:
-        cur2 = driver.current_url or ""
-        if "google." not in cur2:
-            safe_get(driver, f"https://www.{dom}/")
-            human_pause(1.5, 2.5)
-    except Exception:
-        pass
-    safe_get(driver, f"https://www.{dom}/search?q={quote_plus(keyword)}&gl={country}&hl={lang}")
+    # A little activity before/around the navigation - not simulating typing
+    # (that's the part that turned out to be the actual scraper signal), just
+    # the ordinary cursor movement/scrolling a real tab already has.
+    human_mouse(driver)
+    safe_get(driver, url)
+    logger(f"Searched: '{keyword}'" + (f" (city: {city})" if city else ""))
     human_pause(2.0, 3.5)
+    try:
+        human_scroll(driver, steps=random.randint(2, 4))
+        human_mouse(driver)
+    except Exception:
+        pass
     return True
 
 
@@ -2544,8 +2514,31 @@ for (var i = 0; i < elems.length; i++) {
     var a = elems[i].querySelector('a[href]');
     if (!a || !a.href) continue;
     var low = a.href.toLowerCase();
-    if (low.indexOf('google.') !== -1 || low.indexOf('/search?') !== -1) continue;
-    out.push(a.href);
+    var url = a.href;
+    if (low.indexOf('google.') !== -1 || low.indexOf('/search?') !== -1) {
+        // Confirmed live tonight: Google now wraps many real organic results
+        // in an opaque /goto?url=<encoded blob> redirect instead of exposing
+        // the real destination directly in a.href (the old /url?q=<real>
+        // format this used to fall back on doesn't apply here either - the
+        // real URL isn't present in cleartext anywhere in this href at all).
+        // The <cite> element right under the title still shows the real
+        // visible domain exactly as a user sees it - a genuine, fully
+        // rendered page with real results was being read as "0 organic
+        // links" (and misdiagnosed as a Google block) purely because this
+        // fallback didn't exist, not because anything was actually blocked.
+        var cite = elems[i].querySelector('cite');
+        if (!cite) continue;
+        var t = cite.textContent.trim().replace(/^https?:\\/\\//i, '');
+        t = t.split(/[\\u203a\\u00bb\\/\\s]/)[0].trim();
+        if (!/^([a-z0-9-]+\\.)+[a-z]{2,}$/i.test(t)) continue;
+        url = 'https://' + t;
+    }
+    if (low.indexOf('google.') !== -1 || low.indexOf('/search?') !== -1) {
+        // Re-check the FINAL url (may have been rebuilt from <cite> above) -
+        // if it's still google-hosted, this genuinely isn't a real result.
+        if (url.toLowerCase().indexOf('google.') !== -1) continue;
+    }
+    out.push(url);
 }
 return out;
 """
