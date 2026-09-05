@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.87"
+APP_VERSION = "4.12.88"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1280,11 +1280,24 @@ class Session:
         return self.driver
 
     def quit(self):
+        # A driver from engine._spawn_and_attach() is ATTACHED (via CDP's
+        # debuggerAddress) to a browser process this app spawned by hand, not
+        # one launched through Selenium/undetected-chromedriver's own launch
+        # call - driver.quit() alone doesn't reliably kill a process it never
+        # owned in the first place, so the real OS process (stashed as
+        # driver._spawned_proc) needs its own explicit terminate().
+        proc = getattr(self.driver, "_spawned_proc", None)
         try:
             if self.driver and is_alive(self.driver):
                 self.driver.quit()
         except Exception:
             pass
+        if proc is not None:
+            try:
+                if proc.poll() is None:
+                    proc.terminate()
+            except Exception:
+                pass
         self.driver = None
         with state_lock:
             state["driver"] = None

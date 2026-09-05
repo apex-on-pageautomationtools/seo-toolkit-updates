@@ -1866,53 +1866,124 @@ def _apply_stealth(driver, country, latitude=None, longitude=None, lang="en"):
     set_geolocation(driver, country, latitude, longitude)
 
 
-def _build_edge_driver(args, country, binary, logger, latitude=None, longitude=None, lang="en"):
-    """Edge via Selenium's native WebDriver (msedgedriver auto-resolved)."""
-    from selenium.webdriver import Edge, EdgeOptions
-    opts = EdgeOptions()
-    opts.use_chromium = True
-    for a in args:
-        opts.add_argument(a)
-    ev = random.randint(120, 132)
-    opts.add_argument(
-        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        f"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{ev}.0.0.0 "
-        f"Safari/537.36 Edg/{ev}.0.0.0")
-    # Native Edge (unlike uc) accepts these - they hide the automation banner.
-    opts.add_experimental_option("excludeSwitches", ["enable-automation"])
-    opts.add_experimental_option("useAutomationExtension", False)
-    # Block all downloads and mute audio
-    prefs = {
-        "download_restrictions": 3,
-        "download.default_directory": "NUL",
-        "download.prompt_for_download": False,
-        "profile.default_content_setting_values.automatic_downloads": 2,
-        "profile.default_content_setting_values.notifications": 2,
-    }
-    opts.add_experimental_option("prefs", prefs)
-    opts.add_argument("--autoplay-policy=no-user-gesture-required")
-    opts.add_argument("--mute-audio")
-    if binary:
-        opts.binary_location = binary
-    logger("Launching Edge browser...")
-    driver = None
+def _free_debug_port(preferred=9333):
+    """A port unlikely to collide with anything else already running. Doesn't
+    bind-then-release (that races the browser for the same port on Windows -
+    confirmed live, produced a spurious ECONNREFUSED) - just picks a free-
+    looking one; the retry loop in _spawn_and_attach covers the rare clash."""
+    return preferred + random.randint(0, 500)
+
+
+def _spawn_and_attach(binary, browser_type, args, logger, headless=False):
+    """Launch a COMPLETELY ORDINARY browser process by hand (subprocess.Popen,
+    not Selenium's/undetected-chromedriver's own launch call) and only ATTACH
+    to it afterward via CDP's debuggerAddress. This is the real fix for a
+    problem no amount of stealth-JS or CDP-leak patching (this app's own
+    _STEALTH_JS, undetected-chromedriver, even patchright) ever touched:
+    launching a browser THROUGH an automation library's own launch() call
+    marks it as automation-controlled at a level deeper than what JS can hide
+    - confirmed live tonight that this alone changed a hard, unrecoverable
+    soft_block into a solvable CAPTCHA on the exact same query/IP that every
+    other approach failed on outright. Found via a reference tool's own code
+    comment: 'launching a normal Chrome via a remote-debugging port and
+    connecting over CDP avoids that - Google treats it like a real user'.
+
+    Returns a Selenium WebDriver attached to the spawned process, with the
+    subprocess handle stashed on it (driver._spawned_proc) so Session.quit()
+    can terminate the real OS process - an attached session's driver.quit()
+    alone doesn't reliably kill a browser it didn't itself launch."""
+    import subprocess
+    import urllib.request
+    port = _free_debug_port()
+    launch_cmd = [binary] + args + [
+        f"--remote-debugging-port={port}", "--new-window", "about:blank"]
+    logger(f"Launching {browser_type.title()} as a normal (non-automation-flagged) "
+           f"process...")
+    proc = None
     last_err = None
     for attempt in range(3):
         try:
-            driver = Edge(options=opts)
-            break
+            proc = subprocess.Popen(launch_cmd)
         except Exception as e:
             last_err = e
-            # "session not created: cannot connect to ... not reachable" is a known
-            # flaky launch failure (the spawned browser process didn't bind its debug
-            # port in time - antivirus scanning the exe, a slow machine, or a
-            # lingering process from a just-closed session) - almost always transient
-            # and succeeds on a plain retry.
             if attempt < 2:
-                logger(f"Edge launch attempt {attempt + 1}/3 failed ({e}); retrying...")
-                time.sleep(2 + attempt * 2)
-    if driver is None:
-        raise last_err
+                time.sleep(1)
+            continue
+        deadline = time.time() + 20
+        up = False
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                break
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2)
+                up = True
+                break
+            except Exception:
+                time.sleep(0.5)
+        if up:
+            break
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        last_err = RuntimeError(f"{browser_type} debug port {port} never came up")
+        port = _free_debug_port()
+        launch_cmd[-3] = f"--remote-debugging-port={port}"
+        if attempt < 2:
+            logger(f"{browser_type.title()} launch attempt {attempt + 1}/3 didn't come "
+                   f"up in time; retrying...")
+    if proc is None or proc.poll() is not None:
+        raise last_err or RuntimeError(f"{browser_type} failed to launch")
+
+    from selenium.webdriver import Chrome, ChromeOptions, Edge, EdgeOptions
+    Cls, Opts = (Edge, EdgeOptions) if browser_type == "edge" else (Chrome, ChromeOptions)
+    attach_opts = Opts()
+    if browser_type == "edge":
+        attach_opts.use_chromium = True
+    attach_opts.add_experimental_option("debuggerAddress", f"127.0.0.1:{port}")
+    driver = Cls(options=attach_opts)
+    driver._spawned_proc = proc
+    return driver
+
+
+def _build_edge_driver(args, country, binary, logger, latitude=None, longitude=None, lang="en"):
+    """Edge, spawned as a normal process and attached to via CDP (see
+    _spawn_and_attach) - falls back to Selenium's own native launch if that
+    fails for any reason."""
+    try:
+        driver = _spawn_and_attach(binary, "edge", args, logger)
+    except Exception as e:
+        logger(f"Spawn-and-attach failed ({e}); falling back to native Edge launch...")
+        from selenium.webdriver import Edge, EdgeOptions
+        opts = EdgeOptions()
+        opts.use_chromium = True
+        for a in args:
+            opts.add_argument(a)
+        ev = random.randint(120, 132)
+        opts.add_argument(
+            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            f"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{ev}.0.0.0 "
+            f"Safari/537.36 Edg/{ev}.0.0.0")
+        opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+        opts.add_experimental_option("useAutomationExtension", False)
+        opts.add_argument("--autoplay-policy=no-user-gesture-required")
+        opts.add_argument("--mute-audio")
+        if binary:
+            opts.binary_location = binary
+        logger("Launching Edge browser...")
+        driver = None
+        last_err = None
+        for attempt in range(3):
+            try:
+                driver = Edge(options=opts)
+                break
+            except Exception as e2:
+                last_err = e2
+                if attempt < 2:
+                    logger(f"Edge launch attempt {attempt + 1}/3 failed ({e2}); retrying...")
+                    time.sleep(2 + attempt * 2)
+        if driver is None:
+            raise last_err
     _apply_stealth(driver, country, latitude, longitude, lang)
     _block_downloads(driver)
     driver.set_page_load_timeout(45)
@@ -1920,33 +1991,37 @@ def _build_edge_driver(args, country, binary, logger, latitude=None, longitude=N
 
 
 def _build_chrome_driver(args, country, binary, logger, latitude=None, longitude=None, lang="en"):
-    """Chrome via undetected-chromedriver."""
-    import undetected_chromedriver as uc
-    options = uc.ChromeOptions()
-    for a in args:
-        options.add_argument(a)
-    if binary:
-        options.binary_location = binary
-    chrome_ver = get_chrome_major_version()
-    kwargs = {"options": options, "use_subprocess": True}
-    if chrome_ver:
-        logger(f"Detected Chrome version: {chrome_ver}")
-        kwargs["version_main"] = chrome_ver
-    driver = None
-    last_err = None
-    for attempt in range(3):
-        try:
-            driver = uc.Chrome(**kwargs)
-            break
-        except Exception as e:
-            last_err = e
-            # Same flaky "cannot connect to chrome ... not reachable" launch failure
-            # as Edge above - retry before giving up.
-            if attempt < 2:
-                logger(f"Chrome launch attempt {attempt + 1}/3 failed ({e}); retrying...")
-                time.sleep(2 + attempt * 2)
-    if driver is None:
-        raise last_err
+    """Chrome, spawned as a normal process and attached to via CDP (see
+    _spawn_and_attach) - falls back to undetected-chromedriver's own launch
+    if that fails for any reason."""
+    try:
+        driver = _spawn_and_attach(binary, "chrome", args, logger)
+    except Exception as e:
+        logger(f"Spawn-and-attach failed ({e}); falling back to undetected-chromedriver...")
+        import undetected_chromedriver as uc
+        options = uc.ChromeOptions()
+        for a in args:
+            options.add_argument(a)
+        if binary:
+            options.binary_location = binary
+        chrome_ver = get_chrome_major_version()
+        kwargs = {"options": options, "use_subprocess": True}
+        if chrome_ver:
+            logger(f"Detected Chrome version: {chrome_ver}")
+            kwargs["version_main"] = chrome_ver
+        driver = None
+        last_err = None
+        for attempt in range(3):
+            try:
+                driver = uc.Chrome(**kwargs)
+                break
+            except Exception as e2:
+                last_err = e2
+                if attempt < 2:
+                    logger(f"Chrome launch attempt {attempt + 1}/3 failed ({e2}); retrying...")
+                    time.sleep(2 + attempt * 2)
+        if driver is None:
+            raise last_err
     _apply_stealth(driver, country, latitude, longitude, lang)
     _block_downloads(driver)
     driver.set_page_load_timeout(45)
