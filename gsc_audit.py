@@ -144,6 +144,14 @@ def oauth_login_selenium(driver, client_id, client_secret, log_fn=None, login_hi
     # normal tab) and confirmed live as a real UX bug: clicking "Connect
     # Account" visibly opened two separate browser windows.
     driver.get(auth_url)
+    # A natively-launched browser window doesn't always take focus on its
+    # own, especially spawned from a background app process - confirmed
+    # live: the login window opened off to the side/behind the app instead
+    # of in front, so the user never noticed it was there to log into at
+    # all. Snapped to half the screen (not full-screen) so the login is
+    # clearly visible without covering everything else.
+    import engine as _engine
+    _engine.snap_browser_half_screen_and_front(driver)
 
     import time as _t
     log_fn("  Waiting for Google authorization (log in and click Allow)...")
@@ -421,6 +429,9 @@ def launch_session_browser(session_id, browser_pref="edge", log_fn=None):
         use_spawn_and_attach=False,
     )
     driver.get("https://accounts.google.com/")
+    # See oauth_login_selenium()'s matching comment - half-screen and
+    # brought to front so the login is clearly visible.
+    engine.snap_browser_half_screen_and_front(driver)
     return driver
 
 

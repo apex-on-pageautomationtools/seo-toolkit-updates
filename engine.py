@@ -2909,6 +2909,52 @@ def bring_browser_to_front():
         pass
 
 
+def snap_browser_half_screen_and_front(driver=None):
+    """Resize the Chrome/Edge window to the right half of the screen and
+    bring it to the front - used for GSC login/sign-in windows so the
+    browser doesn't cover the whole screen (or, worse, open off to the
+    side/behind the app where the user never notices it needs attention -
+    see bring_browser_to_front()'s own reasoning) and the app's own window
+    stays visible alongside it. Prefers driver.set_window_rect() (works
+    regardless of native-launch vs attached-via-CDP) when a driver is
+    given; falls back to raw Win32 the same way bring_browser_to_front()
+    does if that's unavailable."""
+    if driver is not None:
+        try:
+            w = driver.execute_script("return screen.availWidth || screen.width") or 1920
+            h = driver.execute_script("return screen.availHeight || screen.height") or 1080
+            driver.set_window_rect(x=int(w // 2), y=0, width=int(w // 2), height=int(h))
+            bring_browser_to_front()
+            return
+        except Exception:
+            pass
+    try:
+        import ctypes
+        import ctypes.wintypes
+        user32 = ctypes.windll.user32
+        sw = user32.GetSystemMetrics(0)
+        sh = user32.GetSystemMetrics(1)
+        titles = []
+        def _enum_cb(hwnd, _):
+            if user32.IsWindowVisible(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buf = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buf, length + 1)
+                    titles.append((hwnd, buf.value))
+            return True
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
+        user32.EnumWindows(WNDENUMPROC(_enum_cb), 0)
+        for hwnd, title in titles:
+            if any(k in title for k in ("Chrome", "Chromium", "Google", "Edge", "edge")):
+                user32.ShowWindow(hwnd, 9)   # SW_RESTORE
+                user32.MoveWindow(hwnd, sw // 2, 0, sw // 2, sh, True)
+                user32.SetForegroundWindow(hwnd)
+                break
+    except Exception:
+        pass
+
+
 def human_visit_neutral(driver, target_domain=None):
     """Visit the target domain or a neutral site between keywords to look human."""
     sites = [
