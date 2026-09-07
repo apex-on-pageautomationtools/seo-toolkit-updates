@@ -152,11 +152,35 @@ def oauth_login_selenium(driver, client_id, client_secret, log_fn=None, login_hi
     for _ in range(300):  # 5 minutes max
         _t.sleep(1)
         try:
-            current_url = driver.current_url
+            handles = driver.window_handles
+        except Exception:
+            # The browser process itself is gone, not just one tab -
+            # nothing left to poll.
+            break
+        if not handles:
+            break
+        # Google's account-chooser/consent flow can open a SEPARATE window
+        # partway through (confirmed live: the redirect the user actually
+        # sees lands in a window Selenium's single tracked "current" handle
+        # no longer points at, especially now the browser is attached via
+        # CDP - see engine._spawn_and_attach - rather than freshly launched
+        # single-window, which made this far more likely to happen than
+        # before). Check every open window for the callback URL instead of
+        # trusting driver.current_url alone, and don't let one window that's
+        # mid-navigation (a transient error reading its URL) abort the
+        # entire 5-minute wait - only move on to the next handle.
+        found_handle = None
+        for h in handles:
+            try:
+                driver.switch_to.window(h)
+                current_url = driver.current_url
+            except Exception:
+                continue
             if "oauth_callback" in current_url and "code=" in current_url:
                 parsed = urllib.parse.urlparse(current_url)
                 qs = urllib.parse.parse_qs(parsed.query)
                 code = qs.get("code", [None])[0]
+                found_handle = h
                 break
             if "approval_code" in current_url or "/oauthchooseaccount" not in current_url:
                 # Check if the page shows an authorization code
@@ -167,11 +191,13 @@ def oauth_login_selenium(driver, client_id, client_secret, log_fn=None, login_hi
                             line = line.strip()
                             if line.startswith("4/"):
                                 code = line
+                                found_handle = h
                                 break
                 except Exception:
                     pass
-        except Exception:
-            # Window might be closed
+            if code:
+                break
+        if found_handle:
             break
 
     if not code:
