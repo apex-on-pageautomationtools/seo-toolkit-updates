@@ -715,31 +715,6 @@ def _click_not_indexed_scorecard(driver, log_fn):
     return False
 
 
-def _click_indexed_scorecard(driver, log_fn):
-    """Click the "Indexed" scorecard chip - same structure/mechanism as
-    _click_not_indexed_scorecard() above, just the other chip (title=
-    "Indexed" instead of "Not indexed"). Used to read the real, Google-
-    confirmed-live "Indexed pages" URL list as an EXTRA source of redirect-
-    target candidates (alongside the sitemap) for the 404/broken-URL
-    recommendations - a site with 1000+ pages can have real indexed pages
-    the sitemap doesn't list (or doesn't list correctly), and the sitemap
-    alone was producing too many "redirect to homepage" fallbacks instead
-    of a genuinely relevant page."""
-    from selenium.webdriver.common.by import By
-    try:
-        candidates = driver.find_elements(
-            By.XPATH, "//*[@title='Indexed']/ancestor::*[@role='button'][1]")
-        if not candidates:
-            candidates = driver.find_elements(
-                By.XPATH, "//*[normalize-space(text())='Indexed']/ancestor::*[@role='button'][1]")
-        if candidates:
-            _robust_click(driver, candidates[0])
-            time.sleep(2.5)
-            return True
-        log_fn("  [warn] Could not find the 'Indexed' scorecard to click.")
-    except Exception as e:
-        log_fn(f"  [warn] Could not click 'Indexed' scorecard: {e}")
-    return False
 
 
 def _index_coverage_debug_dir():
@@ -1317,13 +1292,20 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
             # existed.
             indexed_urls = []
             try:
-                driver.get(url)
+                # A real, direct link GSC's own "View data about indexed
+                # pages" button points to (confirmed live via a saved debug
+                # HTML dump) - clicking the "Indexed" scorecard chip itself
+                # does NOT navigate anywhere (unlike "Not indexed", which
+                # reveals an inline breakdown table on the same page); this
+                # URL is the actual way to reach the Indexed-pages drilldown,
+                # so navigate straight to it instead of clicking anything.
+                indexed_url = build_gsc_url("index/drilldown", property_url) + "&pages=ALL_URLS"
+                driver.get(indexed_url)
                 time.sleep(4)
-                if _click_indexed_scorecard(driver, log_fn):
-                    if not _looks_like_signin(driver):
-                        indexed_urls = _scrape_drilldown_urls(driver, log_fn, debug_label="Indexed pages")
-                        log_fn(f"  {len(indexed_urls)} indexed page URL(s) read (extra redirect-target "
-                               f"candidates alongside the sitemap).")
+                if not _looks_like_signin(driver):
+                    indexed_urls = _scrape_drilldown_urls(driver, log_fn, debug_label="Indexed pages")
+                    log_fn(f"  {len(indexed_urls)} indexed page URL(s) read (extra redirect-target "
+                           f"candidates alongside the sitemap).")
             except Exception as e:
                 log_fn(f"  [warn] Could not read the Indexed pages list: {e} "
                        f"(redirect suggestions will use the sitemap only).")
