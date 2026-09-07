@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.95"
+APP_VERSION = "4.12.96"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5811,6 +5811,7 @@ def _run_index_coverage(domain, email):
             raise RuntimeError(result["error"])
         reason_urls = result.get("reason_urls") or {}
         stated_counts = result.get("stated_counts") or {}
+        indexed_urls = result.get("indexed_urls") or []
         if not reason_urls:
             raise RuntimeError("No page-indexing reasons were found to export - either every page is "
                                "healthy/indexed, or GSC's UI structure didn't match this tool's "
@@ -5824,6 +5825,17 @@ def _run_index_coverage(domain, email):
         _log(f"[2/3] Checking live status for every URL across {len(reason_urls)} reason(s)...")
         sitemap_urls = georpt.get_sitemap_urls(domain, cap=2000)
         _log(f"  {len(sitemap_urls)} sitemap URL(s) found for redirect suggestions.")
+        if indexed_urls:
+            # Combined pool, deduped - the sitemap and GSC's own "Indexed
+            # pages" list rarely match exactly (a sitemap can omit real
+            # indexed pages, or list ones no longer live), so redirect
+            # suggestions get to pick the best-matching page from BOTH real
+            # sources instead of only ever falling back to the homepage when
+            # the sitemap alone doesn't have a good slug match.
+            before = len(sitemap_urls)
+            sitemap_urls = list(dict.fromkeys(sitemap_urls + indexed_urls))
+            _log(f"  +{len(sitemap_urls) - before} more from GSC's own Indexed pages list "
+                 f"({len(sitemap_urls)} total redirect-target candidates).")
         homepage_url = f"https://{index_coverage.onpage2.safe_domain(domain)}/"
         index_coverage.onpage2.set_run_scale(sum(len(v) for v in reason_urls.values()))
 

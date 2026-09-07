@@ -715,6 +715,33 @@ def _click_not_indexed_scorecard(driver, log_fn):
     return False
 
 
+def _click_indexed_scorecard(driver, log_fn):
+    """Click the "Indexed" scorecard chip - same structure/mechanism as
+    _click_not_indexed_scorecard() above, just the other chip (title=
+    "Indexed" instead of "Not indexed"). Used to read the real, Google-
+    confirmed-live "Indexed pages" URL list as an EXTRA source of redirect-
+    target candidates (alongside the sitemap) for the 404/broken-URL
+    recommendations - a site with 1000+ pages can have real indexed pages
+    the sitemap doesn't list (or doesn't list correctly), and the sitemap
+    alone was producing too many "redirect to homepage" fallbacks instead
+    of a genuinely relevant page."""
+    from selenium.webdriver.common.by import By
+    try:
+        candidates = driver.find_elements(
+            By.XPATH, "//*[@title='Indexed']/ancestor::*[@role='button'][1]")
+        if not candidates:
+            candidates = driver.find_elements(
+                By.XPATH, "//*[normalize-space(text())='Indexed']/ancestor::*[@role='button'][1]")
+        if candidates:
+            _robust_click(driver, candidates[0])
+            time.sleep(2.5)
+            return True
+        log_fn("  [warn] Could not find the 'Indexed' scorecard to click.")
+    except Exception as e:
+        log_fn(f"  [warn] Could not click 'Indexed' scorecard: {e}")
+    return False
+
+
 def _index_coverage_debug_dir():
     d = os.path.join(_sessions_dir(), "..", "index_coverage_debug")
     d = os.path.normpath(d)
@@ -1280,7 +1307,29 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
                     except Exception:
                         pass
 
-            return {"reason_urls": reason_urls, "stated_counts": stated_counts, "session_id": session_id}
+            # Step 3: the "Indexed pages" list itself - real, Google-confirmed-
+            # live URLs, used as an EXTRA candidate pool (alongside the
+            # sitemap) for 404/broken-URL redirect suggestions. Same click-
+            # then-scrape mechanism as a regular reason, just off the
+            # "Indexed" scorecard instead of "Not indexed" - not required for
+            # the report itself, so a failure here just means redirect
+            # suggestions fall back to sitemap-only, same as before this
+            # existed.
+            indexed_urls = []
+            try:
+                driver.get(url)
+                time.sleep(4)
+                if _click_indexed_scorecard(driver, log_fn):
+                    if not _looks_like_signin(driver):
+                        indexed_urls = _scrape_drilldown_urls(driver, log_fn, debug_label="Indexed pages")
+                        log_fn(f"  {len(indexed_urls)} indexed page URL(s) read (extra redirect-target "
+                               f"candidates alongside the sitemap).")
+            except Exception as e:
+                log_fn(f"  [warn] Could not read the Indexed pages list: {e} "
+                       f"(redirect suggestions will use the sitemap only).")
+
+            return {"reason_urls": reason_urls, "stated_counts": stated_counts,
+                    "indexed_urls": indexed_urls, "session_id": session_id}
         except Exception as e:
             log_fn(f"  Index coverage capture error ({'headless' if headless else 'visible'}): {e}")
             return {"error": str(e)}
