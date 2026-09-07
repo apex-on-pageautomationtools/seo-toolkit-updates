@@ -1992,10 +1992,48 @@ def _spawn_and_attach(binary, browser_type, args, logger, headless=False):
     return driver
 
 
-def _build_edge_driver(args, country, binary, logger, latitude=None, longitude=None, lang="en"):
+def _build_edge_driver(args, country, binary, logger, latitude=None, longitude=None, lang="en",
+                       use_spawn_and_attach=True):
     """Edge, spawned as a normal process and attached to via CDP (see
     _spawn_and_attach) - falls back to Selenium's own native launch if that
-    fails for any reason."""
+    fails for any reason. use_spawn_and_attach=False skips straight to the
+    native launch - GSC/GA4 tools are authenticated, logged-in sessions, not
+    anonymous Google Search scraping, so they never needed the anti-
+    detection spawn-and-attach trick this was built for in the first place;
+    applying it there anyway (build_driver() is shared by every tool) only
+    added extra failure-prone launch attempts with no actual benefit -
+    confirmed live: Index Coverage Report burning through 3 failed spawn-
+    and-attach retries plus 3 more native-launch retries before ever
+    reaching Chrome, each visibly opening a real (briefly, or in a bad case
+    persistently) on-screen window."""
+    if not use_spawn_and_attach:
+        from selenium.webdriver import Edge, EdgeOptions
+        opts = EdgeOptions()
+        opts.use_chromium = True
+        for a in args:
+            opts.add_argument(a)
+        opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+        opts.add_experimental_option("useAutomationExtension", False)
+        if binary:
+            opts.binary_location = binary
+        logger("Launching Edge browser...")
+        driver = None
+        last_err = None
+        for attempt in range(3):
+            try:
+                driver = Edge(options=opts)
+                break
+            except Exception as e2:
+                last_err = e2
+                if attempt < 2:
+                    logger(f"Edge launch attempt {attempt + 1}/3 failed ({e2}); retrying...")
+                    time.sleep(2 + attempt * 2)
+        if driver is None:
+            raise last_err
+        _apply_stealth(driver, country, latitude, longitude, lang)
+        _block_downloads(driver)
+        driver.set_page_load_timeout(45)
+        return driver
     try:
         driver = _spawn_and_attach(binary, "edge", args, logger)
     except Exception as e:
@@ -2036,10 +2074,42 @@ def _build_edge_driver(args, country, binary, logger, latitude=None, longitude=N
     return driver
 
 
-def _build_chrome_driver(args, country, binary, logger, latitude=None, longitude=None, lang="en"):
+def _build_chrome_driver(args, country, binary, logger, latitude=None, longitude=None, lang="en",
+                         use_spawn_and_attach=True):
     """Chrome, spawned as a normal process and attached to via CDP (see
     _spawn_and_attach) - falls back to undetected-chromedriver's own launch
-    if that fails for any reason."""
+    if that fails for any reason. use_spawn_and_attach=False skips straight
+    to undetected-chromedriver - see _build_edge_driver()'s docstring for
+    why GSC/GA4 tools pass this."""
+    if not use_spawn_and_attach:
+        import undetected_chromedriver as uc
+        options = uc.ChromeOptions()
+        for a in args:
+            options.add_argument(a)
+        if binary:
+            options.binary_location = binary
+        chrome_ver = get_chrome_major_version()
+        kwargs = {"options": options, "use_subprocess": True}
+        if chrome_ver:
+            logger(f"Detected Chrome version: {chrome_ver}")
+            kwargs["version_main"] = chrome_ver
+        driver = None
+        last_err = None
+        for attempt in range(3):
+            try:
+                driver = uc.Chrome(**kwargs)
+                break
+            except Exception as e2:
+                last_err = e2
+                if attempt < 2:
+                    logger(f"Chrome launch attempt {attempt + 1}/3 failed ({e2}); retrying...")
+                    time.sleep(2 + attempt * 2)
+        if driver is None:
+            raise last_err
+        _apply_stealth(driver, country, latitude, longitude, lang)
+        _block_downloads(driver)
+        driver.set_page_load_timeout(45)
+        return driver
     try:
         driver = _spawn_and_attach(binary, "chrome", args, logger)
     except Exception as e:
@@ -2076,9 +2146,19 @@ def _build_chrome_driver(args, country, binary, logger, latitude=None, longitude
 
 def build_driver(profile_dir, proxy=None, headless=False, country="us",
                  extra_extensions=None, logger=print, browser_pref="auto",
-                 latitude=None, longitude=None, lang="en"):
+                 latitude=None, longitude=None, lang="en",
+                 use_spawn_and_attach=True):
     """Create a hardened driver. Edge preferred (fewer CAPTCHAs); falls back to
-    Chrome. browser_pref: 'auto' | 'edge' | 'chrome'."""
+    Chrome. browser_pref: 'auto' | 'edge' | 'chrome'.
+
+    use_spawn_and_attach: the anti-detection spawn-as-a-normal-process-then-
+    attach-via-CDP technique (see _spawn_and_attach) - defaults on for Rank
+    Checker, which is anonymous Google Search scraping and genuinely needs
+    it. GSC/GA4 tools (Index Coverage Report, Performance Report, etc.) are
+    authenticated, logged-in sessions that were never at risk of the bot
+    detection this solves, and pass False here to skip straight to the
+    plain native launch instead of burning through extra failure-prone
+    launch attempts for no benefit."""
     binary, btype = find_browser_binary(browser_pref)
     label = {"edge": "Edge", "chrome": "Chrome"}.get(btype, "browser")
     if binary:
@@ -2090,12 +2170,15 @@ def build_driver(profile_dir, proxy=None, headless=False, country="us",
 
     if btype == "edge":
         try:
-            return _build_edge_driver(args, country, binary, logger, latitude, longitude, lang)
+            return _build_edge_driver(args, country, binary, logger, latitude, longitude, lang,
+                                       use_spawn_and_attach=use_spawn_and_attach)
         except Exception as e:
             logger(f"Edge launch failed ({e}); falling back to Chrome...")
             cbin, _ = find_browser_binary("chrome")
-            return _build_chrome_driver(args, country, cbin, logger, latitude, longitude, lang)
-    return _build_chrome_driver(args, country, binary, logger, latitude, longitude, lang)
+            return _build_chrome_driver(args, country, cbin, logger, latitude, longitude, lang,
+                                         use_spawn_and_attach=use_spawn_and_attach)
+    return _build_chrome_driver(args, country, binary, logger, latitude, longitude, lang,
+                                 use_spawn_and_attach=use_spawn_and_attach)
 
 
 def _block_downloads(driver):

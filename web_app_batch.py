@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.93"
+APP_VERSION = "4.12.94"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5609,6 +5609,7 @@ def api_gsc_connect():
             session["profile_dir"], proxy=None, headless=headless,
             country="us", extra_extensions=[],
             browser_pref=browser_name,
+            use_spawn_and_attach=False,
         )
         email = gsc_audit.oauth_login_selenium(driver, client_id, client_secret, login_hint=email_hint or None)
         # Tag this session with the account, and drop any older session for the
@@ -6139,6 +6140,7 @@ def api_gsc_session_refresh(sid):
             profile_dir, proxy=None, headless=True,
             country="us", extra_extensions=[],
             browser_pref=browser_name,
+            use_spawn_and_attach=False,
         )
         result = gsc_audit.scan_session_cookies(sid, driver=driver)
         return jsonify({"status": "refreshed", **result})

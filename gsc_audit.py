@@ -418,6 +418,7 @@ def launch_session_browser(session_id, browser_pref="edge", log_fn=None):
         profile_dir, proxy=None, headless=False,
         country="us", extra_extensions=[],
         logger=log_fn, browser_pref=browser_pref,
+        use_spawn_and_attach=False,
     )
     driver.get("https://accounts.google.com/")
     return driver
@@ -522,6 +523,7 @@ def capture_gsc_with_session(session_id, property_url, email, out_dir,
                 profile_dir, proxy=None, headless=headless,
                 country="us", extra_extensions=[],
                 logger=log_fn, browser_pref=browser_pref,
+                use_spawn_and_attach=False,
             )
             driver.get("https://search.google.com/search-console")
             time.sleep(3)
@@ -1157,6 +1159,7 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
                 profile_dir, proxy=None, headless=headless,
                 country="us", extra_extensions=[],
                 logger=log_fn, browser_pref=browser_pref,
+                use_spawn_and_attach=False,
             )
             # Override the download-block every driver this app builds has by
             # default (engine._block_downloads) - only for this session, only
@@ -1408,6 +1411,7 @@ def request_indexing_via_session(session_id, property_url, email, urls,
             profile_dir, proxy=None, headless=False,
             country="us", extra_extensions=[],
             logger=log_fn, browser_pref=browser_pref,
+            use_spawn_and_attach=False,
         )
         driver.get("https://search.google.com/search-console")
         time.sleep(3)
@@ -1698,6 +1702,7 @@ def bulk_add_owner(session_id, property_urls, new_user_email, browser_pref="edge
             profile_dir, proxy=None, headless=False,
             country="us", extra_extensions=[],
             logger=log_fn, browser_pref=browser_pref,
+            use_spawn_and_attach=False,
         )
         driver.get("https://search.google.com/search-console")
         time.sleep(3)
