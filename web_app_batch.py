@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.99"
+APP_VERSION = "4.12.100"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5074,12 +5074,12 @@ def api_performance_download():
 # so unlike GEO/On-Page this runs synchronously in the request instead of a
 # background job + polling.
 #
-# Kept deliberately tight (5/request, 500/day/user) since this shares one
-# Google Ads developer token + manager account across every installed copy
-# of the app - a single heavy user could otherwise burn through Google's
-# dynamic rate limiting and degrade/lock the account for everyone else.
+# Capped (50/request, 500/day/user) since this shares one Google Ads
+# developer token + manager account across every installed copy of the app -
+# a single heavy user could otherwise burn through Google's dynamic rate
+# limiting and degrade/lock the account for everyone else.
 # --------------------------------------------------------------------------- #
-MAX_KEYWORDS_PER_SEARCH = 5
+MAX_KEYWORDS_PER_SEARCH = 50
 KEYWORDVOLUME_DAILY_LIMIT = 500
 KEYWORDVOLUME_USAGE_FILE = os.path.join(DATA_DIR, "keywordvolume_usage.json")
 _kwvol_usage_lock = threading.Lock()
