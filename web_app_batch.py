@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.12.98"
+APP_VERSION = "4.12.99"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5073,8 +5073,69 @@ def api_performance_download():
 # separate server-side role gate. Google Ads calls are fast (a few seconds),
 # so unlike GEO/On-Page this runs synchronously in the request instead of a
 # background job + polling.
+#
+# Kept deliberately tight (5/request, 500/day/user) since this shares one
+# Google Ads developer token + manager account across every installed copy
+# of the app - a single heavy user could otherwise burn through Google's
+# dynamic rate limiting and degrade/lock the account for everyone else.
 # --------------------------------------------------------------------------- #
-MAX_KEYWORDS_PER_SEARCH = 50
+MAX_KEYWORDS_PER_SEARCH = 5
+KEYWORDVOLUME_DAILY_LIMIT = 500
+KEYWORDVOLUME_USAGE_FILE = os.path.join(DATA_DIR, "keywordvolume_usage.json")
+_kwvol_usage_lock = threading.Lock()
+
+
+def _keywordvolume_check_and_reserve(user, n):
+    """Enforces the per-user daily cap. Tracked locally (not server-side,
+    unlike Submit for Indexing's VPS-backed quota) since there's no shared
+    backend for this tool - just a small JSON file keyed by user email +
+    today's date, reset automatically once the date rolls over. Returns
+    (ok, used, remaining) - only actually increments the counter when ok is
+    True, so a rejected request never costs quota."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    with _kwvol_usage_lock:
+        try:
+            with open(KEYWORDVOLUME_USAGE_FILE, "r", encoding="utf-8") as f:
+                usage = json.load(f)
+        except Exception:
+            usage = {}
+        entry = usage.get(user) or {}
+        if entry.get("date") != today:
+            entry = {"date": today, "count": 0}
+        used = entry.get("count", 0)
+        if used + n > KEYWORDVOLUME_DAILY_LIMIT:
+            return False, used, max(0, KEYWORDVOLUME_DAILY_LIMIT - used)
+        entry["count"] = used + n
+        usage[user] = entry
+        try:
+            with open(KEYWORDVOLUME_USAGE_FILE, "w", encoding="utf-8") as f:
+                json.dump(usage, f)
+        except Exception:
+            pass
+        return True, entry["count"], KEYWORDVOLUME_DAILY_LIMIT - entry["count"]
+
+
+def _keywordvolume_refund(user, n):
+    """Gives back reserved quota when the actual API call fails after
+    reservation (bad config, network error, etc.) - a failed lookup
+    shouldn't cost the user part of their daily allowance."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    with _kwvol_usage_lock:
+        try:
+            with open(KEYWORDVOLUME_USAGE_FILE, "r", encoding="utf-8") as f:
+                usage = json.load(f)
+        except Exception:
+            return
+        entry = usage.get(user) or {}
+        if entry.get("date") != today:
+            return
+        entry["count"] = max(0, entry.get("count", 0) - n)
+        usage[user] = entry
+        try:
+            with open(KEYWORDVOLUME_USAGE_FILE, "w", encoding="utf-8") as f:
+                json.dump(usage, f)
+        except Exception:
+            pass
 
 
 @app.route("/api/keywordvolume/languages")
@@ -5118,12 +5179,21 @@ def api_keywordvolume_search():
     language_name = data.get("language") or "English"
     language_resource = google_ads_keywords.LANGUAGE_CONSTANTS.get(
         language_name, google_ads_keywords.LANGUAGE_CONSTANTS["English"])
+    auth_result = auth.check_saved_auth()
+    user = (auth_result.get("email") or "").strip().lower()
+    if not user:
+        return jsonify({"error": "Not logged in - log in to the app first."}), 400
+    ok, used, remaining = _keywordvolume_check_and_reserve(user, len(keywords))
+    if not ok:
+        return jsonify({"error": f"Daily limit reached ({KEYWORDVOLUME_DAILY_LIMIT} keywords/day) - "
+                                  f"{remaining} left today. Resets at midnight."}), 429
     try:
         config = google_ads_keywords.build_config(CONFIG.get)
         results = google_ads_keywords.get_keyword_historical_metrics(
             keywords, geo_resource_names, language_resource, config)
-        activity(f"Keyword search volume checked ({len(keywords)} keyword(s))")
-        return jsonify({"results": results})
+        activity(f"Keyword search volume checked ({len(keywords)} keyword(s), "
+                 f"{remaining} left today)")
+        return jsonify({"results": results, "daily_remaining": remaining})
     except google_ads_keywords.GoogleAdsConfigError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
@@ -5811,7 +5881,18 @@ def _run_index_coverage(domain, email):
             raise RuntimeError(result["error"])
         reason_urls = result.get("reason_urls") or {}
         stated_counts = result.get("stated_counts") or {}
-        indexed_urls = result.get("indexed_urls") or []
+        # _scrape_drilldown_urls() returns {"url", "last_crawled"} dicts (same
+        # shape used for every reason's URL list) - reason_urls' consumer
+        # (process_reason) already unwraps that shape, but the sitemap merge
+        # just below treats its pool as plain URL strings and feeds it
+        # straight into dict.fromkeys() for deduping. Dicts aren't hashable,
+        # so unwrapping here (confirmed root cause of a real "unhashable
+        # type: 'dict'" crash right at that merge) is required before this
+        # list can be combined with sitemap_urls.
+        indexed_urls_raw = result.get("indexed_urls") or []
+        indexed_urls = [item.get("url") if isinstance(item, dict) else item
+                        for item in indexed_urls_raw]
+        indexed_urls = [u for u in indexed_urls if u]
         if not reason_urls:
             raise RuntimeError("No page-indexing reasons were found to export - either every page is "
                                "healthy/indexed, or GSC's UI structure didn't match this tool's "
