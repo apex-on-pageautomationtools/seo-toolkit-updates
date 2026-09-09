@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.0"
+APP_VERSION = "4.13.1"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -250,7 +250,13 @@ DEFAULT_CONFIG = {
     "use_buster": True,
     "manual_fallback": True,
     "max_block_retries": 3,
-    "min_keyword_delay": 5,
+    # Bumped from 5 (2026-09-09, real case: a rank-check run without a
+    # proxy/VPN hit Google's flat per-IP rate-limit 403 - "Your client does
+    # not have permission..." - consistently around keyword #12, every
+    # keyword having hit Google from the exact same exit IP). This alone
+    # doesn't remove the risk of a single-IP run getting rate-limited on a
+    # long batch - see the "connect a VPN" log hint added alongside this.
+    "min_keyword_delay": 7,
     "default_country": "us",
     "default_pages": 5,
 }
@@ -1379,6 +1385,21 @@ def _recover(sess, kind):
     # All retries failed - last resort manual pause
     if CONFIG.get("manual_fallback", True) and not sess.headless:
         bring_browser_to_front()
+        # soft_block/http_403 with no proxy configured means every retry above
+        # (rotate/deep_reset) still went out on the SAME real exit IP - a
+        # confirmed real case (2026-09-09): a rank-check run with no
+        # proxy/VPN hit Google's flat per-IP rate-limit 403 consistently
+        # around keyword #12. Automatic retries alone can't fix that (there's
+        # no different IP to rotate to without one); a VPN is the one thing
+        # that actually changes the exit IP without needing a proxy pool.
+        if kind in ("soft_block", "http_403") and not sess.pool:
+            return _manual_pause(
+                f"Google is rate-limiting/blocking this connection ({kind}) after "
+                f"automatic retries - every retry went out on the same real IP "
+                f"since no proxy/VPN is set for this run. Connect a VPN (or set a "
+                f"proxy in this tool's Proxy field) and click Resume - a different "
+                f"exit IP is the actual fix here, not another retry."
+            )
         return _manual_pause("Automatic recovery failed")
     return False
 
@@ -2323,10 +2344,12 @@ def run_rank_analysis(keywords, domain, country, delay, max_pages, headless, pro
                     # Quick neutral visit in a background tab (opens, loads, closes ~2s)
                     human_visit_neutral_bg(sess.driver, domain, add_log)
                     elapsed = time.time() - t0
-                    # Hard 5s floor so the gap holds even on installs whose saved
-                    # config.json still carries an older (lower) min_keyword_delay;
-                    # a higher admin-configured value or UI delay still wins.
-                    wait = max(0, max(CONFIG.get("min_keyword_delay", 5), delay, 5) + random.uniform(0.5, 2.5) - elapsed)
+                    # Hard 7s floor (bumped from 5, 2026-09-09 - see
+                    # DEFAULT_CONFIG's min_keyword_delay comment) so the gap
+                    # holds even on installs whose saved config.json still
+                    # carries an older (lower) min_keyword_delay; a higher
+                    # admin-configured value or UI delay still wins.
+                    wait = max(0, max(CONFIG.get("min_keyword_delay", 7), delay, 7) + random.uniform(0.5, 2.5) - elapsed)
                     if wait > 0:
                         add_log(f"Waiting {wait:.0f}s before next keyword...")
                         t = 0
