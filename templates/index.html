@@ -3981,6 +3981,7 @@ https://example.com/page-2"></textarea>
                     <th style="padding:6px">Keyword</th>
                     <th style="padding:6px;text-align:right">Avg Monthly Searches</th>
                     <th style="padding:6px">Competition</th>
+                    <th style="padding:6px;text-align:right">Competition Index</th>
                     <th style="padding:6px;text-align:right">Low CPC</th>
                     <th style="padding:6px;text-align:right">High CPC</th>
                   </tr>
@@ -7471,6 +7472,7 @@ https://example.com/page-2"></textarea>
           '<td style="padding:6px">' + esc(r.keyword) + '</td>' +
           '<td style="padding:6px;text-align:right">' + esc(String(r.avg_monthly_searches)) + '</td>' +
           '<td style="padding:6px">' + esc(r.competition || '') + '</td>' +
+          '<td style="padding:6px;text-align:right">' + (r.competition_index != null ? esc(String(r.competition_index)) : '-') + '</td>' +
           '<td style="padding:6px;text-align:right">' + (r.low_cpc != null ? ('$' + r.low_cpc.toFixed(2)) : '-') + '</td>' +
           '<td style="padding:6px;text-align:right">' + (r.high_cpc != null ? ('$' + r.high_cpc.toFixed(2)) : '-') + '</td>' +
           '</tr>'
@@ -7478,8 +7480,8 @@ https://example.com/page-2"></textarea>
       }
       function kvExportCsv() {
         if (!kvLastResults.length) { toast('No results to export'); return; }
-        const rows = [['Keyword', 'Avg Monthly Searches', 'Competition', 'Low CPC', 'High CPC']];
-        kvLastResults.forEach(r => rows.push([r.keyword, r.avg_monthly_searches, r.competition, r.low_cpc != null ? r.low_cpc : '', r.high_cpc != null ? r.high_cpc : '']));
+        const rows = [['Keyword', 'Avg Monthly Searches', 'Competition', 'Competition Index', 'Low CPC', 'High CPC']];
+        kvLastResults.forEach(r => rows.push([r.keyword, r.avg_monthly_searches, r.competition, r.competition_index != null ? r.competition_index : '', r.low_cpc != null ? r.low_cpc : '', r.high_cpc != null ? r.high_cpc : '']));
         const csv = rows.map(row => row.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\n');
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
