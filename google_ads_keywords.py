@@ -173,8 +173,26 @@ def _ads_request(path, body, access_token, config):
             return json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         err_body = e.read().decode("utf-8", "ignore")
+        # The top-level error.message (e.g. "The caller does not have
+        # permission") is a generic gRPC-transcoded string that's the SAME
+        # for many different real causes (account not linked, developer
+        # token downgraded, account suspended, wrong customer_id, etc.) -
+        # confirmed real case where this alone gave zero signal to diagnose
+        # a recurring 403. The actual specific reason lives in
+        # error.details[].errors[].errorCode (e.g. {"authorizationError":
+        # "USER_PERMISSION_DENIED"} or {"authenticationError":
+        # "CUSTOMER_NOT_ENABLED"}) - surface that too whenever present.
         try:
-            msg = json.loads(err_body).get("error", {}).get("message", err_body)
+            err_obj = json.loads(err_body).get("error", {})
+            msg = err_obj.get("message", err_body)
+            codes = []
+            for detail in err_obj.get("details", []):
+                for sub_err in detail.get("errors", []):
+                    code = sub_err.get("errorCode")
+                    if code:
+                        codes.append(", ".join(f"{k}={v}" for k, v in code.items()))
+            if codes:
+                msg = f"{msg} [{'; '.join(codes)}]"
         except Exception:
             msg = err_body
         raise Exception(f"Google Ads API error ({e.code}): {msg}")

@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.2"
+APP_VERSION = "4.13.3"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -3159,11 +3159,36 @@ def _runtime_keys_sync_loop():
     automatically, without anyone needing to click 'Sync Keys'. On a failed
     sync (e.g. a transient network hiccup right after app launch), retries
     again in RUNTIME_KEYS_RETRY_TTL seconds instead of leaving CONFIG's keys
-    stale/empty for the full 15-minute interval."""
+    stale/empty for the full 15-minute interval.
+
+    Repeated failures only ever went to logging.warning() (a server-side log
+    file no one actually looks at) - confirmed real case: one install's
+    CONFIG silently held a wrong google_ads_customer_id for days with zero
+    visible indication that its background sync might be failing. Surface it
+    in-app (the same activity() log "Sync Keys" already uses) once it's
+    clearly not transient, so a stuck sync gets noticed instead of quietly
+    leaving stale credentials in place indefinitely."""
+    consecutive_failures = 0
+    warned = False
     while True:
         email, _pw = auth.get_any_credentials()
         if email:
             ok = _fetch_runtime_keys_now()
+            if ok:
+                if warned:
+                    activity("API key sync recovered - keys are up to date again.")
+                consecutive_failures = 0
+                warned = False
+            else:
+                consecutive_failures += 1
+                # 5 failures at the 60s retry interval = ~5 min of real
+                # trouble, not a one-off network blip - worth surfacing once,
+                # then again every ~15 failures so it doesn't spam the log.
+                if consecutive_failures == 5 or (consecutive_failures % 15 == 0):
+                    activity(f"API key sync has failed {consecutive_failures} time(s) in a row - "
+                             f"this install's API keys may be stale until it recovers. Check your "
+                             f"network, or use Admin > Sync Keys to retry manually.", "error")
+                    warned = True
             time.sleep(RUNTIME_KEYS_TTL if ok else RUNTIME_KEYS_RETRY_TTL)
         else:
             time.sleep(15)
