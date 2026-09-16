@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.5"
+APP_VERSION = "4.13.6"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5221,8 +5221,15 @@ def api_keywordvolume_search():
     if len(keywords) > MAX_KEYWORDS_PER_SEARCH:
         return jsonify({"error": f"Maximum {MAX_KEYWORDS_PER_SEARCH} keywords at a time "
                                   f"({len(keywords)} given)."}), 400
-    geo_resource_names = data.get("geo_target_resource_names") or []
-    if not geo_resource_names:
+    # Accept the richer {resource_name, name} shape (needed to tag each
+    # result with a real location name); fall back to the older
+    # geo_target_resource_names-only shape (bare resource names, no display
+    # name available) for back-compat with any not-yet-updated client.
+    locations = data.get("locations") or []
+    if not locations:
+        locations = [{"resource_name": r, "name": r}
+                     for r in (data.get("geo_target_resource_names") or [])]
+    if not locations:
         return jsonify({"error": "Choose at least one location."}), 400
     language_name = data.get("language") or "English"
     language_resource = google_ads_keywords.LANGUAGE_CONSTANTS.get(
@@ -5231,20 +5238,27 @@ def api_keywordvolume_search():
     user = (auth_result.get("email") or "").strip().lower()
     if not user:
         return jsonify({"error": "Not logged in - log in to the app first."}), 400
-    ok, used, remaining = _keywordvolume_check_and_reserve(user, len(keywords))
+    # One real API call per keyword-chunk PER location now (see
+    # get_keyword_historical_metrics' docstring) - the daily quota has to
+    # reflect that real cost, not just the keyword count.
+    ok, used, remaining = _keywordvolume_check_and_reserve(user, len(keywords) * len(locations))
     if not ok:
         return jsonify({"error": f"Daily limit reached ({KEYWORDVOLUME_DAILY_LIMIT} keywords/day) - "
-                                  f"{remaining} left today. Resets at midnight."}), 429
+                                  f"{remaining} left today. Resets at midnight. ({len(locations)} "
+                                  f"location(s) selected multiplies the cost per keyword.)"}), 429
     try:
         config = google_ads_keywords.build_config(CONFIG.get)
         results = google_ads_keywords.get_keyword_historical_metrics(
-            keywords, geo_resource_names, language_resource, config)
-        activity(f"Keyword search volume checked ({len(keywords)} keyword(s), "
-                 f"{remaining} left today)")
+            keywords, locations, language_resource, config)
+        loc_names = ", ".join(loc.get("name") or loc.get("resource_name", "") for loc in locations)
+        activity(f"Keyword search volume checked ({len(keywords)} keyword(s) in "
+                 f"{loc_names}, {remaining} left today)")
         return jsonify({"results": results, "daily_remaining": remaining})
     except google_ads_keywords.GoogleAdsConfigError as e:
+        _keywordvolume_refund(user, len(keywords) * len(locations))
         return jsonify({"error": str(e)}), 400
     except Exception as e:
+        _keywordvolume_refund(user, len(keywords) * len(locations))
         return jsonify({"error": str(e)}), 500
 
 

@@ -216,40 +216,54 @@ def suggest_geo_target(query_text, config):
     } for s in suggestions]
 
 
-def get_keyword_historical_metrics(keywords, geo_target_resource_names, language_resource_name, config):
+def get_keyword_historical_metrics(keywords, locations, language_resource_name, config):
     """keywords: list of raw keyword strings (tool-wide limit of 50 is
     enforced by the caller; chunked into MAX_KEYWORDS_PER_CALL-sized API
-    calls internally). Returns a list of dicts: keyword, avg_monthly_searches,
+    calls internally). locations: list of {"resource_name", "name"} dicts.
+
+    Calls generateKeywordHistoricalMetrics ONCE PER LOCATION (rather than
+    passing every selected geoTargetConstant into a single call) so each
+    result can be tagged with the specific location it reflects - Google Ads
+    aggregates multiple geoTargetConstants passed together into ONE combined
+    number per keyword with no per-location breakdown in the response, which
+    doesn't answer "which location is this for" once more than one location
+    is selected (real user ask, 2026-09-16). Costs proportionally more API
+    operations (chunks x locations instead of just chunks) - the caller's
+    daily-quota reservation accounts for this.
+
+    Returns a list of dicts: keyword, location, avg_monthly_searches,
     competition, competition_index, low_cpc, high_cpc, monthly_searches."""
     access_token = _get_access_token(config["client_id"], config["client_secret"], config["refresh_token"])
+
+    def _micros_to_currency(v):
+        return (int(v) / 1_000_000) if v else None
+
     all_results = []
-    for i in range(0, len(keywords), MAX_KEYWORDS_PER_CALL):
-        chunk = keywords[i:i + MAX_KEYWORDS_PER_CALL]
-        body = {
-            "keywords": chunk,
-            "keywordPlanNetwork": "GOOGLE_SEARCH",
-            "geoTargetConstants": geo_target_resource_names,
-            "language": language_resource_name,
-        }
-        result = _ads_request(f"customers/{config['customer_id']}:generateKeywordHistoricalMetrics",
-                               body, access_token, config)
-
-        def _micros_to_currency(v):
-            return (int(v) / 1_000_000) if v else None
-
-        for item in result.get("results", []):
-            m = item.get("keywordMetrics", {}) or {}
-            all_results.append({
-                "keyword": item.get("text", ""),
-                "avg_monthly_searches": int(m.get("avgMonthlySearches", 0) or 0),
-                "competition": m.get("competition", "UNSPECIFIED"),
-                "competition_index": m.get("competitionIndex"),
-                "low_cpc": _micros_to_currency(m.get("lowTopOfPageBidMicros")),
-                "high_cpc": _micros_to_currency(m.get("highTopOfPageBidMicros")),
-                "monthly_searches": [
-                    {"year": mv.get("year"), "month": mv.get("month"),
-                     "searches": int(mv.get("monthlySearches", 0) or 0)}
-                    for mv in (m.get("monthlySearchVolumes") or [])
-                ],
-            })
+    for loc in locations:
+        for i in range(0, len(keywords), MAX_KEYWORDS_PER_CALL):
+            chunk = keywords[i:i + MAX_KEYWORDS_PER_CALL]
+            body = {
+                "keywords": chunk,
+                "keywordPlanNetwork": "GOOGLE_SEARCH",
+                "geoTargetConstants": [loc["resource_name"]],
+                "language": language_resource_name,
+            }
+            result = _ads_request(f"customers/{config['customer_id']}:generateKeywordHistoricalMetrics",
+                                   body, access_token, config)
+            for item in result.get("results", []):
+                m = item.get("keywordMetrics", {}) or {}
+                all_results.append({
+                    "keyword": item.get("text", ""),
+                    "location": loc.get("name", ""),
+                    "avg_monthly_searches": int(m.get("avgMonthlySearches", 0) or 0),
+                    "competition": m.get("competition", "UNSPECIFIED"),
+                    "competition_index": m.get("competitionIndex"),
+                    "low_cpc": _micros_to_currency(m.get("lowTopOfPageBidMicros")),
+                    "high_cpc": _micros_to_currency(m.get("highTopOfPageBidMicros")),
+                    "monthly_searches": [
+                        {"year": mv.get("year"), "month": mv.get("month"),
+                         "searches": int(mv.get("monthlySearches", 0) or 0)}
+                        for mv in (m.get("monthlySearchVolumes") or [])
+                    ],
+                })
     return all_results

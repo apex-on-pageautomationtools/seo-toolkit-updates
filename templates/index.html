@@ -3984,6 +3984,7 @@ https://example.com/page-2"></textarea>
                 <thead>
                   <tr style="text-align:left;border-bottom:1px solid var(--border)">
                     <th style="padding:6px">Keyword</th>
+                    <th style="padding:6px">Location</th>
                     <th style="padding:6px;text-align:right">Avg Monthly Searches</th>
                     <th style="padding:6px">Competition</th>
                     <th style="padding:6px;text-align:right">Competition Index</th>
@@ -5881,16 +5882,18 @@ https://example.com/page-2"></textarea>
           if (!kvSelectedGeo.length) { toast('Search for and add at least one location'); return; }
           setButtons('starting', 'keywordvolume');   // instant feedback, before the network round-trip
           const kvT0 = Date.now();
-          kvLog('Requesting search volume for ' + kvKeywords.length + ' keyword(s) across ' + kvSelectedGeo.length + ' location(s) - up to ' + Math.ceil(kvKeywords.length / 10) + ' sequential Google Ads API call(s), can take a while.');
+          kvLog('Requesting search volume for ' + kvKeywords.length + ' keyword(s) across ' + kvSelectedGeo.length + ' location(s) (' + kvSelectedGeo.map(g => g.name).join(', ') + ') - a separate real number per location, up to ' + (Math.ceil(kvKeywords.length / 10) * kvSelectedGeo.length) + ' sequential Google Ads API call(s), can take a while.');
           try {
             // Longer timeout than the geo-suggest lookup - up to 50 keywords chunks
-            // into up to 5 sequential Google Ads API calls server-side, which can
-            // legitimately take a while. The server also enforces a 500
-            // keyword/day per-user cap on top of this 50/request limit, shared
-            // across everyone using the one Google Ads developer token.
+            // into up to 5 sequential Google Ads API calls PER location server-side
+            // (one location combined into one number would hide which location a
+            // number is actually for), which can legitimately take a while. The
+            // server also enforces a 500 keyword/day per-user cap - keywords x
+            // locations - on top of this 50/request limit, shared across everyone
+            // using the one Google Ads developer token.
             const rkv = await fetchWithTimeout('/api/keywordvolume/search', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ keywords: kvKeywords, geo_target_resource_names: kvSelectedGeo.map(g => g.resource_name), language: $('kv-language').value })
+              body: JSON.stringify({ keywords: kvKeywords, locations: kvSelectedGeo.map(g => ({ resource_name: g.resource_name, name: g.name })), language: $('kv-language').value })
             }, 90000);
             const dkv = await rkv.json();
             const kvElapsed = ((Date.now() - kvT0) / 1000).toFixed(1);
@@ -7475,6 +7478,7 @@ https://example.com/page-2"></textarea>
         $('kv-tbody').innerHTML = results.map(r =>
           '<tr style="border-bottom:1px solid var(--border)">' +
           '<td style="padding:6px">' + esc(r.keyword) + '</td>' +
+          '<td style="padding:6px">' + esc(r.location || '') + '</td>' +
           '<td style="padding:6px;text-align:right">' + esc(String(r.avg_monthly_searches)) + '</td>' +
           '<td style="padding:6px">' + esc(r.competition || '') + '</td>' +
           '<td style="padding:6px;text-align:right">' + (r.competition_index != null ? esc(String(r.competition_index)) : '-') + '</td>' +
@@ -7485,8 +7489,8 @@ https://example.com/page-2"></textarea>
       }
       function kvExportCsv() {
         if (!kvLastResults.length) { toast('No results to export'); return; }
-        const rows = [['Keyword', 'Avg Monthly Searches', 'Competition', 'Competition Index', 'Low CPC', 'High CPC']];
-        kvLastResults.forEach(r => rows.push([r.keyword, r.avg_monthly_searches, r.competition, r.competition_index != null ? r.competition_index : '', r.low_cpc != null ? r.low_cpc : '', r.high_cpc != null ? r.high_cpc : '']));
+        const rows = [['Keyword', 'Location', 'Avg Monthly Searches', 'Competition', 'Competition Index', 'Low CPC', 'High CPC']];
+        kvLastResults.forEach(r => rows.push([r.keyword, r.location || '', r.avg_monthly_searches, r.competition, r.competition_index != null ? r.competition_index : '', r.low_cpc != null ? r.low_cpc : '', r.high_cpc != null ? r.high_cpc : '']));
         const csv = rows.map(row => row.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\n');
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
