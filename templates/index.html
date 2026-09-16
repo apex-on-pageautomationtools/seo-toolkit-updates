@@ -1963,17 +1963,17 @@
         </svg>
         <span class="sb-label">Blog Optimization Suggestions</span>
       </button>
-      <!-- Re-hidden 2026-09-15: the Google Ads API access-level system moved
-         to Google Cloud Console (2026-09-10) - real effective access reset
-         to Explorer, which the Keyword Planner services this tool uses do
-         NOT work under (confirmed live: real 403 DEVELOPER_TOKEN_NOT_APPROVED
-         on both the old and new client accounts). Basic access needs OAuth
-         Brand Verification completed first (logo + home page + privacy
-         policy links on an already-authorized domain, e.g. weblinkbuzz.com)
-         - re-show once that's done and Basic is actually granted, not
-         before. Don't remove `hidden` again on assumption alone - confirm
-         with a real search first, per [[feedback_tool_visibility_sync]]. -->
-      <button class="sb-item hidden" id="tab-keywordvolume" data-tip="Keyword Search Volume"
+      <!-- Un-hidden 2026-09-16: Basic access GRANTED on the Google Cloud
+         Console access-level system (OAuth Brand Verification completed via
+         a real homepage + privacy policy on deltaitt.com, a domain fully
+         owned/DNS-controlled here - GitHub Pages was tried first and
+         rejected since Google's brand check explicitly won't accept
+         ownership of a shared third-party subdomain). Confirmed live via a
+         direct API call (bypassing the app UI): real, exact search-volume
+         data returned for 2 test keywords, competition index included, no
+         403 - not range-based/test-tier data. Basic access grants 15,000
+         production ops/day, well above this tool's own 500/day cap. -->
+      <button class="sb-item" id="tab-keywordvolume" data-tip="Keyword Search Volume"
         onclick="switchTab('keywordvolume')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <line x1="18" y1="20" x2="18" y2="10" />
@@ -7996,10 +7996,10 @@ https://example.com/page-2"></textarea>
         { key: 'geo', label: 'GEO / AI Optimization' },
         { key: 'blogopt', label: 'Blog Optimization Suggestions' },
         { key: 'indexing', label: 'Submit for Indexing (by GSC)' },
-        { key: 'performance', label: 'Performance Report' }];
-        // keywordvolume re-hidden 2026-09-15 (Basic access needs Brand
-        // Verification first) - not in this checkbox list until restored,
-        // matches the sidebar tab and seo-toolkit-admin-panel's own list.
+        { key: 'performance', label: 'Performance Report' },
+        { key: 'keywordvolume', label: 'Keyword Search Volume' }];
+        // Un-hidden 2026-09-16 - Basic access confirmed granted, see the
+        // tab-keywordvolume comment above for the full story.
 
       async function admCheckAdmin() {
         try {
