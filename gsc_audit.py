@@ -184,6 +184,25 @@ def oauth_login_selenium(driver, client_id, client_secret, log_fn=None, login_hi
                 current_url = driver.current_url
             except Exception:
                 continue
+            if "oauth_callback" not in current_url or "code=" not in current_url:
+                # driver.current_url (a WebDriver-level property, backed by
+                # CDP under the hood) doesn't reliably reflect a FAILED
+                # navigation's URL on every Chrome/Edge build - confirmed
+                # real case: a real ERR_CONNECTION_REFUSED page visibly
+                # showing the correct oauth_callback?...code=... URL in the
+                # actual address bar left the login stuck for the full
+                # 5-minute wait, on an app version that already had the
+                # multi-window-polling fix. window.location.href is the
+                # page's OWN JS-level view of its URL, which Chromium
+                # preserves accurately on its internal error pages
+                # regardless of how the WebDriver property behaves - a
+                # second, independent way to read the same address bar.
+                try:
+                    js_url = driver.execute_script("return window.location.href;") or ""
+                except Exception:
+                    js_url = ""
+                if "oauth_callback" in js_url and "code=" in js_url:
+                    current_url = js_url
             if "oauth_callback" in current_url and "code=" in current_url:
                 parsed = urllib.parse.urlparse(current_url)
                 qs = urllib.parse.parse_qs(parsed.query)
