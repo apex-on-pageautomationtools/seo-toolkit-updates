@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.8"
+APP_VERSION = "4.13.9"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -3415,8 +3415,23 @@ def api_start():
     proxies = _proxies_from_request(data, country=country)
 
     if vpn_method == "proxy" and not proxies:
-        add_log(f"Fetching free proxies for {country.upper()}...")
-        proxies = engine.fetch_free_proxy_pool(country, count=15, logger=add_log)
+        # No proxy typed for this run - prefer the admin-configured shared
+        # pool (2026-09-19, explicit request: the team shouldn't have to
+        # enter a proxy themselves, just pick "Proxy" as the method) over
+        # scraping random free public proxies, which are much lower quality.
+        # least_recently_used + mark_used keeps this fair across everyone's
+        # independent local installs sharing the same limited pool, instead
+        # of every install picking the same "best" one at once.
+        shared = _shared_proxies()
+        if shared:
+            pick = _least_recently_used(shared)
+            _mark_proxy_used_async(pick)
+            proxies = [pick] + [p for p in shared if p is not pick]
+            add_log(f"Using admin-configured shared proxy: {pick.get('host')}:{pick.get('port')} "
+                    f"({len(shared)} in the shared pool).")
+        else:
+            add_log(f"No admin-configured proxies available - fetching free proxies for {country.upper()}...")
+            proxies = engine.fetch_free_proxy_pool(country, count=15, logger=add_log)
 
     if mode == "ranking" and (not domain or not keywords):
         return jsonify({"error": "Domain and at least one keyword required."}), 400
