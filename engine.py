@@ -1434,11 +1434,11 @@ class ProxyPool:
 # --------------------------------------------------------------------------- #
 def start_local_proxy_relay(proxy, logger=print):
     """Start a tiny local TCP relay on 127.0.0.1 that forwards every connection
-    to the real upstream proxy, injecting Proxy-Authorization itself. The
-    browser is then pointed at THIS local, credential-free proxy via
-    --proxy-server - Chromium never has to answer a real auth challenge, so its
-    native "Sign in to access this site" dialog becomes structurally impossible,
-    not just less likely.
+    to the real upstream proxy (HTTP or SOCKS5, per proxy["type"]), injecting/
+    performing auth itself. The browser is then pointed at THIS local,
+    credential-free proxy via --proxy-server - Chromium never has to answer a
+    real auth challenge, so its native "Sign in to access this site" dialog
+    becomes structurally impossible, not just less likely.
 
     Why this exists instead of relying only on the auto-auth extension: that
     extension needs Chromium to treat its webRequestBlocking listener as
@@ -1450,18 +1450,72 @@ def start_local_proxy_relay(proxy, logger=print):
     ordinary, unauthenticated local proxy, so there's nothing for it to prompt
     about regardless of extension/browser-version behavior.
 
+    For an HTTPS CONNECT tunnel, this never terminates TLS - it just splices
+    raw bytes through the tunnel it opens upstream, so the browser's TLS
+    handshake with the real destination site is completely untouched (no
+    synthetic cert, no MITM-detectable fingerprint the way a decrypting tool
+    like Selenium-Wire would introduce).
+
+    SOCKS5 support (2026-09-19): proxy["type"] was declared in this pool's own
+    docstring and offered as a real option in several tools' proxy pickers,
+    but was silently ignored here - every proxy went through the HTTP-style
+    CONNECT+Proxy-Authorization path regardless of type, which a real SOCKS5
+    server can't parse. Found while reviewing a similar relay from a
+    different internal tool (vijay-w3era/TrafficTool) that already handled
+    both schemes correctly.
+
     Returns the local port to use, or None if proxy has no user/pass (nothing
     to relay - the caller should just use the real proxy directly)."""
     if not (proxy and proxy.get("user") and proxy.get("pass")):
         return None
     import socket
+    import struct
     import threading
     import base64
+    import urllib.parse
 
     upstream_host = proxy["host"]
     upstream_port = int(proxy["port"])
-    token = base64.b64encode(f"{proxy['user']}:{proxy['pass']}".encode()).decode()
+    upstream_scheme = (proxy.get("type") or "http").strip().lower()
+    upstream_user = proxy["user"]
+    upstream_pass = proxy["pass"]
+    token = base64.b64encode(f"{upstream_user}:{upstream_pass}".encode()).decode()
     auth_header = f"Proxy-Authorization: Basic {token}\r\n".encode()
+
+    def _socks5_connect(target_host, target_port):
+        """Raw TCP tunnel to target_host:target_port via a username/password-
+        authenticated SOCKS5 upstream proxy - the proxy.get("type") field was
+        being silently ignored here (confirmed real bug: the UI has offered a
+        SOCKS5 option in several tools' proxy pickers for a while, but every
+        proxy went through the HTTP-style CONNECT+Proxy-Authorization path
+        below regardless of type, which a real SOCKS5 server can't parse)."""
+        s = socket.create_connection((upstream_host, upstream_port), timeout=30)
+        s.sendall(b"\x05\x01\x02")  # ver=5, 1 method offered, method=user/pass
+        resp = s.recv(2)
+        if len(resp) != 2 or resp[1] != 0x02:
+            s.close()
+            raise ConnectionError("SOCKS5 server rejected user/pass auth negotiation")
+        user_b, pass_b = upstream_user.encode(), upstream_pass.encode()
+        s.sendall(b"\x01" + bytes([len(user_b)]) + user_b + bytes([len(pass_b)]) + pass_b)
+        resp = s.recv(2)
+        if len(resp) != 2 or resp[1] != 0x00:
+            s.close()
+            raise ConnectionError("SOCKS5 authentication failed")
+        host_b = target_host.encode()
+        s.sendall(b"\x05\x01\x00\x03" + bytes([len(host_b)]) + host_b + struct.pack(">H", target_port))
+        resp = s.recv(4)
+        if len(resp) < 4 or resp[1] != 0x00:
+            s.close()
+            raise ConnectionError("SOCKS5 CONNECT failed")
+        atyp = resp[3]
+        if atyp == 0x01:
+            s.recv(4 + 2)
+        elif atyp == 0x03:
+            ln = s.recv(1)[0]
+            s.recv(ln + 2)
+        elif atyp == 0x04:
+            s.recv(16 + 2)
+        return s
 
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1502,27 +1556,54 @@ def start_local_proxy_relay(proxy, logger=print):
             # Drop any Proxy-Authorization the client sent (there shouldn't be one,
             # since it never saw real credentials) so ours is the only one forwarded.
             hdr_lines = [l for l in lines[1:] if not l.lower().startswith(b"proxy-authorization:")]
+            is_connect = request_line.startswith(b"CONNECT")
 
-            upstream_sock = socket.create_connection((upstream_host, upstream_port), timeout=30)
-            out = request_line + b"\r\n" + b"\r\n".join(hdr_lines)
-            out += b"\r\n" if hdr_lines else b""
-            out += auth_header + b"\r\n"
-            upstream_sock.sendall(out)
-            if rest:
-                upstream_sock.sendall(rest)
+            if upstream_scheme == "socks5":
+                # SOCKS5 gives a raw TCP tunnel with no HTTP semantics at all -
+                # there's no Proxy-Authorization header to inject, auth happens
+                # entirely inside the SOCKS5 handshake itself (see
+                # _socks5_connect above). Parse the real target out of the
+                # client's own request line instead of an HTTP proxy header.
+                try:
+                    method, target, _ = request_line.decode("latin-1").split(" ", 2)
+                except ValueError:
+                    return
+                if is_connect:
+                    host, _, port_s = target.partition(":")
+                    target_port = int(port_s) if port_s else 443
+                else:
+                    parsed = urllib.parse.urlparse(target)
+                    host, target_port = parsed.hostname, (parsed.port or 80)
+                if not host:
+                    return
+                upstream_sock = _socks5_connect(host, target_port)
+                if is_connect:
+                    client_sock.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                else:
+                    # Not a CONNECT (plain HTTP) - replay the original request
+                    # bytes as-is over the raw tunnel, nothing to inject.
+                    upstream_sock.sendall(head + b"\r\n\r\n" + rest)
+            else:
+                upstream_sock = socket.create_connection((upstream_host, upstream_port), timeout=30)
+                out = request_line + b"\r\n" + b"\r\n".join(hdr_lines)
+                out += b"\r\n" if hdr_lines else b""
+                out += auth_header + b"\r\n"
+                upstream_sock.sendall(out)
+                if rest:
+                    upstream_sock.sendall(rest)
 
-            if request_line.startswith(b"CONNECT"):
-                # Relay the upstream's response headers back to the client first (the
-                # "200 Connection Established" the browser is waiting for) before
-                # switching to raw bidirectional piping for the TLS-tunneled traffic.
-                resp = b""
-                upstream_sock.settimeout(30)
-                while b"\r\n\r\n" not in resp:
-                    chunk = upstream_sock.recv(65536)
-                    if not chunk:
-                        break
-                    resp += chunk
-                client_sock.sendall(resp)
+                if is_connect:
+                    # Relay the upstream's response headers back to the client first (the
+                    # "200 Connection Established" the browser is waiting for) before
+                    # switching to raw bidirectional piping for the TLS-tunneled traffic.
+                    resp = b""
+                    upstream_sock.settimeout(30)
+                    while b"\r\n\r\n" not in resp:
+                        chunk = upstream_sock.recv(65536)
+                        if not chunk:
+                            break
+                        resp += chunk
+                    client_sock.sendall(resp)
 
             client_sock.settimeout(None)
             upstream_sock.settimeout(None)
