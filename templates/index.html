@@ -2331,7 +2331,8 @@
                 <option value="windscribe">Windscribe extension</option>
                 <option value="edge_secure">Edge Secure Network</option>
                 <option value="system" selected>System VPN (your own app) - recommended</option>
-                <option value="proxy">Free proxy (auto-fetched)</option>
+                <option value="proxy_your">Your Proxy (enter below)</option>
+                <option value="proxy_admin">Admin Proxy (shared pool)</option>
               </select>
             </div>
           </div>
@@ -2490,7 +2491,8 @@
               <option value="windscribe">Windscribe extension</option>
               <option value="edge_secure">Edge Secure Network</option>
               <option value="system">System VPN (your own app)</option>
-              <option value="proxy">Free proxy (auto-fetched)</option>
+              <option value="proxy_your">Your Proxy (enter below)</option>
+              <option value="proxy_admin">Admin Proxy (shared pool)</option>
             </select>
           </div>
           <div class="note">Searches Google for <b>site:domain.com/path</b> - indexing is global so no country needed.
@@ -2643,7 +2645,8 @@
                 <option value="windscribe">Windscribe extension</option>
                 <option value="edge_secure">Edge Secure Network</option>
                 <option value="system">System VPN (your own app)</option>
-                <option value="proxy">Free proxy (auto-fetched)</option>
+                <option value="proxy_your">Your Proxy (enter below)</option>
+                <option value="proxy_admin">Admin Proxy (shared pool)</option>
               </select>
             </div>
           </div>
@@ -3450,8 +3453,10 @@ https://example.com/page-2"></textarea>
           <div class="collapse-b open" id="proxy-b">
             <div>
               <div class="pad">
-                <div class="note" style="margin-bottom:14px">Optional. Rotating proxies dramatically cut CAPTCHA. Leave
-                  blank to use your direct connection. Multiple proxies can be saved in <b>Settings</b>.</div>
+                <div class="note" style="margin-bottom:14px">Only used when a tool's VPN method is set to
+                  <b>"Your Proxy"</b>. Rotating proxies dramatically cut CAPTCHA. Don't have your own proxy?
+                  Pick <b>"Admin Proxy"</b> instead in that dropdown to use the shared pool your admin has
+                  already added - nothing to fill in here for that.</div>
                 <div class="row2 field">
                   <div>
                     <label>Type</label>

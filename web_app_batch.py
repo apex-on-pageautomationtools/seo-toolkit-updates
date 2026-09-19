@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.9"
+APP_VERSION = "4.13.10"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -3414,14 +3414,24 @@ def api_start():
         latitude, longitude = engine.CITY_COORDS[city]
     proxies = _proxies_from_request(data, country=country)
 
-    if vpn_method == "proxy" and not proxies:
-        # No proxy typed for this run - prefer the admin-configured shared
-        # pool (2026-09-19, explicit request: the team shouldn't have to
-        # enter a proxy themselves, just pick "Proxy" as the method) over
-        # scraping random free public proxies, which are much lower quality.
-        # least_recently_used + mark_used keeps this fair across everyone's
-        # independent local installs sharing the same limited pool, instead
-        # of every install picking the same "best" one at once.
+    # "proxy" (old, ambiguous single option - 2026-09-19 request: split into two
+    # EXPLICIT choices so a team member always knows which one they picked
+    # instead of one option silently meaning different things depending on
+    # whether they happened to fill in the sidebar's manual Proxy/VPN fields):
+    #   - proxy_your:  use exactly what's filled in under the sidebar's own
+    #     Proxy/VPN section - if it's empty, that's a real user mistake, not
+    #     something to silently paper over by grabbing an admin proxy instead.
+    #   - proxy_admin: ALWAYS use the admin-configured shared pool, ignoring
+    #     the manual fields entirely even if something's filled in there -
+    #     falls back to scraping free public proxies only if the admin
+    #     hasn't added any yet. Old installs still on the plain "proxy"
+    #     value (pre-update) get this same admin-first behavior too.
+    if vpn_method == "proxy_your":
+        if not proxies:
+            return jsonify({"error": "\"Your Proxy\" is selected but nothing is filled in under "
+                                      "Proxy / VPN in the sidebar - enter one there, or switch the "
+                                      "VPN method to \"Admin Proxy\"."}), 400
+    elif vpn_method in ("proxy_admin", "proxy"):
         shared = _shared_proxies()
         if shared:
             pick = _least_recently_used(shared)
