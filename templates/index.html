@@ -2961,8 +2961,12 @@
                   for Manual Action &amp; Security Issues screenshots, and the Submit for Indexing fallback. "Login"
                   refreshes the session even if it's already working.</div>
               </div>
-              <button class="btn btn-tonal" style="font-size:11px;padding:4px 14px;white-space:nowrap"
-                onclick="gscSessionCreate()">+ New Session</button>
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-tonal" id="btn-gsc-refresh-all" style="font-size:11px;padding:4px 14px;white-space:nowrap"
+                  onclick="gscSessionsRefreshAll()">Refresh All</button>
+                <button class="btn btn-tonal" style="font-size:11px;padding:4px 14px;white-space:nowrap"
+                  onclick="gscSessionCreate()">+ New Session</button>
+              </div>
             </div>
             <div id="gsc-sessions-list" style="font-size:12px;color:var(--text-3)">Loading...</div>
           </div>
@@ -7768,6 +7772,35 @@ https://example.com/page-2"></textarea>
           gscSessionsLoad();
         } catch (e) { toast('Refresh failed', 'err'); }
       }
+      async function gscSessionsRefreshAll() {
+        // Only sessions that have logged in at least once - a session that's
+        // never been logged into has no cookies to check, "Login" is the only
+        // thing that makes sense for it. Runs sequentially (not in parallel) -
+        // each refresh launches a real headless browser against that
+        // session's own profile, and several at once would compete for
+        // resources for no benefit (checks are per-account, not fast).
+        const targets = (window._gscSessions || []).filter(s => s.last_login);
+        if (!targets.length) { toast('No sessions with a previous login to check'); return; }
+        const btn = $('btn-gsc-refresh-all');
+        if (btn) { btn.disabled = true; }
+        let stillWorking = 0;
+        for (let i = 0; i < targets.length; i++) {
+          const s = targets[i];
+          toast(`Checking ${i + 1}/${targets.length}: ${s.label || s.id}...`);
+          try {
+            const r = await fetch('/api/gsc/sessions/' + s.id + '/refresh', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ browser: $('s-browser') ? $('s-browser').value : 'edge' })
+            });
+            const d = await r.json();
+            if (d.accounts && d.accounts.length) stillWorking++;
+          } catch (e) { /* one failed check shouldn't stop the rest */ }
+        }
+        if (btn) { btn.disabled = false; }
+        toast(`Checked ${targets.length} session(s) - ${stillWorking} still working, `
+          + `${targets.length - stillWorking} need Login`, stillWorking < targets.length ? 'warn' : undefined);
+        gscSessionsLoad();
+      }
       async function gscSessionRemove(sid) {
         if (!confirm('Remove this session and all its cookies?')) return;
         await fetch('/api/gsc/sessions/' + sid + '/remove', { method: 'POST' });
@@ -8908,13 +8941,36 @@ https://example.com/page-2"></textarea>
         try {
           const r = await (await fetch('/api/gsc/domain-check?domain=' + encodeURIComponent(domain))).json();
           if (r.found) {
-            const connected = r.email && (window._gscAccounts || []).includes(String(r.email).toLowerCase());
+            const emailLower = String(r.email || '').toLowerCase();
+            const hasAccount = r.email && (window._gscAccounts || []).includes(emailLower);
+            // The report's actual pre-flight gate (since 4.13.11) checks the Browser
+            // Session, not just the OAuth account - an account can be OAuth-connected
+            // (API data works) with no matching session, or a session that's never
+            // been logged in / gone stale, and either way the report will refuse to
+            // start over the SESSION specifically. Reflect that here instead of only
+            // ever mentioning the OAuth account, which can look "connected" while the
+            // actual blocker is the session.
+            const session = (window._gscSessions || []).find(s =>
+              (s.accounts || []).some(a => a.toLowerCase() === emailLower));
+            const hasSession = !!(session && session.last_login);
+            const connected = hasAccount && hasSession;
             info.style.display = 'block';
             info.style.background = 'var(--md-surface-variant, #e8f5e9)';
             info.style.color = 'var(--md-on-surface, #1b5e20)';
+            let statusHtml;
+            if (connected) {
+              statusHtml = '<br><span style="opacity:.85">✓ selected automatically for this domain</span>';
+            } else if (hasAccount) {
+              statusHtml = '<br><span style="color:#b71c1c">Account in Browser Session not connected - go to '
+                + '<a href="#" onclick="switchTab(\'gscaccounts\');return false;" style="color:inherit;text-decoration:underline">'
+                + 'Google Accounts (GSC-GA4)</a> and click Login on its session (or + New Session if it has none).</span>';
+            } else {
+              statusHtml = '<br><span style="color:#b71c1c">Not connected yet - go to '
+                + '<a href="#" onclick="switchTab(\'gscaccounts\');return false;" style="color:inherit;text-decoration:underline">'
+                + 'Google Accounts (GSC-GA4)</a> and click "+ Connect account" (it\'ll prefill this email) to sign in.</span>';
+            }
             info.innerHTML = '<b>' + esc(domain) + '</b><br>Account: <b>' + esc(r.email) + '</b><br>Access: <b>' + esc(r.accessLevel) + '</b>'
-              + (connected ? '<br><span style="opacity:.85">✓ selected automatically for this domain</span>'
-                : '<br><span style="color:#b71c1c">Not connected yet - go to the <a href="#" onclick="switchTab(\'gscaccounts\');return false;" style="color:inherit;text-decoration:underline">Google Accounts</a> tab and click "+ Connect account" (it\'ll prefill this email) to sign in.</span>');
+              + statusHtml;
             // Auto-use the account that owns this domain (no manual pick needed)
             if (connected && _gscEmail !== r.email) { gscSelectAccount(r.email); }
             // Remember which specific email still needs connecting, so "+ Connect
@@ -8942,13 +8998,31 @@ https://example.com/page-2"></textarea>
         try {
           const r = await (await fetch('/api/gsc/domain-check?domain=' + encodeURIComponent(domain))).json();
           if (r.found) {
-            const connected = r.email && (window._gscAccounts || []).includes(String(r.email).toLowerCase());
+            const emailLower = String(r.email || '').toLowerCase();
+            const hasAccount = r.email && (window._gscAccounts || []).includes(emailLower);
+            const session = (window._gscSessions || []).find(s =>
+              (s.accounts || []).some(a => a.toLowerCase() === emailLower));
+            const hasSession = !!(session && session.last_login);
+            const connected = hasAccount && hasSession;
             info.style.display = 'block';
             info.style.background = 'var(--md-surface-variant, #e8f5e9)';
             info.style.color = 'var(--md-on-surface, #1b5e20)';
+            let statusHtml;
+            if (connected) {
+              statusHtml = '<br><span style="opacity:.85">✓ selected automatically for this domain</span>';
+            } else if (hasAccount) {
+              statusHtml = '<br><span style="color:#b71c1c">Account in Browser Session not connected - go to '
+                + '<a href="#" onclick="switchTab(\'gscaccounts\');return false;" style="color:inherit;text-decoration:underline">'
+                + 'Google Accounts (GSC-GA4)</a> and click Login on its session (or + New Session if it has none), '
+                + 'or use the manual upload option below.</span>';
+            } else {
+              statusHtml = '<br><span style="color:#b71c1c">Not connected yet - go to '
+                + '<a href="#" onclick="switchTab(\'gscaccounts\');return false;" style="color:inherit;text-decoration:underline">'
+                + 'Google Accounts (GSC-GA4)</a> and click "+ Connect account" (it\'ll prefill this email) to sign in, '
+                + 'or use the manual upload option below.</span>';
+            }
             info.innerHTML = '<b>' + esc(domain) + '</b><br>Account: <b>' + esc(r.email) + '</b><br>Access: <b>' + esc(r.accessLevel) + '</b>'
-              + (connected ? '<br><span style="opacity:.85">✓ selected automatically for this domain</span>'
-                : '<br><span style="color:#b71c1c">Not connected yet - go to the <a href="#" onclick="switchTab(\'gscaccounts\');return false;" style="color:inherit;text-decoration:underline">Google Accounts</a> tab and click "+ Connect account" (it\'ll prefill this email) to sign in, or use the manual upload option below.</span>');
+              + statusHtml;
             _icEmail = connected ? r.email : '';
             window._gscConnectHint = connected ? '' : (r.email || '');
           } else {
