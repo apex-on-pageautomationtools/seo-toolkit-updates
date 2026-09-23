@@ -590,6 +590,60 @@ def capture_gsc_with_session(session_id, property_url, email, out_dir,
         lock.release()
 
 
+def verify_session_login(session_id, browser_pref="edge", log_fn=None):
+    """Quick pre-flight check: is this session's Google login actually still
+    valid? Same headless-then-visible-retry bounce check capture_gsc_with_session
+    uses per-screenshot, but standalone and cheap (no screenshot capture) so a
+    caller can fail fast BEFORE running a full audit, instead of discovering a
+    dead session only after ~70s of API/inspection work plus 5 separate
+    "bounced to sign-in" screenshot attempts (confirmed real case, 2026-09-23:
+    every one of sitemap/manual/perf/security/removals bounced individually
+    for the same expired session, each one re-confirming the same fact).
+    Returns True if logged in, False if the session needs re-login."""
+    if log_fn is None:
+        log_fn = print
+    import engine
+    profile_dir = os.path.join(_sessions_dir(), session_id, "chrome_profile")
+
+    def _check(headless):
+        driver = None
+        try:
+            driver = engine.build_driver(
+                profile_dir, proxy=None, headless=headless,
+                country="us", extra_extensions=[],
+                logger=log_fn, browser_pref=browser_pref,
+                use_spawn_and_attach=False,
+            )
+            driver.get("https://search.google.com/search-console")
+            time.sleep(3)
+            cur = (driver.current_url or "").lower()
+            return not ("accounts.google.com" in cur or "/signin" in cur or "servicelogin" in cur)
+        except Exception as e:
+            log_fn(f"  Session verify error ({'headless' if headless else 'visible'}): {e}")
+            return False
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+
+    lock = _profile_lock(profile_dir)
+    if not lock.acquire(timeout=60):
+        # Another capture/refresh is actively using this exact profile right
+        # now - treat as "can't verify, but don't block the run over it"
+        # rather than falsely reporting a dead session.
+        log_fn("  Could not verify session (busy with another capture) - proceeding anyway.")
+        return True
+    try:
+        if _check(headless=True):
+            return True
+        log_fn("  Headless session check bounced to login - retrying in a visible window...")
+        return _check(headless=False)
+    finally:
+        lock.release()
+
+
 # ---------------------------------------------------------------------------
 # Index Coverage report - the Page Indexing report's per-reason URL lists
 # aren't exposed by the official Search Console API at all (a real,

@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.10"
+APP_VERSION = "4.13.11"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5865,6 +5865,22 @@ def api_gsc_start():
     fmt = data.get("format", "james")
     headless = data.get("headless", True)
     browser_name = data.get("browser", "edge")
+
+    # Fail fast with a clear, actionable error if this account's browser
+    # session isn't actually logged in, instead of running the full ~70s of
+    # API/inspection work first and only then discovering it via 5 separate
+    # buried "bounced to sign-in" log warnings during screenshot capture
+    # (confirmed real case, 2026-09-23, explicit request: "should show error
+    # for session login if not connected before starting the report").
+    session = gsc_audit.find_session_for_email(email)
+    if not session:
+        return jsonify({"error": f"No browser session found for {email} - connect it in the "
+                                  f"Google Accounts tab first (Login), then try again."}), 400
+    if not gsc_audit.verify_session_login(session["id"], browser_pref=browser_name):
+        return jsonify({"error": f"The browser session for {email} is signed out - go to the "
+                                  f"Google Accounts tab and click Login/Refresh on it, then try again. "
+                                  f"(The audit's API data doesn't need this, but the Manual Actions/"
+                                  f"Security/Sitemap screenshots do.)"}), 400
 
     def _gsc_status():
         with gsc_lock:
