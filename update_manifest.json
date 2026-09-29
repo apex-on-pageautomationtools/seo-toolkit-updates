@@ -1,5 +1,5 @@
 {
-  "version": "4.13.12",
+  "version": "4.13.13",
   "files": [
     {
       "path": "da_checker.py",
@@ -28,12 +28,12 @@
     },
     {
       "path": "google_ads_keywords.py",
-      "hash": "ea36ede585d96d744de4f4088a80ca66da91adc957be8a59624f3451cc69efe0",
+      "hash": "7fb52be98e5820f57150b41d3d1d386646035e10d3b0d3abf40ec2ac221b845a",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/google_ads_keywords.py"
     },
     {
       "path": "web_app_batch.py",
-      "hash": "9382fc95fdf6c634ca6939cfd32b806ca1cb596572a461b5ec1f434bb40aa19c",
+      "hash": "ef4550955930e0ef5693e1e40fb191d3897fcf738149897a49af8a6ed231059c",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {

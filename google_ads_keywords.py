@@ -16,6 +16,7 @@ account, almost always also:
 import contextlib
 import json
 import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -158,6 +159,17 @@ def _get_access_token(client_id, client_secret, refresh_token):
     return tokens["access_token"]
 
 
+# Between-call delay + retry-with-backoff for _ads_request (2026-09-29):
+# confirmed real case - a multi-location search (4.13.6's per-location loop
+# fires one real API call per keyword-chunk PER location, back-to-back with
+# no pause at all) hit a real 429 RESOURCE_EXHAUSTED, while Cloud Console's
+# own "Basic access level operation limit per project" quota showed 0%
+# used - proving this is Google's short-term burst/QPS rate limit, NOT the
+# 15,000/day cap (which resets daily and wasn't the issue here at all).
+_ADS_CALL_DELAY = 0.4
+_ADS_MAX_RETRIES = 3
+
+
 def _ads_request(path, body, access_token, config):
     url = f"{BASE_URL}/{path}"
     headers = {
@@ -168,34 +180,46 @@ def _ads_request(path, body, access_token, config):
     if config.get("manager_customer_id"):
         headers["login-customer-id"] = config["manager_customer_id"]
     req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
-    try:
-        with _force_ipv4(), urllib.request.urlopen(req, timeout=40) as r:
-            return json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode("utf-8", "ignore")
-        # The top-level error.message (e.g. "The caller does not have
-        # permission") is a generic gRPC-transcoded string that's the SAME
-        # for many different real causes (account not linked, developer
-        # token downgraded, account suspended, wrong customer_id, etc.) -
-        # confirmed real case where this alone gave zero signal to diagnose
-        # a recurring 403. The actual specific reason lives in
-        # error.details[].errors[].errorCode (e.g. {"authorizationError":
-        # "USER_PERMISSION_DENIED"} or {"authenticationError":
-        # "CUSTOMER_NOT_ENABLED"}) - surface that too whenever present.
+    for attempt in range(1, _ADS_MAX_RETRIES + 2):  # +1 normal attempt, then retries
         try:
-            err_obj = json.loads(err_body).get("error", {})
-            msg = err_obj.get("message", err_body)
-            codes = []
-            for detail in err_obj.get("details", []):
-                for sub_err in detail.get("errors", []):
-                    code = sub_err.get("errorCode")
-                    if code:
-                        codes.append(", ".join(f"{k}={v}" for k, v in code.items()))
-            if codes:
-                msg = f"{msg} [{'; '.join(codes)}]"
-        except Exception:
-            msg = err_body
-        raise Exception(f"Google Ads API error ({e.code}): {msg}")
+            with _force_ipv4(), urllib.request.urlopen(req, timeout=40) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", "ignore")
+            # The top-level error.message (e.g. "The caller does not have
+            # permission") is a generic gRPC-transcoded string that's the SAME
+            # for many different real causes (account not linked, developer
+            # token downgraded, account suspended, wrong customer_id, etc.) -
+            # confirmed real case where this alone gave zero signal to diagnose
+            # a recurring 403. The actual specific reason lives in
+            # error.details[].errors[].errorCode (e.g. {"authorizationError":
+            # "USER_PERMISSION_DENIED"} or {"authenticationError":
+            # "CUSTOMER_NOT_ENABLED"}) - surface that too whenever present.
+            try:
+                err_obj = json.loads(err_body).get("error", {})
+                msg = err_obj.get("message", err_body)
+                codes = []
+                for detail in err_obj.get("details", []):
+                    for sub_err in detail.get("errors", []):
+                        code = sub_err.get("errorCode")
+                        if code:
+                            codes.append(", ".join(f"{k}={v}" for k, v in code.items()))
+                if codes:
+                    msg = f"{msg} [{'; '.join(codes)}]"
+            except Exception:
+                codes = []
+                msg = err_body
+            # A 429 with RESOURCE_EXHAUSTED is very likely the SHORT-TERM
+            # burst limit (not the daily quota, which resets at midnight
+            # regardless of retrying) - worth a few backed-off retries before
+            # giving up, since it often clears within seconds.
+            is_burst = e.code == 429 and any("RESOURCE_EXHAUSTED" in c for c in codes)
+            if is_burst and attempt <= _ADS_MAX_RETRIES:
+                time.sleep(2 ** attempt)  # 2s, 4s, 8s
+                continue
+            raise Exception(f"Google Ads API error ({e.code}): {msg}")
+        finally:
+            time.sleep(_ADS_CALL_DELAY)  # space out consecutive calls, burst-limit or not
 
 
 def suggest_geo_target(query_text, config):
