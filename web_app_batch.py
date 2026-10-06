@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.17"
+APP_VERSION = "4.13.18"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4406,7 +4406,7 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
         auth_headers = {"User-Agent": "Mozilla/5.0 SEOToolkitPro",
                          "Accept": "application/json",
                          "Authorization": f"LOW {access_key}:{secret_key}"}
-        auth_succeeded = False
+        auth_got_job = False
         for proxy in attempts:
             try:
                 kwargs = {}
@@ -4446,7 +4446,7 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
                             f", content-type: {r.headers.get('content-type', '?')}")
                          + ") - the archive.org API key may be invalid/expired.")
                     continue
-                auth_succeeded = True
+                auth_got_job = True
                 status_url = f"https://web.archive.org/save/status/{job_id}"
                 for _ in range(15):   # ~30s max wait, matches this attempt's own timeout budget
                     time.sleep(2)
@@ -4463,22 +4463,34 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
                             return f"https://web.archive.org/web/{ts}/{original}"
                         break
                     if st == "error":
+                        # Confirmed real case (2026-10-06): a job that got a real
+                        # job_id (so auth itself is fine) can still fail or never
+                        # resolve within the poll window - this used to be
+                        # completely silent AND skipped the anonymous fallback
+                        # below (a bug: reaching this point at all means no job
+                        # ever actually succeeded, since success returns
+                        # immediately above - there was never a real reason to
+                        # withhold the fallback once a job_id was obtained).
+                        _log(f"  SPN2 job {job_id} failed: {sj.get('status_ext') or sj.get('message') or 'error'}")
                         break
                     # st == "pending" -> keep polling
+                else:
+                    _log(f"  SPN2 job {job_id} still pending after ~30s - giving up on this attempt.")
             except Exception:
                 continue
-        # Every attempt failed to even get a job_id (not just failed to
-        # complete) - the API key itself is almost certainly broken, not a
-        # transient issue. Fall back to the anonymous endpoint below rather
-        # than giving up outright - confirmed live (2026-10-06) it still
-        # works fine and returns a genuine fresh capture, just without
-        # SPN2's "definitely fresh, never an existing snapshot" guarantee.
-        if not auth_succeeded:
+        # No job ever reached "success" (that returns immediately above) -
+        # fall back to the anonymous endpoint rather than giving up outright,
+        # regardless of whether a job_id was ever obtained. Confirmed live
+        # (2026-10-06) the anonymous endpoint works fine and returns a
+        # genuine fresh capture, just without SPN2's "definitely fresh,
+        # never an existing snapshot" guarantee.
+        if not auth_got_job:
             _log("  Authenticated SPN2 never returned a job_id on any attempt - "
                  "falling back to the anonymous endpoint (check the archive.org "
                  "API key in Settings if this keeps happening).")
         else:
-            return None
+            _log("  Authenticated SPN2 got a job but it never succeeded - "
+                 "falling back to the anonymous endpoint.")
 
     save_url = "https://web.archive.org/save/" + url
     for i, proxy in enumerate(attempts):
