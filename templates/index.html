@@ -6049,8 +6049,16 @@ https://example.com/page-2"></textarea>
         }
       }
       const _mkbody = m => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: m }) });
-      async function doPause() { if (mode === 'crawl') { crawlPause(); return; } const m = mode; await fetch('/api/pause', _mkbody(m)); setButtons('paused', m); }
-      async function doResume() { if (mode === 'crawl') { crawlResume(); return; } const m = mode; await fetch('/api/resume', _mkbody(m)); setButtons('running', m); showAlert(false); }
+      async function doPause() {
+        if (mode === 'crawl') { crawlPause(); return; }
+        if (mode === 'wayback') { await wbPause(); return; }
+        const m = mode; await fetch('/api/pause', _mkbody(m)); setButtons('paused', m);
+      }
+      async function doResume() {
+        if (mode === 'crawl') { crawlResume(); return; }
+        if (mode === 'wayback') { await wbResume(); return; }
+        const m = mode; await fetch('/api/resume', _mkbody(m)); setButtons('running', m); showAlert(false);
+      }
       async function doStop() {
         if (mode === 'crawl') { crawlStop(); return; }
         if (mode === 'onpage') { await opStop(); return; }
@@ -7580,6 +7588,9 @@ https://example.com/page-2"></textarea>
             $('wb-progress').textContent = 'Stopped'; $('wb-progress').className = 'tag t-unknown';
             finishToolProgress('wb', false);
             setButtons('stopped', 'wayback'); stopWbPoll(); stopReportTimer('wb');
+          } else if (d.status === 'paused') {
+            $('wb-progress').textContent = 'Paused'; $('wb-progress').className = 'tag t-unknown';
+            setButtons('paused', 'wayback');
           } else {
             $('wb-progress').textContent = d.progress || 'Running...'; $('wb-progress').className = 'tag t-yes';
             setToolProgress('wb', d.progress);
@@ -7587,6 +7598,8 @@ https://example.com/page-2"></textarea>
         } catch (e) { }
       }
       async function wbStop() { await fetch('/api/wayback/stop', { method: 'POST' }); toast('Stopping...'); }
+      async function wbPause() { await fetch('/api/wayback/pause', { method: 'POST' }); setButtons('paused', 'wayback'); toast('Pausing after the current URL...'); }
+      async function wbResume() { await fetch('/api/wayback/resume', { method: 'POST' }); setButtons('running', 'wayback'); toast('Resumed'); }
       function wbExport() { window.location.href = '/api/wayback/export'; }
       function wbReset() {
         $('empty-wayback').style.display = 'block';

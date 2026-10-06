@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.14"
+APP_VERSION = "4.13.15"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4330,6 +4330,17 @@ def api_onpage_download():
 wayback_state = {"status": "idle", "log": [], "results": [], "error_msg": "", "progress": ""}
 wayback_lock = threading.Lock()
 wayback_stop = threading.Event()
+# Wayback runs on its own entirely separate state machine from the shared
+# Rank Checker-family `state`/`pause_event` globals - "Stop" already has its
+# own dedicated /api/wayback/stop route for exactly this reason, but "Pause"
+# never got the same treatment (confirmed real case, 2026-10-06): clicking
+# Pause called the generic /api/pause, which only touches the UNRELATED
+# shared pause_event that nothing in _run_wayback_submit ever reads, so the
+# submission loop kept running untouched while the UI misleadingly showed
+# "paused" anyway. Set (not cleared) by default = running, matching the
+# shared pause_event's own convention.
+wayback_pause_event = threading.Event()
+wayback_pause_event.set()
 
 
 def _wayback_proxy_url(p):
@@ -4378,6 +4389,7 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
     if access_key and secret_key:
         auth_headers = {"User-Agent": "Mozilla/5.0 SEOToolkitPro",
                          "Authorization": f"LOW {access_key}:{secret_key}"}
+        auth_succeeded = False
         for proxy in attempts:
             try:
                 kwargs = {}
@@ -4400,7 +4412,17 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
                     job = {}
                 job_id = job.get("job_id")
                 if not job_id:
+                    # Confirmed real case (2026-10-06): an invalid/expired API
+                    # key makes archive.org silently ignore the Authorization
+                    # header and serve back its normal public HTML page (200
+                    # OK, content-type text/html) instead of a JSON job - no
+                    # error, no 401, nothing to distinguish it from a genuine
+                    # transient hiccup without logging the actual content-type.
+                    _log(f"  SPN2 authenticated request got no job_id back "
+                         f"(content-type: {r.headers.get('content-type', '?')}) - "
+                         f"the archive.org API key may be invalid/expired.")
                     continue
+                auth_succeeded = True
                 status_url = f"https://web.archive.org/save/status/{job_id}"
                 for _ in range(15):   # ~30s max wait, matches this attempt's own timeout budget
                     time.sleep(2)
@@ -4421,7 +4443,18 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
                     # st == "pending" -> keep polling
             except Exception:
                 continue
-        return None
+        # Every attempt failed to even get a job_id (not just failed to
+        # complete) - the API key itself is almost certainly broken, not a
+        # transient issue. Fall back to the anonymous endpoint below rather
+        # than giving up outright - confirmed live (2026-10-06) it still
+        # works fine and returns a genuine fresh capture, just without
+        # SPN2's "definitely fresh, never an existing snapshot" guarantee.
+        if not auth_succeeded:
+            _log("  Authenticated SPN2 never returned a job_id on any attempt - "
+                 "falling back to the anonymous endpoint (check the archive.org "
+                 "API key in Settings if this keeps happening).")
+        else:
+            return None
 
     save_url = "https://web.archive.org/save/" + url
     for i, proxy in enumerate(attempts):
@@ -4511,6 +4544,7 @@ def _run_wayback_submit(urls, extra_proxy=None):
         wayback_state.update({"status": "running", "log": [], "results": [], "error_msg": "",
                               "progress": "Starting..."})
     wayback_stop.clear()
+    wayback_pause_event.set()  # a prior run's Pause shouldn't carry over and freeze this new one
     activity(f"Wayback submission started for {len(urls)} URL(s)")
 
     def _wblog(msg):
@@ -4524,6 +4558,20 @@ def _run_wayback_submit(urls, extra_proxy=None):
                 _wblog("Stopped by user.")
                 wayback_state["status"] = "stopped"
             return
+        # Checked BETWEEN URLs, same granularity as the stop check above - a
+        # single URL's own submission (proxy attempts + retries) isn't
+        # interrupted mid-flight, same tradeoff the stop check already makes.
+        if not wayback_pause_event.is_set():
+            with wayback_lock:
+                wayback_state["status"] = "paused"
+            wayback_pause_event.wait()
+            if wayback_stop.is_set():
+                with wayback_lock:
+                    _wblog("Stopped by user.")
+                    wayback_state["status"] = "stopped"
+                return
+            with wayback_lock:
+                wayback_state["status"] = "running"
         with wayback_lock:
             _wblog(f"[{i+1}/{len(urls)}] Submitting {u}...")
         archived = _submit_wayback_url(u, extra_proxy=extra_proxy, logger=_wblog)
@@ -4608,7 +4656,26 @@ def api_wayback_status():
 @app.route("/api/wayback/stop", methods=["POST"])
 def api_wayback_stop():
     wayback_stop.set()
+    wayback_pause_event.set()  # unblock a paused run's wait() so it can see the stop
     return jsonify({"status": "stopping"})
+
+
+@app.route("/api/wayback/pause", methods=["POST"])
+def api_wayback_pause():
+    wayback_pause_event.clear()
+    with wayback_lock:
+        if wayback_state["status"] == "running":
+            wayback_state["status"] = "paused"
+    return jsonify({"status": "paused"})
+
+
+@app.route("/api/wayback/resume", methods=["POST"])
+def api_wayback_resume():
+    with wayback_lock:
+        if wayback_state["status"] == "paused":
+            wayback_state["status"] = "running"
+    wayback_pause_event.set()
+    return jsonify({"status": "running"})
 
 
 @app.route("/api/wayback/export")
