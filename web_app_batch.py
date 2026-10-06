@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.16"
+APP_VERSION = "4.13.17"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4349,17 +4349,20 @@ def _wayback_proxy_url(p):
 
 
 def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=None):
-    """Submit `url` to the Wayback Machine's Save Page Now, rotating through a
-    different proxy each attempt (archive.org blocks/limits by IP, so retrying on
-    the SAME IP would just fail the same way). Capped at max_tries so a slow/blocked
-    archive.org can never hang the job - returns None on exhausted retries.
+    """Submit `url` to the Wayback Machine's Save Page Now. Capped at
+    max_tries so a slow/blocked archive.org can never hang the job - returns
+    None on exhausted retries.
+
+    Goes DIRECT (no proxy) by default (2026-10-06 - previously auto-pulled
+    CONFIG["proxies"] + the admin's shared pool unconditionally, which was
+    confirmed broken wholesale - 407 Proxy Authentication Required on every
+    proxy sampled - and silently blocked every submission even though
+    archive.org's anonymous endpoint works fine with no proxy at all).
 
     extra_proxy: a one-off proxy from the sidebar Proxy/VPN fields for THIS
-    run specifically - previously the frontend already sent these fields
-    (every tool's start request includes them via proxyPayload()), but the
-    Wayback route never read them, so a proxy typed in for one retry attempt
-    was silently ignored and only the saved Settings/shared-pool proxies
-    ever got used. Tried FIRST, ahead of the random pool sample below.
+    run specifically, if the user explicitly typed one in - tried first,
+    then direct for the remaining attempts so a bad one-off proxy doesn't
+    fail the whole submission when going direct would have worked.
 
     Uses the authenticated SPN2 API (POST + Authorization: LOW key:secret) when
     an archive.org S3 API key is configured (Admin -> API Keys -
@@ -4379,12 +4382,19 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
                 pass
     access_key = CONFIG.get("archive_org_access_key", "").strip()
     secret_key = CONFIG.get("archive_org_secret_key", "").strip()
-    proxies_pool = list(CONFIG.get("proxies", [])) + _shared_proxies()
-    attempts = (random.sample(proxies_pool, min(max_tries, len(proxies_pool)))
-                if proxies_pool else [None] * max_tries)
-    if extra_proxy:
-        attempts = [extra_proxy] + attempts
-        attempts = attempts[:max(max_tries, 1)]
+    # No longer auto-pulls CONFIG["proxies"] + _shared_proxies() by default
+    # (2026-10-06, explicit request) - the admin's shared pool was confirmed
+    # broken wholesale (407 Proxy Authentication Required on every proxy
+    # sampled, not just one bad entry), which silently blocked every
+    # submission even though archive.org's anonymous endpoint works fine
+    # with a direct connection (confirmed live). Wayback now goes direct by
+    # default; a proxy is only used if the caller explicitly provides one
+    # (the sidebar's own Proxy/VPN fields for this specific run).
+    proxies_pool = []
+    # A caller-provided proxy is tried first, then direct for the remaining
+    # attempts - so a bad one-off proxy doesn't fail the whole submission
+    # when going direct would have worked.
+    attempts = (([extra_proxy] if extra_proxy else []) + [None] * max_tries)[:max_tries]
 
     if access_key and secret_key:
         # Accept: application/json was missing entirely (confirmed real bug,
