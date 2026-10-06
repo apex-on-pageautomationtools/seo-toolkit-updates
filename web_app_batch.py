@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.20"
+APP_VERSION = "4.13.21"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4665,8 +4665,18 @@ def _run_wayback_submit(urls, extra_proxy=None):
             else:
                 _wblog("  -> Failed after retries")
     with wayback_lock:
-        ok = sum(1 for r in wayback_state["results"] if r["status"] == "submitted")
-        _wblog(f"Completed -- {ok} ok, {len(wayback_state['results']) - ok} error(s).")
+        results = wayback_state["results"]
+        fresh = sum(1 for r in results if r["status"] == "submitted")
+        existing = sum(1 for r in results if r["status"] == "existing")
+        failed = sum(1 for r in results if r["status"] == "failed")
+        # "existing" (archive.org already had a recent-enough snapshot, so no
+        # new capture was made) was being lumped in with real failures here -
+        # confirmed real case, 2026-10-06: a run where 5/6 URLs succeeded via
+        # existing-snapshot reuse and only 1 genuinely failed still reported
+        # "0 ok, 6 error(s)", making a mostly-successful run look like a
+        # total failure.
+        _wblog(f"Completed -- {fresh} fresh capture(s), {existing} existing snapshot(s) reused, "
+               f"{failed} failed.")
         wayback_state["status"] = "completed"
 
 
