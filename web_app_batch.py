@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.18"
+APP_VERSION = "4.13.19"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4610,7 +4610,24 @@ def _run_wayback_submit(urls, extra_proxy=None):
                 wayback_state["status"] = "running"
         with wayback_lock:
             _wblog(f"[{i+1}/{len(urls)}] Submitting {u}...")
+        submit_t0 = time.time()
         archived = _submit_wayback_url(u, extra_proxy=extra_proxy, logger=_wblog)
+        # archive.org's authenticated SPN2 is strictly capped at 7 captures/min
+        # per account (confirmed real case, 2026-10-06: a batch of URLs on the
+        # same host hit "crawling this host is paused... they notified us
+        # they are overloaded" after 2 submissions a few seconds apart -
+        # archive.org's own guidance recommends >=9s between requests to stay
+        # safely under that; using 12s for real headroom above the bare
+        # minimum, per explicit request). Only wait out the REMAINDER of that
+        # window - a submission that already took that long (retries,
+        # polling) needs no extra delay.
+        WAYBACK_MIN_GAP = 12
+        remaining = WAYBACK_MIN_GAP - (time.time() - submit_t0)
+        if remaining > 0 and i < len(urls) - 1:
+            slept = 0.0
+            while slept < remaining and not wayback_stop.is_set():
+                time.sleep(min(1.0, remaining - slept))
+                slept += 1.0
         now = datetime.now()
         snapshot_time = _parse_wayback_snapshot_time(archived) if archived else None
         # Within 5 min of the request = a genuinely fresh capture; anything

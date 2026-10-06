@@ -1,5 +1,5 @@
 {
-  "version": "4.13.18",
+  "version": "4.13.19",
   "files": [
     {
       "path": "da_checker.py",
@@ -33,7 +33,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "bbf8209f43d06b02d6715befd9f8ecf8aac2af070554de3802e4b5e3cfe719f7",
+      "hash": "a894479829f04e9a24ac6bff4c67097287b192b409a2670d41640d842aabbc34",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
