@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.19"
+APP_VERSION = "4.13.20"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4552,6 +4552,17 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
         except Exception as e:
             _log(f"  Wayback attempt {i+1}/{len(attempts)} via {proxy_label}: "
                  f"{type(e).__name__}: {e}")
+            # Confirmed real pattern (2026-10-06): a direct connection to
+            # web.archive.org gets a TCP-level refusal (WinError 10061,
+            # "actively refused") for a short window (tens of seconds) after
+            # a burst of rapid attempts, then works again on its own -
+            # consistent with a brief per-IP cooldown rather than a real
+            # outage. A short backoff before the NEXT attempt (instead of
+            # immediately retrying into the same cooldown window) gives it a
+            # real chance to actually help rather than repeating the exact
+            # same failure 3 times in a row.
+            if i < len(attempts) - 1:
+                time.sleep(5)
             continue
     return None
 
