@@ -1230,6 +1230,18 @@
       white-space: nowrap
     }
 
+    /* #wb-progress reuses .tag for its pill look, but its content is a full
+       progress message with a URL embedded ("[2/10] Submitting https://...")
+       - not a short status word like every other .tag use (Idle, Running) -
+       capitalize was wrongly title-casing every letter after a "." or "/" in
+       the URL too (confirmed real case, 2026-10-06: "Https://Example.Com/...").
+       white-space also needs to wrap here since the full message is too long
+       for one line, unlike a real status pill. */
+    #wb-progress {
+      text-transform: none;
+      white-space: normal;
+    }
+
     .geo-chip {
       display: inline-flex;
       align-items: center;
