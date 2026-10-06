@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.15"
+APP_VERSION = "4.13.16"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4387,7 +4387,14 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
         attempts = attempts[:max(max_tries, 1)]
 
     if access_key and secret_key:
+        # Accept: application/json was missing entirely (confirmed real bug,
+        # 2026-10-06, found by comparing against archive.org's own documented
+        # example request) - SPN2 falls back to serving its normal HTML page
+        # for a request that doesn't explicitly ask for JSON, EVEN with a
+        # valid key, which looks identical (200 OK) to an actually-invalid
+        # key - this alone may have been misdiagnosed as a bad key.
         auth_headers = {"User-Agent": "Mozilla/5.0 SEOToolkitPro",
+                         "Accept": "application/json",
                          "Authorization": f"LOW {access_key}:{secret_key}"}
         auth_succeeded = False
         for proxy in attempts:
@@ -4412,15 +4419,22 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
                     job = {}
                 job_id = job.get("job_id")
                 if not job_id:
-                    # Confirmed real case (2026-10-06): an invalid/expired API
-                    # key makes archive.org silently ignore the Authorization
-                    # header and serve back its normal public HTML page (200
-                    # OK, content-type text/html) instead of a JSON job - no
-                    # error, no 401, nothing to distinguish it from a genuine
-                    # transient hiccup without logging the actual content-type.
+                    # Confirmed real case (2026-10-06): without an explicit
+                    # Accept: application/json header (missing until this same
+                    # fix), SPN2 silently served its normal public HTML page
+                    # (200 OK, text/html) for ANY request it didn't like,
+                    # authenticated or not - indistinguishable from a
+                    # transient hiccup. With that header added, a real
+                    # invalid/expired key now comes back as a proper JSON
+                    # error (e.g. 401 "You need to be logged in to use Save
+                    # Page Now.") - surface it directly instead of just
+                    # "no job_id back".
+                    err_detail = job.get("message") or job.get("error") or ""
                     _log(f"  SPN2 authenticated request got no job_id back "
-                         f"(content-type: {r.headers.get('content-type', '?')}) - "
-                         f"the archive.org API key may be invalid/expired.")
+                         f"(HTTP {r.status_code}"
+                         + (f": {err_detail}" if err_detail else
+                            f", content-type: {r.headers.get('content-type', '?')}")
+                         + ") - the archive.org API key may be invalid/expired.")
                     continue
                 auth_succeeded = True
                 status_url = f"https://web.archive.org/save/status/{job_id}"
