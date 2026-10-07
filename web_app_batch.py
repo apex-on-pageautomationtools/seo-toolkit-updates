@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.24"
+APP_VERSION = "4.13.25"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4448,7 +4448,13 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
                     continue
                 auth_got_job = True
                 status_url = f"https://web.archive.org/save/status/{job_id}"
-                for _ in range(15):   # ~30s max wait, matches this attempt's own timeout budget
+                # ~60s max wait (was ~30s) - confirmed real case, 2026-10-07: a
+                # job's own actual completion timestamp (per archive.org) landed
+                # BEFORE we gave up polling it, meaning the capture had already
+                # succeeded (or was about to) right around when the old 30s
+                # window cut off - giving up here throws away a real result and
+                # falls through to a slower/less certain fallback for no reason.
+                for _ in range(30):
                     time.sleep(2)
                     try:
                         sr = http_requests.get(status_url, headers=auth_headers, timeout=timeout, **kwargs)
@@ -4475,7 +4481,7 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
                         break
                     # st == "pending" -> keep polling
                 else:
-                    _log(f"  SPN2 job {job_id} still pending after ~30s - giving up on this attempt.")
+                    _log(f"  SPN2 job {job_id} still pending after ~60s - giving up on this attempt.")
             except Exception:
                 continue
         # No job ever reached "success" (that returns immediately above) -
