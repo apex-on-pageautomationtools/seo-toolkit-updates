@@ -28,7 +28,7 @@ import threading
 import webbrowser
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import (Flask, render_template, request, jsonify, send_file,
                    Response, send_from_directory)
@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.21"
+APP_VERSION = "4.13.22"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4640,7 +4640,21 @@ def _run_wayback_submit(urls, extra_proxy=None):
                 time.sleep(min(1.0, remaining - slept))
                 slept += 1.0
         now = datetime.now()
-        snapshot_time = _parse_wayback_snapshot_time(archived) if archived else None
+        snapshot_time_utc = _parse_wayback_snapshot_time(archived) if archived else None
+        # Confirmed real bug, 2026-10-07: Wayback's own URL timestamp is
+        # always UTC (naive, no tzinfo), but `now` above is naive LOCAL time
+        # (IST here, UTC+5:30) - comparing them directly inflated every
+        # freshness check by the local UTC offset, so a snapshot made at the
+        # EXACT instant of submission could still read as ~5.5 hours old and
+        # get wrongly reported as "existing" instead of a fresh capture.
+        # Convert to local time (via an aware round-trip through UTC) before
+        # comparing OR displaying, so both the freshness check and the
+        # "snapshot_at" shown to the user agree with every other timestamp in
+        # this log, which is already local.
+        snapshot_time = None
+        if snapshot_time_utc:
+            snapshot_time = (snapshot_time_utc.replace(tzinfo=timezone.utc)
+                             .astimezone().replace(tzinfo=None))
         # Within 5 min of the request = a genuinely fresh capture; anything
         # older means archive.org handed back an existing snapshot instead of
         # making a new one - report that honestly rather than as "submitted".
