@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.23"
+APP_VERSION = "4.13.24"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4552,17 +4552,17 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
         except Exception as e:
             _log(f"  Wayback attempt {i+1}/{len(attempts)} via {proxy_label}: "
                  f"{type(e).__name__}: {e}")
-            # Confirmed real pattern (2026-10-06): a direct connection to
+            # Confirmed real pattern (2026-10-06/07): a direct connection to
             # web.archive.org gets a TCP-level refusal (WinError 10061,
-            # "actively refused") for a short window (tens of seconds) after
-            # a burst of rapid attempts, then works again on its own -
-            # consistent with a brief per-IP cooldown rather than a real
-            # outage. A short backoff before the NEXT attempt (instead of
-            # immediately retrying into the same cooldown window) gives it a
-            # real chance to actually help rather than repeating the exact
-            # same failure 3 times in a row.
+            # "actively refused") for a window that's varied from under a
+            # minute to over 2 minutes before clearing on its own -
+            # consistent with a per-IP cooldown rather than a real outage,
+            # but not a fixed duration. Escalating backoff instead of a flat
+            # one (explicit request, 2026-10-07): 30s before the 2nd attempt,
+            # 60s before the 3rd - only actually waited when a retry is
+            # genuinely needed, so a quick success never pays this cost.
             if i < len(attempts) - 1:
-                time.sleep(5)
+                time.sleep(30 if i == 0 else 60)
             continue
     return None
 
