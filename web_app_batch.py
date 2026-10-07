@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.22"
+APP_VERSION = "4.13.23"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4599,46 +4599,13 @@ def _run_wayback_submit(urls, extra_proxy=None):
         if msg.startswith("["):
             wayback_state["progress"] = msg
 
-    for i, u in enumerate(urls):
-        if wayback_stop.is_set():
-            with wayback_lock:
-                _wblog("Stopped by user.")
-                wayback_state["status"] = "stopped"
-            return
-        # Checked BETWEEN URLs, same granularity as the stop check above - a
-        # single URL's own submission (proxy attempts + retries) isn't
-        # interrupted mid-flight, same tradeoff the stop check already makes.
-        if not wayback_pause_event.is_set():
-            with wayback_lock:
-                wayback_state["status"] = "paused"
-            wayback_pause_event.wait()
-            if wayback_stop.is_set():
-                with wayback_lock:
-                    _wblog("Stopped by user.")
-                    wayback_state["status"] = "stopped"
-                return
-            with wayback_lock:
-                wayback_state["status"] = "running"
+    def _attempt_one(u, label, result_idx=None):
+        """Submit one URL and record/update its result. result_idx: if given,
+        UPDATES that existing results[] entry in place (used by the retry
+        pass below) instead of appending a new one. Returns the final status."""
         with wayback_lock:
-            _wblog(f"[{i+1}/{len(urls)}] Submitting {u}...")
-        submit_t0 = time.time()
+            _wblog(f"{label} Submitting {u}...")
         archived = _submit_wayback_url(u, extra_proxy=extra_proxy, logger=_wblog)
-        # archive.org's authenticated SPN2 is strictly capped at 7 captures/min
-        # per account (confirmed real case, 2026-10-06: a batch of URLs on the
-        # same host hit "crawling this host is paused... they notified us
-        # they are overloaded" after 2 submissions a few seconds apart -
-        # archive.org's own guidance recommends >=9s between requests to stay
-        # safely under that; using 12s for real headroom above the bare
-        # minimum, per explicit request). Only wait out the REMAINDER of that
-        # window - a submission that already took that long (retries,
-        # polling) needs no extra delay.
-        WAYBACK_MIN_GAP = 12
-        remaining = WAYBACK_MIN_GAP - (time.time() - submit_t0)
-        if remaining > 0 and i < len(urls) - 1:
-            slept = 0.0
-            while slept < remaining and not wayback_stop.is_set():
-                time.sleep(min(1.0, remaining - slept))
-                slept += 1.0
         now = datetime.now()
         snapshot_time_utc = _parse_wayback_snapshot_time(archived) if archived else None
         # Confirmed real bug, 2026-10-07: Wayback's own URL timestamp is
@@ -4665,11 +4632,14 @@ def _run_wayback_submit(urls, extra_proxy=None):
             status = "existing"
         else:
             status = "failed"
+        result = {"url": u, "archived_url": archived or "", "status": status,
+                 "snapshot_at": snapshot_time.strftime("%Y-%m-%d %H:%M:%S") if snapshot_time else "",
+                 "checked_at": now.strftime("%Y-%m-%d %H:%M:%S")}
         with wayback_lock:
-            wayback_state["results"].append({
-                "url": u, "archived_url": archived or "", "status": status,
-                "snapshot_at": snapshot_time.strftime("%Y-%m-%d %H:%M:%S") if snapshot_time else "",
-                "checked_at": now.strftime("%Y-%m-%d %H:%M:%S")})
+            if result_idx is None:
+                wayback_state["results"].append(result)
+            else:
+                wayback_state["results"][result_idx] = result
             if status == "existing":
                 _wblog(
                     f"  -> Existing snapshot reused (archive.org already had one from "
@@ -4678,6 +4648,86 @@ def _run_wayback_submit(urls, extra_proxy=None):
                 _wblog(f"  -> Archived (new capture): {archived}")
             else:
                 _wblog("  -> Failed after retries")
+        return status
+
+    for i, u in enumerate(urls):
+        if wayback_stop.is_set():
+            with wayback_lock:
+                _wblog("Stopped by user.")
+                wayback_state["status"] = "stopped"
+            return
+        # Checked BETWEEN URLs, same granularity as the stop check above - a
+        # single URL's own submission (proxy attempts + retries) isn't
+        # interrupted mid-flight, same tradeoff the stop check already makes.
+        if not wayback_pause_event.is_set():
+            with wayback_lock:
+                wayback_state["status"] = "paused"
+            wayback_pause_event.wait()
+            if wayback_stop.is_set():
+                with wayback_lock:
+                    _wblog("Stopped by user.")
+                    wayback_state["status"] = "stopped"
+                return
+            with wayback_lock:
+                wayback_state["status"] = "running"
+        submit_t0 = time.time()
+        _attempt_one(u, f"[{i+1}/{len(urls)}]")
+        # archive.org's authenticated SPN2 is strictly capped at 7 captures/min
+        # per account (confirmed real case, 2026-10-06: a batch of URLs on the
+        # same host hit "crawling this host is paused... they notified us
+        # they are overloaded" after 2 submissions a few seconds apart -
+        # archive.org's own guidance recommends >=9s between requests to stay
+        # safely under that; using 12s for real headroom above the bare
+        # minimum, per explicit request). Only wait out the REMAINDER of that
+        # window - a submission that already took that long (retries,
+        # polling) needs no extra delay.
+        WAYBACK_MIN_GAP = 12
+        remaining = WAYBACK_MIN_GAP - (time.time() - submit_t0)
+        if remaining > 0 and i < len(urls) - 1:
+            slept = 0.0
+            while slept < remaining and not wayback_stop.is_set():
+                time.sleep(min(1.0, remaining - slept))
+                slept += 1.0
+
+    # Retry pass: direct connections to web.archive.org have been confirmed
+    # (2026-10-06/07) to hit a WinError 10061 "actively refused" window
+    # lasting anywhere from ~30s to several minutes, then clear on their own
+    # - a real run lost 5/11 URLs purely to landing inside that window, with
+    # OTHER URLs submitted minutes later in the SAME run succeeding fine. By
+    # the time the whole batch finishes, several minutes have usually already
+    # passed - giving failed URLs one more attempt here recovers exactly the
+    # ones that failed only because of bad timing, not a real/permanent issue.
+    failed_indices = [i for i, r in enumerate(wayback_state["results"]) if r["status"] == "failed"]
+    if failed_indices and not wayback_stop.is_set():
+        with wayback_lock:
+            _wblog(f"Retrying {len(failed_indices)} failed URL(s) now that some time has passed...")
+        for n, idx in enumerate(failed_indices):
+            if wayback_stop.is_set():
+                with wayback_lock:
+                    _wblog("Stopped by user.")
+                    wayback_state["status"] = "stopped"
+                return
+            if not wayback_pause_event.is_set():
+                with wayback_lock:
+                    wayback_state["status"] = "paused"
+                wayback_pause_event.wait()
+                if wayback_stop.is_set():
+                    with wayback_lock:
+                        _wblog("Stopped by user.")
+                        wayback_state["status"] = "stopped"
+                    return
+                with wayback_lock:
+                    wayback_state["status"] = "running"
+            u = wayback_state["results"][idx]["url"]
+            submit_t0 = time.time()
+            _attempt_one(u, f"[retry {n+1}/{len(failed_indices)}]", result_idx=idx)
+            remaining = 12 - (time.time() - submit_t0)
+            if remaining > 0 and n < len(failed_indices) - 1:
+                slept = 0.0
+                while slept < remaining and not wayback_stop.is_set():
+                    time.sleep(min(1.0, remaining - slept))
+                    slept += 1.0
+
     with wayback_lock:
         results = wayback_state["results"]
         fresh = sum(1 for r in results if r["status"] == "submitted")
