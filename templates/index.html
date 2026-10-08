@@ -7697,10 +7697,20 @@ https://example.com/page-2"></textarea>
               : (fresh
                 ? '<span style="color:var(--ok)">&#9679; Active</span>'
                 : '<span style="color:var(--warn,#c78a00)">&#9679; May be stale - refresh recommended</span>');
+            // Both actions are now always offered when there's a previous login -
+            // "Refresh" (a quick headless cookie check, gscSessionRefresh) used to
+            // only appear on sessions already guessed "Active", leaving a "stale"
+            // one with no way to try the fast check first - it jumped straight to
+            // "Login" (a full visible browser relaunch), even though Refresh All
+            // confirms plenty of "stale"-labeled sessions are actually still fine.
+            const refreshBtn = s.last_login
+              ? '<button class="btn btn-tonal btn-sm" style="font-size:10.5px;padding:5px 12px;white-space:nowrap" onclick="gscSessionRefresh(\'' + s.id + '\')">Refresh</button>'
+              : '';
             html += '<div style="display:flex;align-items:flex-end;gap:8px;padding:9px 11px;border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:6px;background:var(--surface-2)">'
               + '<div style="flex:1;min-width:0"><div style="font-weight:600">' + esc(s.label || s.id) + '</div>'
               + '<div style="font-size:11px;color:var(--text-3);margin-top:2px">Accounts: ' + accts + ' &middot; Last login: ' + last + ' &middot; ' + statusHtml + '</div></div>'
-              + '<button class="btn ' + (fresh && s.last_login ? 'btn-tonal' : 'btn-primary') + ' btn-sm" style="font-size:10.5px;padding:5px 12px;white-space:nowrap" onclick="gscSessionLaunch(\'' + s.id + '\')">' + (fresh && s.last_login ? 'Refresh' : 'Login') + '</button>'
+              + refreshBtn
+              + '<button class="btn btn-primary btn-sm" style="font-size:10.5px;padding:5px 12px;white-space:nowrap" onclick="gscSessionLaunch(\'' + s.id + '\')">Login</button>'
               + '<button class="btn btn-err btn-sm" style="font-size:10.5px;padding:5px 12px;white-space:nowrap" title="Remove this session and its saved cookies" onclick="gscSessionRemove(\'' + s.id + '\')">Remove</button>'
               + '</div>';
           });
