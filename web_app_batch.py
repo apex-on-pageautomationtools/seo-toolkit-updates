@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.29"
+APP_VERSION = "4.13.30"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4498,7 +4498,20 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
             _log("  Authenticated SPN2 got a job but it never succeeded - "
                  "falling back to the anonymous endpoint.")
 
-    save_url = "https://web.archive.org/save/" + url
+    # Confirmed real root cause via live testing, 2026-10-08: HTTPS (port 443)
+    # to web.archive.org's own IP gets intermittently refused at the TCP
+    # level (WinError 10061 / ECONNREFUSED, ~3.3s consistent delay before the
+    # refusal - too slow for a local firewall synthesizing it, too fast/
+    # consistent for a real remote timeout) - reproduced identically from TWO
+    # completely separate environments/networks, so it's not specific to any
+    # one machine. Plain HTTP (port 80) to the exact SAME IP, at the exact
+    # same moment HTTPS was still being refused, connected instantly and got
+    # a real response (a 302 redirect to the archived snapshot, exactly the
+    # success path this code already expects via allow_redirects=True) -
+    # archive.org's /save/ endpoint accepts plain HTTP and redirects through
+    # to the same result, so routing this ANONYMOUS, no-credentials request
+    # over HTTP entirely sidesteps the intermittent HTTPS-specific refusal.
+    save_url = "http://web.archive.org/save/" + url
     for i, proxy in enumerate(attempts):
         proxy_label = f"{proxy.get('host')}:{proxy.get('port')}" if proxy else "direct connection"
         try:
@@ -4535,7 +4548,13 @@ def _submit_wayback_url(url, max_tries=3, timeout=45, extra_proxy=None, logger=N
             # successful submission was being reported as "failed" 100% of the
             # time on this endpoint until this was added.
             if r.url and _re.search(r"/web/\d{10,}/https?://", r.url):
-                return r.url
+                # The submission request itself now goes out over HTTP (see
+                # save_url above), so a redirect chain that never hops to
+                # HTTPS would hand back an http:// result here - normalize to
+                # https:// for the final link shown to the user, since
+                # archive.org's actual viewing site works fine over HTTPS
+                # regardless of which scheme the submission used internally.
+                return _re.sub(r"^http://", "https://", r.url)
 
             # Content-Location is Wayback's own redirect header for exactly the page
             # just requested - authoritative, prefer it over scraping the HTML.
