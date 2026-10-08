@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.28"
+APP_VERSION = "4.13.29"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -4593,6 +4593,7 @@ def _parse_wayback_snapshot_time(archived_url):
 
 
 def _run_wayback_submit(urls, extra_proxy=None):
+    import concurrent.futures
     with wayback_lock:
         wayback_state.update({"status": "running", "log": [], "results": [], "error_msg": "",
                               "progress": "Starting..."})
@@ -4656,44 +4657,67 @@ def _run_wayback_submit(urls, extra_proxy=None):
                 _wblog("  -> Failed after retries")
         return status
 
-    for i, u in enumerate(urls):
-        if wayback_stop.is_set():
-            with wayback_lock:
-                _wblog("Stopped by user.")
-                wayback_state["status"] = "stopped"
-            return
-        # Checked BETWEEN URLs, same granularity as the stop check above - a
-        # single URL's own submission (proxy attempts + retries) isn't
-        # interrupted mid-flight, same tradeoff the stop check already makes.
+    # Explicit request, 2026-10-08: process multiple URLs concurrently instead
+    # of one at a time. A single URL that needs its full escalating backoff
+    # (60s SPN2 wait + 30s + 60s connection-refused retries) can take several
+    # minutes on its own - running them strictly sequentially meant one slow
+    # URL blocked the entire rest of the batch, confirmed real case: a 20-URL
+    # batch with several multi-minute URLs was projected to take 40-60+
+    # minutes. Concurrency keeps every one of those same reliability fixes
+    # intact per URL, it just stops one slow URL from stalling the others.
+    WAYBACK_WORKERS = 4
+    # Stagger when each NEW URL's submission actually starts (even across
+    # workers) rather than firing all of them the instant a worker is free -
+    # real spacing toward SPN2's 7/min account-wide cap, which concurrency
+    # would otherwise defeat if every worker hit archive.org at once.
+    WAYBACK_STAGGER = 5
+
+    def _wait_if_paused():
+        """Returns False if the run should stop entirely."""
         if not wayback_pause_event.is_set():
             with wayback_lock:
                 wayback_state["status"] = "paused"
             wayback_pause_event.wait()
             if wayback_stop.is_set():
-                with wayback_lock:
-                    _wblog("Stopped by user.")
-                    wayback_state["status"] = "stopped"
-                return
+                return False
             with wayback_lock:
                 wayback_state["status"] = "running"
-        submit_t0 = time.time()
-        _attempt_one(u, f"[{i+1}/{len(urls)}]")
-        # archive.org's authenticated SPN2 is strictly capped at 7 captures/min
-        # per account (confirmed real case, 2026-10-06: a batch of URLs on the
-        # same host hit "crawling this host is paused... they notified us
-        # they are overloaded" after 2 submissions a few seconds apart -
-        # archive.org's own guidance recommends >=9s between requests to stay
-        # safely under that; using 12s for real headroom above the bare
-        # minimum, per explicit request). Only wait out the REMAINDER of that
-        # window - a submission that already took that long (retries,
-        # polling) needs no extra delay.
-        WAYBACK_MIN_GAP = 12
-        remaining = WAYBACK_MIN_GAP - (time.time() - submit_t0)
-        if remaining > 0 and i < len(urls) - 1:
-            slept = 0.0
-            while slept < remaining and not wayback_stop.is_set():
-                time.sleep(min(1.0, remaining - slept))
-                slept += 1.0
+        return True
+
+    def _run_batch(items, label_fmt):
+        """items: list of (result_idx, url). Submits each to the pool,
+        staggering launch starts, and waits for them all to finish."""
+        with concurrent.futures.ThreadPoolExecutor(max_workers=WAYBACK_WORKERS) as ex:
+            futures = []
+            for n, (idx, u) in enumerate(items):
+                if wayback_stop.is_set():
+                    break
+                if not _wait_if_paused():
+                    break
+                futures.append(ex.submit(_attempt_one, u, label_fmt(n, idx), idx))
+                if n < len(items) - 1:
+                    slept = 0.0
+                    while slept < WAYBACK_STAGGER and not wayback_stop.is_set():
+                        time.sleep(min(1.0, WAYBACK_STAGGER - slept))
+                        slept += 1.0
+            concurrent.futures.wait(futures)
+
+    # Pre-allocate a result slot per URL, in input order, before any worker
+    # starts - so the results table shows every URL immediately (as
+    # "pending") and fills in as workers finish, regardless of completion
+    # order, and so _attempt_one's result_idx always lands in the right row.
+    with wayback_lock:
+        wayback_state["results"] = [
+            {"url": u, "archived_url": "", "status": "pending", "snapshot_at": "", "checked_at": ""}
+            for u in urls
+        ]
+    _run_batch(list(enumerate(urls)), lambda n, idx: f"[{idx+1}/{len(urls)}]")
+
+    if wayback_stop.is_set():
+        with wayback_lock:
+            _wblog("Stopped by user.")
+            wayback_state["status"] = "stopped"
+        return
 
     # Retry pass: direct connections to web.archive.org have been confirmed
     # (2026-10-06/07) to hit a WinError 10061 "actively refused" window
@@ -4703,36 +4727,17 @@ def _run_wayback_submit(urls, extra_proxy=None):
     # the time the whole batch finishes, several minutes have usually already
     # passed - giving failed URLs one more attempt here recovers exactly the
     # ones that failed only because of bad timing, not a real/permanent issue.
-    failed_indices = [i for i, r in enumerate(wayback_state["results"]) if r["status"] == "failed"]
-    if failed_indices and not wayback_stop.is_set():
+    failed = [(i, r["url"]) for i, r in enumerate(wayback_state["results"]) if r["status"] == "failed"]
+    if failed and not wayback_stop.is_set():
         with wayback_lock:
-            _wblog(f"Retrying {len(failed_indices)} failed URL(s) now that some time has passed...")
-        for n, idx in enumerate(failed_indices):
-            if wayback_stop.is_set():
-                with wayback_lock:
-                    _wblog("Stopped by user.")
-                    wayback_state["status"] = "stopped"
-                return
-            if not wayback_pause_event.is_set():
-                with wayback_lock:
-                    wayback_state["status"] = "paused"
-                wayback_pause_event.wait()
-                if wayback_stop.is_set():
-                    with wayback_lock:
-                        _wblog("Stopped by user.")
-                        wayback_state["status"] = "stopped"
-                    return
-                with wayback_lock:
-                    wayback_state["status"] = "running"
-            u = wayback_state["results"][idx]["url"]
-            submit_t0 = time.time()
-            _attempt_one(u, f"[retry {n+1}/{len(failed_indices)}]", result_idx=idx)
-            remaining = 12 - (time.time() - submit_t0)
-            if remaining > 0 and n < len(failed_indices) - 1:
-                slept = 0.0
-                while slept < remaining and not wayback_stop.is_set():
-                    time.sleep(min(1.0, remaining - slept))
-                    slept += 1.0
+            _wblog(f"Retrying {len(failed)} failed URL(s) now that some time has passed...")
+        _run_batch(failed, lambda n, idx: f"[retry {n+1}/{len(failed)}]")
+
+    if wayback_stop.is_set():
+        with wayback_lock:
+            _wblog("Stopped by user.")
+            wayback_state["status"] = "stopped"
+        return
 
     with wayback_lock:
         results = wayback_state["results"]

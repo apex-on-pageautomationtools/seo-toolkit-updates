@@ -7557,7 +7557,8 @@ https://example.com/page-2"></textarea>
           // than both being reported as the same success.
           const badge = r.status === 'submitted' ? { cls: 't-yes', label: 'New capture' }
             : r.status === 'existing' ? { cls: 't-unknown', label: 'Existing snapshot reused' }
-              : { cls: 't-not_found', label: 'Failed' };
+              : r.status === 'pending' ? { cls: 't-unknown', label: 'Pending...' }
+                : { cls: 't-not_found', label: 'Failed' };
           return '<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px;word-break:break-all">' + esc(r.url) + '</td>' +
             '<td style="padding:6px;word-break:break-all">' + link + '</td>' +
             '<td style="padding:6px;white-space:nowrap">' + esc(r.snapshot_at || '-') + '</td>' +
