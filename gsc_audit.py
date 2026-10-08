@@ -1476,8 +1476,12 @@ _INDEXING_QUOTA_MARKERS = (
     "try again in 24 hours", "try again later",
 )
 _INDEXING_SUCCESS_MARKERS = (
-    "indexing request", "already indexed", "url is on google",
-    "request received", "we'll let you know",
+    # "url is on google" removed (2026-10-08, confirmed real bug) - that text
+    # is the PRE-EXISTING URL Inspection result card's own wording, which
+    # stays on screen unchanged throughout the "Testing if live URL can be
+    # indexed" modal regardless of the new request's actual outcome - not
+    # something that only appears once a fresh request genuinely succeeds.
+    "indexing request", "already indexed", "request received", "we'll let you know",
 )
 
 
@@ -1667,6 +1671,19 @@ def request_indexing_via_session(session_id, property_url, email, urls,
                 # ~120s) - the old 90s cap could time out just short of a real
                 # confirmation, wrongly falling back to "submitted, not
                 # confirmed" for a request that was actually still succeeding.
+                #
+                # Confirmed real bug (2026-10-08, caught via a user screenshot):
+                # one of the success markers ("url is on google") is ALSO the
+                # text shown in the PRE-EXISTING URL Inspection result card,
+                # which stays visible on screen right alongside the "Testing if
+                # live URL can be indexed" modal - not something that only
+                # appears once the NEW request actually finishes. The very
+                # first poll (~5s in) was matching that leftover text and
+                # declaring success while the real test was still running in
+                # the background, moving to the next URL far too early. Now
+                # requires the "Testing..." modal to have actually CLOSED
+                # before trusting any success/quota marker at all.
+                TESTING_MODAL_TEXT = "testing if live url can be indexed"
                 done = False
                 cwaited = 0
                 while cwaited < 150:
@@ -1675,6 +1692,8 @@ def request_indexing_via_session(session_id, property_url, email, urls,
                         confirm_text = driver.find_element(By.TAG_NAME, "body").text.lower()
                     except Exception:
                         confirm_text = ""
+                    if TESTING_MODAL_TEXT in confirm_text:
+                        continue   # still running - ignore any text on the page until this closes
                     if any(m in confirm_text for m in _INDEXING_QUOTA_MARKERS):
                         log_fn(f"  {email}: Google's own daily Request Indexing quota is exhausted.")
                         results.append({"url": url, "ok": False, "message": "google_quota_exceeded"})
