@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.30"
+APP_VERSION = "4.13.31"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -288,7 +288,12 @@ def _ai_key_env():
     OPENAI_API_KEY, whichever are configured centrally (Admin -> Sync API Keys) -
     shared by every report generator that calls generate_seo_onpage_phase2._ai_suggest()'s
     fallback chain (On-Page, GEO, SEranking), so a key added once reaches all of them."""
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    # Without this, these subprocesses' own stdout defaults to the Windows
+    # console's codepage (cp1252/"charmap") rather than UTF-8, since they're
+    # piped (not a real console) - confirmed real crash: a scraped page title
+    # containing a fullwidth char (e.g. U+FF08 "(") raised UnicodeEncodeError
+    # from inside the child's own print()/log(), killing the whole report run.
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"}
     for cfg_key, env_key in (("gemini_api_key", "GEMINI_API_KEY"),
                               ("groq_api_key", "GROQ_API_KEY"),
                               ("openrouter_api_key", "OPENROUTER_API_KEY"),
@@ -4922,7 +4927,7 @@ def _run_seranking_audit(in_path, pdf_path, brand, zip_path=None):
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, bufsize=1, cwd=SCRIPTS_DIR,
-                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"})
         for line in proc.stdout:
             if sr_stop.is_set():
                 proc.kill()
@@ -5264,7 +5269,7 @@ def _run_performance_report(domain, gsc_account, ga4_account, ga4_property, days
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, bufsize=1, cwd=SCRIPTS_DIR,
-                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"})
         for line in proc.stdout:
             if perf_stop.is_set():
                 proc.kill()
