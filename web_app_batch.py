@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.31"
+APP_VERSION = "4.13.32"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -827,6 +827,25 @@ def _click_audio_and_buster(driver, skip_image_reload=False):
         return False
 
 
+def _verify_buster_loaded(driver):
+    """Confirm Buster actually registered a service worker target, instead of
+    just trusting that --load-extension was passed on the command line (see
+    _ensure_developer_mode's docstring for why that assumption was wrong)."""
+    try:
+        targets = driver.execute_cdp_cmd("Target.getTargets", {}).get("targetInfos", [])
+        for t in targets:
+            if t.get("type") == "service_worker" and "chrome-extension://" in (t.get("url") or ""):
+                add_log("Buster CAPTCHA solver confirmed loaded.")
+                return True
+        add_log("WARNING: Buster did NOT load into this browser profile (Developer mode "
+                "was probably off until just now) - CAPTCHA recovery will need manual "
+                "solving this run. It should load normally on the next run.")
+        return False
+    except Exception as e:
+        add_log(f"Could not verify Buster load status: {e}")
+        return False
+
+
 def solve_with_buster(driver, max_attempts=1):
     from selenium.webdriver.common.by import By
     add_log("Trying Buster CAPTCHA solver...")
@@ -1122,6 +1141,42 @@ def _clear_stale_proxy_preference(profile_dir):
             pass
 
 
+def _ensure_developer_mode(profile_dir):
+    """Force 'Developer mode' on in this profile's own Preferences before launch.
+
+    Root cause found live (profile_ranking, confirmed via the real installed
+    app's Chrome Preferences file): modern Chrome silently ignores
+    --load-extension entirely - no error, no warning bar, nothing - unless
+    Developer mode is already toggled on for that specific profile. Every
+    "Buster CAPTCHA solver loaded" / "Buster clicked on the audio challenge"
+    log line this app ever produced was fiction for any profile that never
+    had this flag set - the code it was clicking was Google's own generic
+    .help-button-holder "need help" element inside the audio challenge
+    (coincidentally the same div Buster injects its real #solver-button
+    into), never Buster's actual button, since Buster had never loaded into
+    the browser at all. Confirmed on profile_ranking: zero entries existed
+    under extensions.settings in its Preferences file - not merely
+    disabled, never even attempted. Chrome's normal UI path for this is a
+    one-time manual toggle in chrome://extensions, which obviously can't
+    happen on an unattended automated profile - so it's set directly here
+    instead, every launch, before Chrome's extension system initializes."""
+    path = os.path.join(profile_dir, "Default", "Preferences")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        prefs = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                prefs = json.load(f)
+        ext = prefs.setdefault("extensions", {})
+        ui = ext.setdefault("ui", {})
+        if ui.get("developer_mode") is not True:
+            ui["developer_mode"] = True
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(prefs, f)
+    except Exception:
+        pass
+
+
 # --------------------------------------------------------------------------- #
 # Session holder (driver + identity rotation)
 # --------------------------------------------------------------------------- #
@@ -1146,7 +1201,11 @@ class Session:
             return exts
         if CONFIG.get("use_buster", True) and os.path.isdir(BUSTER_DIR):
             exts.append(BUSTER_DIR)
-            add_log("Buster CAPTCHA solver loaded")
+            # NOT confirmation it actually loaded - --load-extension is silently a
+            # no-op on Chrome profiles without Developer mode enabled (see
+            # _ensure_developer_mode). Real confirmation happens after launch via
+            # _verify_buster_loaded().
+            add_log("Buster CAPTCHA solver requested (verifying after launch...)")
         if self.vpn_method in ("windscribe",) and os.path.isdir(WINDSCRIBE_DIR):
             exts.append(WINDSCRIBE_DIR)
             add_log("Windscribe VPN loaded -- sign in once to activate")
@@ -1175,6 +1234,7 @@ class Session:
         if deep_reset:
             _deep_reset_profile(self.profile)
         _clear_stale_proxy_preference(self.profile)
+        _ensure_developer_mode(self.profile)
         add_log(f"Using profile: {os.path.basename(self.profile)}"
                 + (" (fully reset - fresh identity)" if deep_reset else ""))
 
@@ -1243,6 +1303,8 @@ class Session:
             latitude=self.latitude, longitude=self.longitude, lang=self.lang)
         with state_lock:
             state["driver"] = self.driver
+        if CONFIG.get("use_buster", True) and os.path.isdir(BUSTER_DIR) and not self.headless:
+            _verify_buster_loaded(self.driver)
         # Always fetch FRESH rankings: a rank check must reflect the live SERP, never a
         # page served from disk cache or personalised by a prior session's cookies.
         # Disable the HTTP cache for the whole session and wipe any saved cache + cookies
