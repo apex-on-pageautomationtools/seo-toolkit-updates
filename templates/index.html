@@ -8951,7 +8951,9 @@ https://example.com/page-2"></textarea>
         const csv = [header, ...rows].map(row => row.map(c => '"' + (c || '').replace(/"/g, '""') + '"').join(',')).join('\r\n');
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }));
-        a.download = 'gsc_crawl_dates_' + new Date().toISOString().split('T')[0] + '.csv';
+        const domains = [...new Set(rows.map(r => r[1]).filter(Boolean))];
+        const domainPart = domains.length === 1 ? domains[0].replace(/[^A-Za-z0-9.\-]/g, '_') + '_' : '';
+        a.download = 'gsc_crawl_dates_' + domainPart + new Date().toISOString().split('T')[0] + '.csv';
         a.click();
       }
 

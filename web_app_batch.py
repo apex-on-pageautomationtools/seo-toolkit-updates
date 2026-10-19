@@ -63,7 +63,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.32"
+APP_VERSION = "4.13.33"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -7826,7 +7826,13 @@ def api_crawl_save():
         w.writerow(["URL", "Domain", "Last Crawl Date", "Index Status", "GSC Property"])
         w.writerows(rows)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = f"gsc_crawl_dates_{ts}.csv"
+        # If every row is the same domain, name the file after it instead of a
+        # bare timestamp - makes a single-domain export identifiable at a glance
+        # (e.g. in a Downloads folder full of these) without opening it.
+        import re as _crawl_re
+        domains = {(r[1] or "").strip() for r in rows if len(r) > 1 and r[1]}
+        safe_domain = _crawl_re.sub(r"[^A-Za-z0-9.\-]", "_", next(iter(domains))) if len(domains) == 1 else None
+        name = f"gsc_crawl_dates_{safe_domain}_{ts}.csv" if safe_domain else f"gsc_crawl_dates_{ts}.csv"
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
         with open(os.path.join(DOWNLOADS_DIR, name), "w", encoding="utf-8", newline="") as f:
             f.write("﻿" + out.getvalue())
