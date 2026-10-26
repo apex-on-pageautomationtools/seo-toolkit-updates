@@ -3404,9 +3404,15 @@ https://example.com/page-2"></textarea>
             needed. Useful for finding what people actually ask/say about a topic (content ideas, pain points,
             GEO/AI-citation research).</p>
           <div class="field">
-            <label>Subreddit <span class="hint">(without r/, required - the free API this uses can only search
-                within one subreddit at a time, not site-wide)</span></label>
-            <input type="text" id="rd-subreddit" placeholder="e.g. SEO" autocomplete="off">
+            <label>Subreddit <span class="hint">(required - the free API this uses can only search within one real
+                subreddit at a time, not site-wide - search and pick one below)</span></label>
+            <div style="display:flex;gap:8px">
+              <input type="text" id="rd-subreddit-query" placeholder="e.g. SEO, cars, marketing" autocomplete="off"
+                style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();rdSearchSubreddit();}">
+              <button class="btn btn-tonal" type="button" onclick="rdSearchSubreddit()">Search</button>
+            </div>
+            <div id="rd-subreddit-results" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
+            <div id="rd-subreddit-selected" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
           </div>
           <div class="field">
             <label>Keyword <span class="hint">(searched in post titles, optional - leave blank for all posts in the
@@ -6027,16 +6033,15 @@ https://example.com/page-2"></textarea>
           return;
         } else if (mode === 'reddit') {
           const rdKeyword = $('rd-keyword').value.trim();
-          const rdSubreddit = $('rd-subreddit').value.trim();
-          if (!rdSubreddit) { toast('Enter a subreddit - this free API can\'t search Reddit site-wide'); return; }
+          if (!rdSelectedSubreddit) { toast('Search for and select a subreddit first'); return; }
           setButtons('starting', 'reddit');
           const rdT0 = Date.now();
-          rdLog('Searching Reddit...');
+          rdLog('Searching r/' + rdSelectedSubreddit.name + '...');
           try {
             const rrd = await fetchWithTimeout('/api/reddit/search', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                keyword: rdKeyword, subreddit: rdSubreddit,
+                keyword: rdKeyword, subreddit: rdSelectedSubreddit.name,
                 time_filter: $('rd-timefilter').value,
                 limit: parseInt($('rd-limit').value, 10) || 25,
                 comments_per_post: parseInt($('rd-comments').value, 10) || 0,
@@ -7671,6 +7676,46 @@ https://example.com/page-2"></textarea>
 
       /* ===================== reddit research ===================== */
       let rdLastResults = [];
+      let rdSubredditSuggestions = [];
+      let rdSelectedSubreddit = null;
+      async function rdSearchSubreddit() {
+        const q = $('rd-subreddit-query').value.trim();
+        if (!q) { toast('Enter a subreddit name to search for'); return; }
+        $('rd-subreddit-results').innerHTML = '<span class="hint">Searching...</span>';
+        const t0 = Date.now();
+        try {
+          const r = await (await fetchWithTimeout('/api/reddit/suggest_subreddit?q=' + encodeURIComponent(q), {}, 20000)).json();
+          const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+          if (r.error) { rdLog('Failed after ' + elapsed + 's: ' + r.error); toast(r.error); $('rd-subreddit-results').innerHTML = ''; return; }
+          rdSubredditSuggestions = r.suggestions || [];
+          if (!rdSubredditSuggestions.length) { rdLog('No subreddits found for "' + q + '" (' + elapsed + 's)'); $('rd-subreddit-results').innerHTML = '<span class="hint">No real subreddit starts with that name - try a shorter/different prefix (e.g. "car" not "car hire")</span>'; return; }
+          rdLog('Found ' + rdSubredditSuggestions.length + ' subreddit(s) for "' + q + '" (' + elapsed + 's)');
+          $('rd-subreddit-results').innerHTML = '<div class="geo-chip-group-label" style="width:100%;margin-top:0">' + rdSubredditSuggestions.length + ' match(es) - click to select</div>' +
+            rdSubredditSuggestions.map((s, i) =>
+              '<button type="button" class="geo-chip" onclick="rdSelectSubreddit(' + i + ')">r/' + esc(s.name) +
+              ' <span class="hint">(' + Number(s.subscribers || 0).toLocaleString() + ')</span></button>'
+            ).join('');
+        } catch (e) {
+          const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+          const msg = e.name === 'AbortError' ? 'Subreddit search timed out - try again' : 'Subreddit search failed: ' + e.message;
+          rdLog('Failed after ' + elapsed + 's: ' + msg);
+          toast(msg);
+          $('rd-subreddit-results').innerHTML = '';
+        }
+      }
+      function rdSelectSubreddit(i) {
+        const s = rdSubredditSuggestions[i];
+        if (!s) return;
+        rdSelectedSubreddit = s;
+        $('rd-subreddit-selected').innerHTML = '<span class="geo-chip-selected">r/' + esc(s.name) +
+          '<span class="geo-chip-x" onclick="rdClearSubreddit()">&times;</span></span>';
+        $('rd-subreddit-results').innerHTML = '';
+        $('rd-subreddit-query').value = '';
+      }
+      function rdClearSubreddit() {
+        rdSelectedSubreddit = null;
+        $('rd-subreddit-selected').innerHTML = '';
+      }
       // Same reasoning as kvLog above: one synchronous request-response, no
       // background job to poll, so the shared Activity Log needs an explicit
       // write or it just sits blank while the search runs.
@@ -7723,7 +7768,9 @@ https://example.com/page-2"></textarea>
         $('rd-active').classList.add('hidden');
         $('rd-list').innerHTML = '';
         $('rd-keyword').value = '';
-        $('rd-subreddit').value = '';
+        $('rd-subreddit-query').value = '';
+        $('rd-subreddit-results').innerHTML = '';
+        rdClearSubreddit();
         rdLastResults = [];
         setButtons('idle', 'reddit');
       }

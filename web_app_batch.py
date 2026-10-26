@@ -64,7 +64,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.14.1"
+APP_VERSION = "4.14.2"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5593,6 +5593,19 @@ def api_keywordvolume_search():
 # --------------------------------------------------------------------------- #
 # Reddit Research - search posts/comments via Arctic Shift (free, no API key)
 # --------------------------------------------------------------------------- #
+@app.route("/api/reddit/suggest_subreddit")
+def api_reddit_suggest_subreddit():
+    if not _require_tool("reddit"):
+        return jsonify({"error": "You don't have access to the Reddit Research tool."}), 403
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"error": "Enter a subreddit name to search for."}), 400
+    try:
+        return jsonify({"suggestions": reddit_research.suggest_subreddit(q)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/reddit/search", methods=["POST"])
 def api_reddit_search():
     if not _require_tool("reddit"):

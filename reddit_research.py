@@ -70,6 +70,27 @@ def _ts(ts):
         return ""
 
 
+def suggest_subreddit(prefix, limit=15):
+    """Real subreddit name-prefix lookup (e.g. "car" -> r/cars, r/CarTalk,
+    ...), confirmed live via Arctic Shift's subreddits/search?subreddit_prefix=
+    - lets the UI offer a pick-a-real-subreddit dropdown instead of a free-text
+    field a user can type an invalid/made-up name into (e.g. "Car hire" isn't
+    a real subreddit, so a plain search against it always returns 0 posts with
+    no indication the name itself was the problem)."""
+    prefix = (prefix or "").strip()
+    if not prefix:
+        return []
+    data = _fetch(f"{_BASE}/subreddits/search",
+                  {"subreddit_prefix": prefix, "limit": min(max(int(limit or 15), 1), 25)})
+    if not data:
+        return []
+    return [{
+        "name": s.get("display_name") or s.get("name") or "",
+        "subscribers": s.get("subscribers") or 0,
+        "description": (s.get("public_description") or "").strip(),
+    } for s in data.get("data", []) if s.get("display_name") or s.get("name")]
+
+
 def search(keyword=None, subreddit=None, time_filter="all", limit=25):
     """Search Reddit posts by keyword (title) within a subreddit.
 
