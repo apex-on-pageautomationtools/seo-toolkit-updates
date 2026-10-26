@@ -1,33 +1,26 @@
-"""Builds a "Reddit FAQ Recommendations" DOCX from Reddit Research results -
-real question-shaped post titles found on a subreddit, with where each one
-was found and why answering it on the website helps AI-engine citations.
-
-Format mirrors a real client deliverable (Enfortra_Reddit_FAQ_Recommendations.docx):
-a title, a short "what we did and why" intro, then one Qn. heading per
-question followed by a 3-row key/value table (Found on / Answer to add on
-website / Why it helps with AI results), and a closing "how to use these"
-section. The intro/outro copy is generic GEO guidance, not client-specific,
-so it's reused verbatim.
-
-"Answer to add on website" is deliberately left as a fill-in placeholder,
-not auto-written from scraped comments - the business's actual answer needs
-real product/policy knowledge this tool has no way to know, and passing off
-unedited Reddit replies as finished website copy would be actively
-misleading. The real top comment(s) are instead included as reference
-material right under the table so there's something to write from.
+"""Builds a Reddit FAQ DOCX from Reddit Research results - real
+question-shaped post titles found on a subreddit, with where each one was
+found. Deliberately minimal: just "Qn. <question>" + "Found on" per
+question. An "Answer" row is added only when a real AI provider key is
+configured and a draft was actually generated from the thread's top
+comments - if no AI key works, the report stops at Question + Found on,
+nothing else.
 """
+import json
 import re
+import urllib.error
+import urllib.request
+
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 _QUESTION_STARTERS = (
     "what", "why", "how", "is", "are", "does", "do", "can", "could",
     "should", "will", "when", "where", "who", "which", "would",
 )
 
-COL0_WIDTH = Inches(1.25)
-COL1_WIDTH = Inches(5.25)
+COL0_WIDTH = Inches(1.4)
+COL1_WIDTH = Inches(5.1)
 
 
 def _looks_like_question(title):
@@ -57,24 +50,86 @@ def select_questions(results, max_questions=15):
     return deduped[:max_questions]
 
 
-def _add_heading(doc, text, size_pt):
+def _found_on_text(post):
+    return (f'r/{post["subreddit"]} - "{post["title"]}" '
+            f'({post.get("score", 0)} upvotes, {post.get("num_comments", 0)} comments)')
+
+
+# --------------------------------------------------------------------------- #
+# AI answer drafting - same free-tier-first/paid-last provider chain used by
+# the On-Page report (Gemini free -> Groq free -> OpenRouter free -> OpenAI
+# paid), re-implemented standalone here since that module is written for
+# structured on-page JSON suggestions, not free-form FAQ answers, and runs
+# as a subprocess rather than being imported in-process like this is.
+# --------------------------------------------------------------------------- #
+def _call_gemini(prompt, key, model="gemini-2.5-flash"):
+    url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{model}:generateContent?key={key}")
+    body = json.dumps({"contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.5}}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        data = json.loads(r.read())
+    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+
+def _call_openai_compatible(prompt, key, url, model):
+    payload = {"model": model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.5}
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={
+        "Content-Type": "application/json", "Authorization": f"Bearer {key}",
+    })
+    with urllib.request.urlopen(req, timeout=30) as r:
+        data = json.loads(r.read())
+    return data["choices"][0]["message"]["content"].strip()
+
+
+def _draft_answer(question, comments, api_keys):
+    """Tries each configured provider in order, free tiers first; returns a
+    drafted answer string, or None if no provider is configured/succeeds."""
+    comment_text = "\n".join(f'- {c.get("body", "")}' for c in (comments or [])[:5]) or "(no comments)"
+    prompt = (
+        f'A real question was asked on Reddit: "{question}"\n\n'
+        f'Real replies from that thread:\n{comment_text}\n\n'
+        f'Write a short, direct answer (2-4 sentences, plain English, no Reddit slang, '
+        f'no mention of Reddit) suitable for publishing on a company FAQ page, based on '
+        f'the genuine information in those replies. If the replies do not actually answer '
+        f'the question, reply with exactly: NO_ANSWER'
+    )
+    providers = []
+    if api_keys.get("gemini"):
+        providers.append(lambda: _call_gemini(prompt, api_keys["gemini"]))
+    if api_keys.get("groq"):
+        providers.append(lambda: _call_openai_compatible(
+            prompt, api_keys["groq"], "https://api.groq.com/openai/v1/chat/completions",
+            "llama-3.3-70b-versatile"))
+    if api_keys.get("openrouter"):
+        providers.append(lambda: _call_openai_compatible(
+            prompt, api_keys["openrouter"], "https://openrouter.ai/api/v1/chat/completions",
+            "meta-llama/llama-3.3-70b-instruct:free"))
+    if api_keys.get("openai"):
+        providers.append(lambda: _call_openai_compatible(
+            prompt, api_keys["openai"], "https://api.openai.com/v1/chat/completions", "gpt-4o-mini"))
+
+    for call in providers:
+        try:
+            answer = call()
+            if answer and "NO_ANSWER" not in answer.upper():
+                return answer
+        except Exception:
+            continue
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# Document
+# --------------------------------------------------------------------------- #
+def _add_heading(doc, text):
     p = doc.add_paragraph()
     run = p.add_run(text)
     run.bold = True
-    run.font.size = Pt(size_pt)
+    run.font.size = Pt(11)
     run.font.color.rgb = RGBColor(0, 0, 0)
     return p
-
-
-def _add_body(doc, text):
-    p = doc.add_paragraph()
-    run = p.add_run(text)
-    run.font.color.rgb = RGBColor(0, 0, 0)
-    return p
-
-
-def _set_cell_width(cell, width):
-    cell.width = width
 
 
 def _add_kv_table(doc, rows):
@@ -82,38 +137,26 @@ def _add_kv_table(doc, rows):
     table.style = "Normal Table"
     table.autofit = False
     for ri, (label, value) in enumerate(rows):
-        row = table.rows[ri]
-        label_cell, value_cell = row.cells
-        _set_cell_width(label_cell, COL0_WIDTH)
-        _set_cell_width(value_cell, COL1_WIDTH)
-
-        lp = label_cell.paragraphs[0]
-        lr = lp.add_run(label)
+        label_cell, value_cell = table.rows[ri].cells
+        label_cell.width = COL0_WIDTH
+        value_cell.width = COL1_WIDTH
+        lr = label_cell.paragraphs[0].add_run(label)
         lr.bold = True
         lr.font.color.rgb = RGBColor(0, 0, 0)
-
-        vp = value_cell.paragraphs[0]
-        vr = vp.add_run(value)
+        vr = value_cell.paragraphs[0].add_run(value)
         vr.font.color.rgb = RGBColor(0, 0, 0)
     return table
 
 
-def _found_on_text(post):
-    return (f'r/{post["subreddit"]} - "{post["title"]}" '
-            f'({post.get("score", 0)} upvotes, {post.get("num_comments", 0)} comments)')
-
-
-def _why_text(post):
-    return (f'This question is actively being asked on r/{post["subreddit"]} '
-            f'({post.get("num_comments", 0)} comment(s) on this thread alone). If the '
-            f'website does not already answer it directly, an AI engine answering the '
-            f'same question is likely to cite a competitor\'s page instead of this one.')
-
-
-def build_faq_docx(results, out_path, subreddit, keyword=None, max_questions=15):
+def build_faq_docx(results, out_path, subreddit, keyword=None, max_questions=15, api_keys=None):
     """results: the list Reddit Research's /api/reddit/search returns
-    ([{"post": {...}, "comments": [...]}, ...])."""
+    ([{"post": {...}, "comments": [...]}, ...]). api_keys: optional dict of
+    {"gemini"/"groq"/"openrouter"/"openai": key} - when at least one is set
+    and succeeds, an "Answer" row is added per question from a real AI draft
+    grounded in that thread's actual comments; otherwise each question is
+    just "Found on", nothing else."""
     selected = select_questions(results, max_questions=max_questions)
+    api_keys = api_keys or {}
 
     doc = Document()
     section = doc.sections[0]
@@ -122,68 +165,20 @@ def build_faq_docx(results, out_path, subreddit, keyword=None, max_questions=15)
     section.left_margin = section.right_margin = Inches(1)
     section.top_margin = section.bottom_margin = Inches(1)
 
-    _add_heading(doc, "Reddit Research: Questions Found in Our Niche and "
-                      "Recommended Answers to Add to Website", 12)
-
-    _add_heading(doc, "What We Did and Why", 11)
-    scope = f'r/{subreddit}' + (f', filtered by "{keyword}"' if keyword else '')
-    _add_body(doc, f"Reddit was reviewed in {scope} to find the exact questions real "
-                   f"people are already asking in this niche - questions they are also "
-                   f"typing into AI engines like ChatGPT, Perplexity, and Google AI Overviews.")
-    _add_body(doc, "When someone asks an AI engine a question, the AI pulls its answer "
-                   "from whichever website already has a clear, relevant answer to that "
-                   "question. If a website does not have that content, the AI cannot "
-                   "reference it - and a competitor's page gets cited instead.")
-    _add_body(doc, "The recommendation is simple: add these questions and their answers "
-                   "to the website as a FAQ section or dedicated FAQ pages. This directly "
-                   "increases the chances of the website appearing in AI-generated answers "
-                   "when buyers and decision-makers ask these questions.")
-
-    if not selected:
-        _add_body(doc, "No clearly question-shaped posts were found in this search - try "
-                       "a broader time range, a higher post count, or a different subreddit.")
-
     for i, item in enumerate(selected, 1):
         post = item["post"]
-        _add_heading(doc, f"Q{i}. {post['title']}", 11)
-        _add_kv_table(doc, [
-            ("Found on", _found_on_text(post)),
-            ("Answer to add on website", "[Write the answer here]"),
-            ("Why it helps with AI results", _why_text(post)),
-        ])
-
-        comments = item.get("comments") or []
-        if comments:
-            ref = doc.add_paragraph()
-            ref_run = ref.add_run("Reference - real Reddit replies on this thread (for writing the answer above, not for publishing as-is):")
-            ref_run.italic = True
-            ref_run.font.size = Pt(9)
-            ref_run.font.color.rgb = RGBColor(0x59, 0x59, 0x59)
-            for c in comments[:3]:
-                cp = doc.add_paragraph()
-                cr = cp.add_run(f'u/{c.get("author") or "[unknown]"}: {c.get("body", "")}')
-                cr.italic = True
-                cr.font.size = Pt(9)
-                cr.font.color.rgb = RGBColor(0x59, 0x59, 0x59)
-
+        _add_heading(doc, f"Q{i}. {post['title']}")
+        rows = [("Found on", _found_on_text(post))]
+        answer = _draft_answer(post["title"], item.get("comments"), api_keys) if api_keys else None
+        if answer:
+            rows.append(("Answer", answer))
+        _add_kv_table(doc, rows)
         doc.add_paragraph()
 
-    _add_heading(doc, "How to Use These on the Website", 11)
-    _add_body(doc, "Each question above can be added directly to an FAQ section on the "
-                   "website, or as individual FAQ pages if the question is broad enough "
-                   "to justify a full page. Write the answer in plain English, in the "
-                   "website's existing tone.")
-    _add_body(doc, "The question text itself should be used as the heading, exactly as "
-                   "written above. AI engines match the heading language to what users "
-                   "search - changing the wording significantly reduces the chance of "
-                   "being cited.")
-    _add_body(doc, "Adding FAQ schema markup to these questions and answers is still "
-                   "recommended - not for Google, which no longer displays FAQ rich "
-                   "results for most sites, but because AI engines and other bots "
-                   "(Perplexity, Bing Copilot, ChatGPT plugins) read structured data "
-                   "when crawling pages. Schema helps these engines understand that a "
-                   "piece of content is a question and a direct answer, which improves "
-                   "the chance of that content being pulled when a relevant query is made.")
+    if not selected:
+        p = doc.add_paragraph()
+        p.add_run("No clearly question-shaped posts were found in this search - try a "
+                  "broader time range, a higher post count, or a different subreddit.")
 
     doc.save(out_path)
     return out_path

@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.15.0"
+APP_VERSION = "4.15.1"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5656,7 +5656,14 @@ def api_reddit_faq_report():
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         fname = f"reddit_faq_r-{subreddit}_{ts}.docx"
         out_path = os.path.join(out_dir, fname)
-        reddit_faq.build_faq_docx(results, out_path, subreddit=subreddit, keyword=keyword or None)
+        api_keys = {
+            "gemini": CONFIG.get("gemini_api_key", "").strip(),
+            "groq": CONFIG.get("groq_api_key", "").strip(),
+            "openrouter": CONFIG.get("openrouter_api_key", "").strip(),
+            "openai": CONFIG.get("openai_api_key", "").strip(),
+        }
+        reddit_faq.build_faq_docx(results, out_path, subreddit=subreddit, keyword=keyword or None,
+                                   api_keys=api_keys)
         activity(f"Reddit FAQ report built for r/{subreddit}")
         return send_file(out_path, as_attachment=True, download_name=fname)
     except Exception as e:
