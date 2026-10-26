@@ -1994,6 +1994,20 @@
         </svg>
         <span class="sb-label">Keyword Search Volume</span>
       </button>
+      <button class="sb-item" id="tab-reddit" data-tip="Reddit Research"
+        onclick="switchTab('reddit')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <circle cx="12" cy="13" r="7" />
+          <circle cx="7.5" cy="13" r="1.1" fill="currentColor" stroke="none" />
+          <circle cx="16.5" cy="13" r="1.1" fill="currentColor" stroke="none" />
+          <path d="M8.5 16c1 .8 2 1.1 3.5 1.1s2.5-.3 3.5-1.1" />
+          <path d="M12 6V3" />
+          <circle cx="12" cy="2.3" r=".9" fill="currentColor" stroke="none" />
+          <path d="M19 10.5c1 0 1.8.8 1.8 1.8s-.8 1.8-1.8 1.8" />
+          <path d="M5 10.5c-1 0-1.8.8-1.8 1.8s.8 1.8 1.8 1.8" />
+        </svg>
+        <span class="sb-label">Reddit Research</span>
+      </button>
       <div class="sb-sep"></div>
       <div class="sb-section-label">Account</div>
       <button class="sb-item" id="tab-gscaccounts" data-tip="Google Accounts (GSC-GA4)" onclick="switchTab('gscaccounts')">
@@ -3375,6 +3389,49 @@ https://example.com/page-2"></textarea>
             instead of exact numbers, per Google's own account-tier rules.</div>
         </section>
 
+        <section class="card panel" id="panel-reddit" style="display:none">
+          <div class="card-t">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <circle cx="12" cy="13" r="7" />
+              <circle cx="7.5" cy="13" r="1.1" fill="currentColor" stroke="none" />
+              <circle cx="16.5" cy="13" r="1.1" fill="currentColor" stroke="none" />
+              <path d="M8.5 16c1 .8 2 1.1 3.5 1.1s2.5-.3 3.5-1.1" />
+            </svg>
+            Reddit Research
+          </div>
+          <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Search real Reddit posts and
+            top comments by keyword and/or subreddit - no Reddit API key, login, or approval needed. Useful for finding
+            what people actually ask/say about a topic (content ideas, pain points, GEO/AI-citation research).</p>
+          <div class="field">
+            <label>Keyword <span class="hint">(searched in post titles, optional if a subreddit is set)</span></label>
+            <input type="text" id="rd-keyword" placeholder="e.g. best SEO tools" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Subreddit <span class="hint">(without r/, optional)</span></label>
+            <input type="text" id="rd-subreddit" placeholder="e.g. SEO" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Time range</label>
+            <select id="rd-timefilter">
+              <option value="all" selected>All time</option>
+              <option value="year">Past year</option>
+              <option value="month">Past month</option>
+              <option value="week">Past week</option>
+              <option value="day">Past day</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Posts <span class="hint">(max 100)</span></label>
+            <input type="number" id="rd-limit" value="25" min="1" max="100">
+          </div>
+          <div class="field">
+            <label>Comments per post <span class="hint">(top-scored, 0 to skip)</span></label>
+            <input type="number" id="rd-comments" value="5" min="0" max="20">
+          </div>
+          <div class="note" style="margin-top:12px">Data comes from Arctic Shift, a free public Reddit archive API - no
+            account linking, so results can lag a few minutes behind brand-new posts.</div>
+        </section>
+
         <section class="card panel" id="panel-brief" style="display:none">
           <div class="card-t">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
@@ -4025,6 +4082,33 @@ https://example.com/page-2"></textarea>
                   Export CSV
                 </button>
                 <button class="btn btn-tonal" onclick="kvReset()">New Search</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- reddit research -->
+          <div id="tbl-reddit" style="flex:1;display:none">
+            <div class="empty" id="empty-reddit">
+              <div class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  stroke-width="2">
+                  <circle cx="12" cy="13" r="7" />
+                  <circle cx="7.5" cy="13" r="1.1" fill="currentColor" stroke="none" />
+                  <circle cx="16.5" cy="13" r="1.1" fill="currentColor" stroke="none" />
+                </svg></div>
+              <p>Enter a keyword and/or subreddit and click <b>Start</b> to search real Reddit posts.</p>
+            </div>
+            <div id="rd-active" class="hidden">
+              <div id="rd-list"></div>
+              <div style="margin-top:14px;display:flex;gap:10px">
+                <button class="btn btn-primary" onclick="rdExportCsv()">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Export CSV
+                </button>
+                <button class="btn btn-tonal" onclick="rdReset()">New Search</button>
               </div>
             </div>
           </div>
@@ -5224,7 +5308,7 @@ https://example.com/page-2"></textarea>
       // tool's paused session stays visible (correctly) while browsing other tabs,
       // but with no tool name it read as an unexplained, possibly stuck "Action
       // needed" no matter which tab you were actually looking at.
-      const TOOL_TITLES = { overview: 'Dashboard', ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Website Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SEranking/SEMrush Audit', indexcoverage: 'Index Coverage Report', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', gscaccounts: 'Google Accounts (GSC-GA4)', history: 'Report History', admin: 'Admin Panel' };
+      const TOOL_TITLES = { overview: 'Dashboard', ranking: 'Google Rank Checker', index: 'Google Index Checker (site:)', count: 'Google Search Results Count', backlink: 'Backlink Status Checker', onpage: 'SEO On-Page Report', health: 'Health Audit Report', siteaudit: 'Website Audit', gsc: 'GSC Audit Report', crawl: 'Crawl Date Tracker (by GSC)', brief: 'Brief Analysis Report', wayback: 'Wayback Submission', seranking: 'SEranking/SEMrush Audit', indexcoverage: 'Index Coverage Report', geo: 'GEO/AI Optimization Suggestions', performance: 'Performance Report', indexing: 'Submit for Indexing (by GSC)', keywordvolume: 'Keyword Search Volume', reddit: 'Reddit Research', gscaccounts: 'Google Accounts (GSC-GA4)', history: 'Report History', admin: 'Admin Panel' };
       // The four browser tools run in parallel, so each keeps its OWN poll timer, its own
       // running count, and its own last-seen status. The shared status bar / log / result
       // count reflect only the ACTIVE tab; every tool's table keeps filling in the background.
@@ -5377,6 +5461,7 @@ https://example.com/page-2"></textarea>
         $('panel-performance').style.display = m === 'performance' ? '' : 'none';
         $('panel-indexing').style.display = m === 'indexing' ? '' : 'none';
         $('panel-keywordvolume').style.display = m === 'keywordvolume' ? '' : 'none';
+        $('panel-reddit').style.display = m === 'reddit' ? '' : 'none';
         $('tbl-ranking').style.display = m === 'ranking' ? '' : 'none';
         $('tbl-index').style.display = m === 'index' ? '' : 'none';
         $('tbl-count').style.display = m === 'count' ? '' : 'none';
@@ -5396,6 +5481,7 @@ https://example.com/page-2"></textarea>
         $('tbl-performance').style.display = m === 'performance' ? '' : 'none';
         $('tbl-indexing').style.display = m === 'indexing' ? '' : 'none';
         $('tbl-keywordvolume').style.display = m === 'keywordvolume' ? '' : 'none';
+        $('tbl-reddit').style.display = m === 'reddit' ? '' : 'none';
         $('btn-export-serps').style.display = m === 'ranking' ? '' : 'none';
         const subs = {
           overview: 'An overview of every tool in SEO Toolkit Pro - pick one to get started.',
@@ -5416,6 +5502,7 @@ https://example.com/page-2"></textarea>
           performance: 'Monthly performance deck built from real Google Search Console + Google Analytics 4 data - real charts, not screenshots. Testing phase.',
           indexing: 'Submit URLs to Google for indexing via a shared team quota, with a real-Search-Console fallback once your daily share is used. Testing phase.',
           keywordvolume: 'Real Keyword Planner search volume data from the Google Ads API - avg monthly searches, competition, CPC, filtered by location/language. Testing phase.',
+          reddit: 'Search real Reddit posts and top comments by keyword and/or subreddit - no Reddit API key or login needed. Good for content ideas, pain points, and GEO/AI-citation research.',
           gscaccounts: 'Connect Google accounts and manage browser sessions - shared across GSC Audit, Submit for Indexing\'s fallback, and other tools that need one.',
           history: 'Every report already generated on this machine, across every tool - re-download without running the tool again.',
           admin: 'Manage users, cities, and app configuration.'
@@ -5935,6 +6022,41 @@ https://example.com/page-2"></textarea>
             setButtons('idle', 'keywordvolume');
           }
           return;
+        } else if (mode === 'reddit') {
+          const rdKeyword = $('rd-keyword').value.trim();
+          const rdSubreddit = $('rd-subreddit').value.trim();
+          if (!rdKeyword && !rdSubreddit) { toast('Enter a keyword and/or a subreddit'); return; }
+          setButtons('starting', 'reddit');
+          const rdT0 = Date.now();
+          rdLog('Searching Reddit...');
+          try {
+            const rrd = await fetchWithTimeout('/api/reddit/search', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                keyword: rdKeyword, subreddit: rdSubreddit,
+                time_filter: $('rd-timefilter').value,
+                limit: parseInt($('rd-limit').value, 10) || 25,
+                comments_per_post: parseInt($('rd-comments').value, 10) || 0,
+              })
+            }, 90000);
+            const drd = await rrd.json();
+            const rdElapsed = ((Date.now() - rdT0) / 1000).toFixed(1);
+            if (drd.error) { rdLog('Failed after ' + rdElapsed + 's: ' + drd.error); toast(drd.error); setButtons('idle', 'reddit'); return; }
+            rdLog('Done in ' + rdElapsed + 's - ' + drd.results.length + ' post(s) retrieved.');
+            toast('Reddit search done (' + drd.results.length + ' post(s))');
+            rdLastResults = drd.results;
+            rdRenderResults(drd.results);
+            $('empty-reddit').style.display = 'none';
+            $('rd-active').classList.remove('hidden');
+            setButtons('completed', 'reddit');
+          } catch (netErr) {
+            const rdElapsed = ((Date.now() - rdT0) / 1000).toFixed(1);
+            const rdMsg = netErr.name === 'AbortError' ? 'Search timed out after 90s - try again.' : 'Could not reach the server - try again.';
+            rdLog('Failed after ' + rdElapsed + 's: ' + rdMsg);
+            toast(rdMsg);
+            setButtons('idle', 'reddit');
+          }
+          return;
         } else if (mode === 'wayback') {
           const _wbRaw = $('wb-urls').value.trim();
           if (!_wbRaw) { toast('Enter at least one URL'); return; }
@@ -6072,6 +6194,7 @@ https://example.com/page-2"></textarea>
         if (mode === 'geo') { await geoStop(); return; }
         if (mode === 'performance') { await perfStop(); return; }
         if (mode === 'keywordvolume') { return; }  // synchronous request - nothing to cancel mid-flight
+        if (mode === 'reddit') { return; }  // synchronous request - nothing to cancel mid-flight
         const m = mode; await fetch('/api/stop', _mkbody(m)); setButtons('stopped', m); stopPoll(m); showAlert(false); toast('Stopped');
       }
       async function doReset() {
@@ -6090,6 +6213,7 @@ https://example.com/page-2"></textarea>
         if (mode === 'geo') { geoReset(); return; }
         if (mode === 'performance') { perfReset(); return; }
         if (mode === 'keywordvolume') { kvReset(); return; }
+        if (mode === 'reddit') { rdReset(); return; }
         const m = mode; await fetch('/api/reset', _mkbody(m)); setButtons('idle', m); showAlert(false); clearResults(m); updateProgress(0, 0, ''); setStatus('idle'); stopPoll(m); $('log').textContent = '';
       }
       async function loadPrevious() {
@@ -6221,7 +6345,7 @@ https://example.com/page-2"></textarea>
         else { topEl.style.display = 'none'; }
         $('cur-kw').textContent = (kw && cur > 0 && cur <= tot) ? 'Checking: "' + kw + '"' : '';
       }
-      const _modeState = { ranking: 'idle', index: 'idle', count: 'idle', backlink: 'idle', onpage: 'idle', health: 'idle', gsc: 'idle', crawl: 'idle', brief: 'idle', wayback: 'idle', seranking: 'idle', indexcoverage: 'idle', geo: 'idle', performance: 'idle', keywordvolume: 'idle', admin: 'idle' };
+      const _modeState = { ranking: 'idle', index: 'idle', count: 'idle', backlink: 'idle', onpage: 'idle', health: 'idle', gsc: 'idle', crawl: 'idle', brief: 'idle', wayback: 'idle', seranking: 'idle', indexcoverage: 'idle', geo: 'idle', performance: 'idle', keywordvolume: 'idle', reddit: 'idle', admin: 'idle' };
       function setButtons(s, m) {
         m = m || mode;
         _modeState[m] = s;
@@ -7540,6 +7664,65 @@ https://example.com/page-2"></textarea>
         kvUpdateKeywordCount();
         kvLastResults = [];
         setButtons('idle', 'keywordvolume');
+      }
+
+      /* ===================== reddit research ===================== */
+      let rdLastResults = [];
+      // Same reasoning as kvLog above: one synchronous request-response, no
+      // background job to poll, so the shared Activity Log needs an explicit
+      // write or it just sits blank while the search runs.
+      function rdLog(msg) {
+        const el = $('log');
+        if (!el || mode !== 'reddit') return;
+        const ts = new Date().toLocaleTimeString();
+        el.textContent = (el.textContent ? el.textContent + '\n' : '') + '[' + ts + '] ' + msg;
+        el.scrollTop = el.scrollHeight;
+      }
+      function rdRenderResults(results) {
+        $('rd-list').innerHTML = results.map(r => {
+          const p = r.post;
+          const comments = (r.comments || []).map(c =>
+            '<div style="padding:8px 10px;border-top:1px solid var(--border);font-size:12px">'
+            + '<div style="color:var(--text-3)">' + esc(c.author || '[unknown]') + ' &middot; ' + c.score + ' pts &middot; ' + esc(c.created_utc || '') + '</div>'
+            + '<div style="margin-top:2px;white-space:pre-wrap">' + esc(c.body) + '</div></div>'
+          ).join('');
+          return '<div class="card" style="margin-bottom:10px;padding:0">'
+            + '<div style="padding:10px 12px">'
+            + '<a href="' + esc(p.permalink) + '" target="_blank" rel="noopener" style="font-weight:600;text-decoration:none">' + esc(p.title) + '</a>'
+            + '<div style="color:var(--text-3);font-size:12px;margin-top:3px">r/' + esc(p.subreddit) + ' &middot; u/' + esc(p.author || '[unknown]')
+            + ' &middot; ' + p.score + ' pts &middot; ' + p.num_comments + ' comments &middot; ' + esc(p.created_utc || '') + (p.flair ? ' &middot; ' + esc(p.flair) : '') + '</div>'
+            + (p.selftext ? '<div style="margin-top:6px;font-size:13px;white-space:pre-wrap">' + esc(p.selftext.length > 500 ? p.selftext.slice(0, 500) + '...' : p.selftext) + '</div>' : '')
+            + '</div>' + comments + '</div>';
+        }).join('') || '<div class="hint">No posts found - try a broader keyword/time range.</div>';
+      }
+      function rdExportCsv() {
+        if (!rdLastResults.length) { toast('No results to export'); return; }
+        const header = ['post_title', 'post_subreddit', 'post_author', 'post_score', 'post_num_comments',
+          'post_created_utc', 'post_permalink', 'post_selftext', 'comment_rank', 'comment_author',
+          'comment_body', 'comment_score', 'comment_created_utc'];
+        const rows = [header];
+        rdLastResults.forEach(r => {
+          const p = r.post;
+          const base = [p.title, p.subreddit, p.author, p.score, p.num_comments, p.created_utc, p.permalink, p.selftext];
+          if (!r.comments || !r.comments.length) { rows.push([...base, '', '', '', '', '']); return; }
+          r.comments.forEach((c, i) => rows.push([...base, i + 1, c.author, c.body, c.score, c.created_utc]));
+        });
+        const csv = rows.map(row => row.map(v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(',')).join('\n');
+        const blob = new Blob(['﻿' + csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'reddit-research.csv';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+      function rdReset() {
+        $('empty-reddit').style.display = 'block';
+        $('rd-active').classList.add('hidden');
+        $('rd-list').innerHTML = '';
+        $('rd-keyword').value = '';
+        $('rd-subreddit').value = '';
+        rdLastResults = [];
+        setButtons('idle', 'reddit');
       }
 
       /* ===================== wayback submitter ===================== */
@@ -9122,7 +9305,7 @@ https://example.com/page-2"></textarea>
           if (typeof t === 'string') t = t.split(',');          // accept comma string
           const allowed = t.map(x => String(x).trim().toLowerCase()).filter(x => x);
           if (allowed.length === 0 || allowed.includes('all')) return;
-          const KEYS = ['ranking', 'index', 'count', 'backlink', 'onpage', 'health', 'siteaudit', 'gsc', 'crawl', 'brief', 'wayback', 'seranking', 'indexcoverage', 'geo', 'keywordvolume', 'indexing', 'performance', 'blogopt'];
+          const KEYS = ['ranking', 'index', 'count', 'backlink', 'onpage', 'health', 'siteaudit', 'gsc', 'crawl', 'brief', 'wayback', 'seranking', 'indexcoverage', 'geo', 'keywordvolume', 'reddit', 'indexing', 'performance', 'blogopt'];
           KEYS.forEach(key => {
             if (!allowed.includes(key)) { const b = $('tab-' + key); if (b) b.style.display = 'none'; }
           });

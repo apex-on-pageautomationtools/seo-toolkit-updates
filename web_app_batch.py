@@ -50,6 +50,7 @@ import updater
 import requests as http_requests
 import brief_analysis
 import google_ads_keywords
+import reddit_research
 import site_audit
 # site_audit's own import above already puts SCRIPTS_DIR on sys.path, so this
 # resolves fine despite living in scripts/ - imported as a module (not run via
@@ -63,7 +64,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.13.33"
+APP_VERSION = "4.14.0"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5586,6 +5587,37 @@ def api_keywordvolume_search():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         _keywordvolume_refund(user, len(keywords) * len(locations))
+        return jsonify({"error": str(e)}), 500
+
+
+# --------------------------------------------------------------------------- #
+# Reddit Research - search posts/comments via Arctic Shift (free, no API key)
+# --------------------------------------------------------------------------- #
+@app.route("/api/reddit/search", methods=["POST"])
+def api_reddit_search():
+    if not _require_tool("reddit"):
+        return jsonify({"error": "You don't have access to the Reddit Research tool."}), 403
+    data = request.get_json(silent=True) or {}
+    keyword = (data.get("keyword") or "").strip()
+    subreddit = (data.get("subreddit") or "").strip()
+    if not keyword and not subreddit:
+        return jsonify({"error": "Enter a keyword and/or a subreddit."}), 400
+    time_filter = (data.get("time_filter") or "all").strip()
+    try:
+        limit = min(max(int(data.get("limit") or 25), 1), 100)
+    except (TypeError, ValueError):
+        limit = 25
+    try:
+        comments_per_post = min(max(int(data.get("comments_per_post") or 0), 0), 20)
+    except (TypeError, ValueError):
+        comments_per_post = 0
+    try:
+        results = reddit_research.scrape_topic(
+            keyword=keyword or None, subreddit=subreddit or None,
+            time_filter=time_filter, limit=limit, comments_per_post=comments_per_post)
+        activity(f"Reddit Research searched ({keyword or subreddit!r}, {len(results)} post(s))")
+        return jsonify({"results": results})
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
