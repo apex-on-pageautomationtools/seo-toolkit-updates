@@ -64,7 +64,7 @@ import generate_geo_report as georpt
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.14.0"
+APP_VERSION = "4.14.1"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5600,8 +5600,8 @@ def api_reddit_search():
     data = request.get_json(silent=True) or {}
     keyword = (data.get("keyword") or "").strip()
     subreddit = (data.get("subreddit") or "").strip()
-    if not keyword and not subreddit:
-        return jsonify({"error": "Enter a keyword and/or a subreddit."}), 400
+    if not subreddit:
+        return jsonify({"error": "Enter a subreddit - this free Reddit API can't search site-wide."}), 400
     time_filter = (data.get("time_filter") or "all").strip()
     try:
         limit = min(max(int(data.get("limit") or 25), 1), 100)

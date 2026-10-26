@@ -3400,15 +3400,18 @@ https://example.com/page-2"></textarea>
             Reddit Research
           </div>
           <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Search real Reddit posts and
-            top comments by keyword and/or subreddit - no Reddit API key, login, or approval needed. Useful for finding
-            what people actually ask/say about a topic (content ideas, pain points, GEO/AI-citation research).</p>
+            top comments within a subreddit, optionally filtered by keyword - no Reddit API key, login, or approval
+            needed. Useful for finding what people actually ask/say about a topic (content ideas, pain points,
+            GEO/AI-citation research).</p>
           <div class="field">
-            <label>Keyword <span class="hint">(searched in post titles, optional if a subreddit is set)</span></label>
-            <input type="text" id="rd-keyword" placeholder="e.g. best SEO tools" autocomplete="off">
+            <label>Subreddit <span class="hint">(without r/, required - the free API this uses can only search
+                within one subreddit at a time, not site-wide)</span></label>
+            <input type="text" id="rd-subreddit" placeholder="e.g. SEO" autocomplete="off">
           </div>
           <div class="field">
-            <label>Subreddit <span class="hint">(without r/, optional)</span></label>
-            <input type="text" id="rd-subreddit" placeholder="e.g. SEO" autocomplete="off">
+            <label>Keyword <span class="hint">(searched in post titles, optional - leave blank for all posts in the
+                subreddit)</span></label>
+            <input type="text" id="rd-keyword" placeholder="e.g. best SEO tools" autocomplete="off">
           </div>
           <div class="field">
             <label>Time range</label>
@@ -6025,7 +6028,7 @@ https://example.com/page-2"></textarea>
         } else if (mode === 'reddit') {
           const rdKeyword = $('rd-keyword').value.trim();
           const rdSubreddit = $('rd-subreddit').value.trim();
-          if (!rdKeyword && !rdSubreddit) { toast('Enter a keyword and/or a subreddit'); return; }
+          if (!rdSubreddit) { toast('Enter a subreddit - this free API can\'t search Reddit site-wide'); return; }
           setButtons('starting', 'reddit');
           const rdT0 = Date.now();
           rdLog('Searching Reddit...');
