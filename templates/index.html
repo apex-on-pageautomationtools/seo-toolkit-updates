@@ -4117,8 +4117,19 @@ https://example.com/page-2"></textarea>
                   </svg>
                   Export CSV
                 </button>
+                <button class="btn btn-primary" id="rd-faq-btn" onclick="rdGenerateFaqReport()">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="9" y1="13" x2="15" y2="13" />
+                    <line x1="9" y1="17" x2="13" y2="17" />
+                  </svg>
+                  Generate FAQ Report (.docx)
+                </button>
                 <button class="btn btn-tonal" onclick="rdReset()">New Search</button>
               </div>
+              <p class="hint" style="margin-top:6px">Pulls question-shaped posts from these results into a Word doc
+                with Question + Found on filled in, ready for you to write the answer.</p>
             </div>
           </div>
 
@@ -6053,6 +6064,8 @@ https://example.com/page-2"></textarea>
             rdLog('Done in ' + rdElapsed + 's - ' + drd.results.length + ' post(s) retrieved.');
             toast('Reddit search done (' + drd.results.length + ' post(s))');
             rdLastResults = drd.results;
+            rdLastSubreddit = rdSelectedSubreddit.name;
+            rdLastKeyword = rdKeyword;
             rdRenderResults(drd.results);
             $('empty-reddit').style.display = 'none';
             $('rd-active').classList.remove('hidden');
@@ -7676,6 +7689,8 @@ https://example.com/page-2"></textarea>
 
       /* ===================== reddit research ===================== */
       let rdLastResults = [];
+      let rdLastSubreddit = '';
+      let rdLastKeyword = '';
       let rdSubredditSuggestions = [];
       let rdSelectedSubreddit = null;
       async function rdSearchSubreddit() {
@@ -7763,6 +7778,38 @@ https://example.com/page-2"></textarea>
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         URL.revokeObjectURL(url);
       }
+      async function rdGenerateFaqReport() {
+        if (!rdLastResults.length) { toast('No results to build a report from'); return; }
+        const btn = $('rd-faq-btn');
+        btn.disabled = true;
+        rdLog('Building FAQ report...');
+        try {
+          const r = await fetchWithTimeout('/api/reddit/faq-report', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ results: rdLastResults, subreddit: rdLastSubreddit, keyword: rdLastKeyword })
+          }, 30000);
+          if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            throw new Error(d.error || ('HTTP ' + r.status));
+          }
+          const blob = await r.blob();
+          const cd = r.headers.get('Content-Disposition') || '';
+          const m = cd.match(/filename="?([^"]+)"?/);
+          const filename = m ? m[1] : ('reddit_faq_r-' + rdLastSubreddit + '.docx');
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = filename;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          rdLog('FAQ report downloaded: ' + filename);
+          toast('FAQ report downloaded');
+        } catch (e) {
+          rdLog('Failed to build FAQ report: ' + e.message);
+          toast('Failed to build FAQ report: ' + e.message);
+        } finally {
+          btn.disabled = false;
+        }
+      }
       function rdReset() {
         $('empty-reddit').style.display = 'block';
         $('rd-active').classList.add('hidden');
@@ -7772,6 +7819,8 @@ https://example.com/page-2"></textarea>
         $('rd-subreddit-results').innerHTML = '';
         rdClearSubreddit();
         rdLastResults = [];
+        rdLastSubreddit = '';
+        rdLastKeyword = '';
         setButtons('idle', 'reddit');
       }
 

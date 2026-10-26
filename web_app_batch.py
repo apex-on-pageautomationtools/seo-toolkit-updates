@@ -60,11 +60,12 @@ import site_audit
 import generate_seranking_audit
 import generate_index_coverage_report as index_coverage
 import generate_geo_report as georpt
+import generate_reddit_faq_report as reddit_faq
 
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.14.2"
+APP_VERSION = "4.15.0"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -5630,6 +5631,34 @@ def api_reddit_search():
             time_filter=time_filter, limit=limit, comments_per_post=comments_per_post)
         activity(f"Reddit Research searched ({keyword or subreddit!r}, {len(results)} post(s))")
         return jsonify({"results": results})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/reddit/faq-report", methods=["POST"])
+def api_reddit_faq_report():
+    # Builds the FAQ DOCX straight from results the browser already has (the
+    # last search's response) instead of re-searching server-side - keeps the
+    # report in sync with exactly what's on screen, and avoids a second round
+    # of Arctic Shift calls/rate limiting for something already fetched once.
+    if not _require_tool("reddit"):
+        return jsonify({"error": "You don't have access to the Reddit Research tool."}), 403
+    data = request.get_json(silent=True) or {}
+    results = data.get("results") or []
+    subreddit = (data.get("subreddit") or "").strip()
+    keyword = (data.get("keyword") or "").strip()
+    if not results:
+        return jsonify({"error": "No search results to build a report from - run a search first."}), 400
+    if not subreddit:
+        return jsonify({"error": "Missing subreddit."}), 400
+    try:
+        out_dir = _domain_folder(subreddit, "reddit_faq")
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fname = f"reddit_faq_r-{subreddit}_{ts}.docx"
+        out_path = os.path.join(out_dir, fname)
+        reddit_faq.build_faq_docx(results, out_path, subreddit=subreddit, keyword=keyword or None)
+        activity(f"Reddit FAQ report built for r/{subreddit}")
+        return send_file(out_path, as_attachment=True, download_name=fname)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
