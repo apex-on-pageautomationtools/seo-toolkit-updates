@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.15.1"
+APP_VERSION = "4.15.2"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -7826,6 +7826,36 @@ def _crawl_apps_script_post(webapp_url, payload, timeout=180, retries=1):
             break
     raise last_err
 
+
+def _parse_apps_script_json(resp):
+    """Parses a response from the GSC Apps Script backend, turning the real
+    failure modes we've actually hit into a message someone can act on,
+    instead of the raw resp.json() JSONDecodeError ("Expecting value: line 1
+    column 1 (char 0)") that tells a user nothing - confirmed real case: the
+    script lost its OAuth authorization after an edit added/changed a scope,
+    and every call got an HTML "needs your permission"/login-wall page back
+    (HTTP 403) instead of JSON, with no indication anywhere of what to do."""
+    try:
+        return resp.json()
+    except ValueError:
+        pass
+    snippet = (resp.text or "")[:800]
+    low = snippet.lower()
+    if "review permissions" in low or "needs your permission" in low or "accounts.google.com" in low:
+        raise RuntimeError(
+            "The GSC backend (Google Apps Script) needs to be re-authorized by its owner "
+            "account before this will work. Open the Web app URL directly in a browser "
+            "while logged in as the script's owner account, click 'Review Permissions' -> "
+            "'Advanced' -> 'Go to ... (unsafe)' -> 'Allow', then try again here."
+        )
+    if "<html" in low or "<!doctype html" in low:
+        raise RuntimeError(
+            f"The GSC backend returned a web page instead of real data (HTTP {resp.status_code}) "
+            "- it may be temporarily down, or the Apps Script deployment/URL has changed."
+        )
+    raise RuntimeError(f"The GSC backend returned an unreadable response (HTTP {resp.status_code}): {snippet[:200]!r}")
+
+
 @app.route("/api/crawl/validate", methods=["POST"])
 def api_crawl_validate():
     if not _require_tool("crawl"):
@@ -7837,7 +7867,7 @@ def api_crawl_validate():
     user = (auth.check_saved_auth().get("email") or "").strip().lower()
     try:
         resp = _crawl_apps_script_post(webapp_url, {"action": "validate_batch", "urls": data.get("urls", []), "user": user})
-        result = resp.json()
+        result = _parse_apps_script_json(resp)
         # An item marked not-ready here because the shared account's quota/
         # auth failed (not a permanent reason like "domain not in master
         # list") still deserves a real attempt, not an instant "Skipped" -
@@ -7873,7 +7903,7 @@ def api_crawl_inspect():
             "accountKey": data.get("accountKey", ""),
             "batchId": data.get("batchId", "")
         })
-        result = resp.json()
+        result = _parse_apps_script_json(resp)
         if not result.get("success") and _looks_like_quota_or_auth_error(result.get("error", "")):
             fallback = _crawl_inspect_via_local_gsc(url, domain)
             if fallback is not None:
