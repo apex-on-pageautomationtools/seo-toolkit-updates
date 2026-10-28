@@ -1,5 +1,5 @@
 {
-  "version": "4.15.2",
+  "version": "4.16.0",
   "files": [
     {
       "path": "da_checker.py",
@@ -38,12 +38,12 @@
     },
     {
       "path": "scripts/generate_reddit_faq_report.py",
-      "hash": "06b6c9b2118d89ec80684e640a136f799cae50993ca7fd5473c8170e1a0b2344",
+      "hash": "438fe22baf75f677efa2381bea991b4886422ad3f6feabd58a2e867944f50e54",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_reddit_faq_report.py"
     },
     {
       "path": "web_app_batch.py",
-      "hash": "8355615e3cab45ced92780445592d4b24e7ff1c5993f1790dec3329c2a331791",
+      "hash": "52e61ae8a1cebd329346f54663eca65cddb24e20d9dc09ded9e8f4ac2ce1d184",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -133,7 +133,7 @@
     },
     {
       "path": "scripts/generate_seo_onpage_phase2.py",
-      "hash": "f232413b032333ee2889fb626f9e1ea4b90bf16b1a82bedf1c47e8729aadda43",
+      "hash": "4a0352e1bfb46a0b841766844e5ff8772ff65fd8556ffd195f8e4eda7fed3710",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_seo_onpage_phase2.py"
     },
     {

@@ -839,6 +839,57 @@ def _ai_suggest_openrouter(prompt):
         return None
 
 
+def _ai_suggest_claude(prompt):
+    """Anthropic's PAID API when ANTHROPIC_API_KEY is set - tried FIRST,
+    ahead of the free tiers, per explicit team decision (real account credit
+    to use, and generally the best-quality output of the available
+    providers). Quota is real and limited though, same concern as OpenAI
+    below, so this is gated by the same BULK_AI_PAGE_LIMIT/set_run_scale
+    check in _ai_suggest - a large bulk run doesn't burn the whole quota on
+    this tier alone, it falls through to the free tiers once exhausted."""
+    if "claude" in _AI_BROKEN_PROVIDERS:
+        return None
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not key:
+        return None
+    import urllib.request, urllib.error
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5")
+    url = "https://api.anthropic.com/v1/messages"
+    # No "temperature" param - this model rejects it outright with a 400
+    # ("temperature is deprecated for this model"), confirmed live - unlike
+    # OpenAI's reasoning-tier models which merely restrict it to 1, this one
+    # doesn't accept the field at all, so it's simplest to never send it.
+    payload = {"model": model, "max_tokens": 1024,
+               "messages": [{"role": "user", "content": prompt}]}
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={
+        "Content-Type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=40) as r:
+            data = json.loads(r.read())
+        _ai_note_success("claude")
+        # This model defaults to extended thinking, which prepends a
+        # {"type": "thinking", ...} block before the real {"type": "text",
+        # ...} one - content[0] is NOT reliably the text block, confirmed
+        # live, so find it by type instead of assuming position.
+        text = next(b["text"] for b in data["content"] if b.get("type") == "text")
+        return _extract_json(text)
+    except urllib.error.HTTPError as e:
+        if e.code in _PERMANENT_HTTP_CODES:
+            _AI_BROKEN_PROVIDERS.add("claude")
+            log(f"   [warn] Claude suggestion failed: HTTP Error {e.code} - won't retry Claude for the rest of this run.")
+        elif e.code == 429 and _ai_note_429("claude"):
+            log(f"   [warn] Claude suggestion failed: HTTP Error {e.code} - rate-limited/quota exhausted repeatedly, won't retry Claude for the rest of this run (falling back to free tiers).")
+        else:
+            log(f"   [warn] Claude suggestion failed: HTTP Error {e.code}")
+        return None
+    except Exception as e:
+        log(f"   [warn] Claude suggestion failed: {e}")
+        return None
+
+
 def _ai_suggest_openai(prompt):
     """OpenAI's PAID API when OPENAI_API_KEY is set - last tier, after every
     free one has failed. gpt-5.6-luna: OpenAI's cheapest current-gen model
@@ -930,19 +981,25 @@ def set_run_scale(page_count, limit=BULK_AI_PAGE_LIMIT):
 
 
 def _ai_suggest(prompt):
-    """Suggestion copy via a fallback chain: Gemini -> Groq -> OpenRouter (all
-    free tiers, tried unconditionally) -> OpenAI (paid, only within this run's
-    page-count limit - see set_run_scale) -> None (caller falls back to its
-    own heuristic). Each tier is skipped instantly if its API key isn't
-    configured (CONFIG's Keys sheet / GEMINI_API_KEY, GROQ_API_KEY,
-    OPENROUTER_API_KEY, OPENAI_API_KEY env vars), so a site with only a
-    Gemini key behaves exactly as before. Returns parsed JSON or None."""
+    """Suggestion copy via a fallback chain: Claude (paid, tried FIRST within
+    this run's page-count limit - team decision, see set_run_scale) -> Gemini
+    -> Groq -> OpenRouter (all free, tried unconditionally) -> OpenAI (paid,
+    also within the page-count limit) -> None (caller falls back to its own
+    heuristic). Each tier is skipped instantly if its API key isn't
+    configured (CONFIG's Keys sheet / ANTHROPIC_API_KEY, GEMINI_API_KEY,
+    GROQ_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY env vars), so a site with
+    only a Gemini key behaves exactly as before. Returns parsed JSON or None."""
+    within_paid_limit = (_current_run_scale is None or _current_run_limit is None
+                          or _current_run_scale <= _current_run_limit)
+    if within_paid_limit:
+        result = _ai_suggest_claude(prompt)
+        if result is not None:
+            return result
     for fn in (_ai_suggest_gemini, _ai_suggest_groq, _ai_suggest_openrouter):
         result = fn(prompt)
         if result is not None:
             return result
-    if (_current_run_scale is None or _current_run_limit is None
-            or _current_run_scale <= _current_run_limit):
+    if within_paid_limit:
         result = _ai_suggest_openai(prompt)
         if result is not None:
             return result

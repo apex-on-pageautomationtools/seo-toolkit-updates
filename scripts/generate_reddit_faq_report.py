@@ -56,12 +56,28 @@ def _found_on_text(post):
 
 
 # --------------------------------------------------------------------------- #
-# AI answer drafting - same free-tier-first/paid-last provider chain used by
-# the On-Page report (Gemini free -> Groq free -> OpenRouter free -> OpenAI
-# paid), re-implemented standalone here since that module is written for
-# structured on-page JSON suggestions, not free-form FAQ answers, and runs
-# as a subprocess rather than being imported in-process like this is.
+# AI answer drafting - same Claude-first/free-tiers/OpenAI-last provider
+# chain used by the On-Page report, re-implemented standalone here since that
+# module is written for structured on-page JSON suggestions, not free-form
+# FAQ answers, and runs as a subprocess rather than being imported in-process
+# like this is.
 # --------------------------------------------------------------------------- #
+def _call_claude(prompt, key, model="claude-sonnet-5-5"):
+    url = "https://api.anthropic.com/v1/messages"
+    # No "temperature" - this model rejects it outright with a 400, confirmed live.
+    payload = {"model": model, "max_tokens": 1024,
+               "messages": [{"role": "user", "content": prompt}]}
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={
+        "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01",
+    })
+    with urllib.request.urlopen(req, timeout=30) as r:
+        data = json.loads(r.read())
+    # content[0] is not reliably the text block - this model defaults to
+    # extended thinking, which prepends a "thinking" block first.
+    text = next(b["text"] for b in data["content"] if b.get("type") == "text")
+    return text.strip()
+
+
 def _call_gemini(prompt, key, model="gemini-2.5-flash"):
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"{model}:generateContent?key={key}")
@@ -84,8 +100,9 @@ def _call_openai_compatible(prompt, key, url, model):
 
 
 def _draft_answer(question, comments, api_keys):
-    """Tries each configured provider in order, free tiers first; returns a
-    drafted answer string, or None if no provider is configured/succeeds."""
+    """Tries each configured provider in order - Claude first, then the free
+    tiers, then OpenAI - returns a drafted answer string, or None if no
+    provider is configured/succeeds."""
     comment_text = "\n".join(f'- {c.get("body", "")}' for c in (comments or [])[:5]) or "(no comments)"
     prompt = (
         f'A real question was asked on Reddit: "{question}"\n\n'
@@ -96,6 +113,8 @@ def _draft_answer(question, comments, api_keys):
         f'the question, reply with exactly: NO_ANSWER'
     )
     providers = []
+    if api_keys.get("claude"):
+        providers.append(lambda: _call_claude(prompt, api_keys["claude"]))
     if api_keys.get("gemini"):
         providers.append(lambda: _call_gemini(prompt, api_keys["gemini"]))
     if api_keys.get("groq"):
@@ -151,7 +170,7 @@ def _add_kv_table(doc, rows):
 def build_faq_docx(results, out_path, subreddit, keyword=None, max_questions=15, api_keys=None):
     """results: the list Reddit Research's /api/reddit/search returns
     ([{"post": {...}, "comments": [...]}, ...]). api_keys: optional dict of
-    {"gemini"/"groq"/"openrouter"/"openai": key} - when at least one is set
+    {"claude"/"gemini"/"groq"/"openrouter"/"openai": key} - when at least one is set
     and succeeds, an "Answer" row is added per question from a real AI draft
     grounded in that thread's actual comments; otherwise each question is
     just "Found on", nothing else."""

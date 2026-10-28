@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.15.2"
+APP_VERSION = "4.16.0"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -286,17 +286,19 @@ CONFIG = load_config()
 
 
 def _ai_key_env():
-    """Base subprocess env plus GEMINI_API_KEY/GROQ_API_KEY/OPENROUTER_API_KEY/
-    OPENAI_API_KEY, whichever are configured centrally (Admin -> Sync API Keys) -
-    shared by every report generator that calls generate_seo_onpage_phase2._ai_suggest()'s
-    fallback chain (On-Page, GEO, SEranking), so a key added once reaches all of them."""
+    """Base subprocess env plus ANTHROPIC_API_KEY/GEMINI_API_KEY/GROQ_API_KEY/
+    OPENROUTER_API_KEY/OPENAI_API_KEY, whichever are configured centrally (Admin
+    -> Sync API Keys) - shared by every report generator that calls
+    generate_seo_onpage_phase2._ai_suggest()'s fallback chain (On-Page, GEO,
+    SEranking), so a key added once reaches all of them."""
     # Without this, these subprocesses' own stdout defaults to the Windows
     # console's codepage (cp1252/"charmap") rather than UTF-8, since they're
     # piped (not a real console) - confirmed real crash: a scraped page title
     # containing a fullwidth char (e.g. U+FF08 "(") raised UnicodeEncodeError
     # from inside the child's own print()/log(), killing the whole report run.
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"}
-    for cfg_key, env_key in (("gemini_api_key", "GEMINI_API_KEY"),
+    for cfg_key, env_key in (("anthropic_api_key", "ANTHROPIC_API_KEY"),
+                              ("gemini_api_key", "GEMINI_API_KEY"),
                               ("groq_api_key", "GROQ_API_KEY"),
                               ("openrouter_api_key", "OPENROUTER_API_KEY"),
                               ("openai_api_key", "OPENAI_API_KEY"),
@@ -5657,6 +5659,7 @@ def api_reddit_faq_report():
         fname = f"reddit_faq_r-{subreddit}_{ts}.docx"
         out_path = os.path.join(out_dir, fname)
         api_keys = {
+            "claude": CONFIG.get("anthropic_api_key", "").strip(),
             "gemini": CONFIG.get("gemini_api_key", "").strip(),
             "groq": CONFIG.get("groq_api_key", "").strip(),
             "openrouter": CONFIG.get("openrouter_api_key", "").strip(),
@@ -6875,7 +6878,7 @@ def api_auth_is_admin():
 # --------------------------------------------------------------------------- #
 # Admin config (Apps Script URL, API key sync)
 # --------------------------------------------------------------------------- #
-SENSITIVE_KEYS = {"psi_api_key", "gemini_api_key", "groq_api_key", "openrouter_api_key",
+SENSITIVE_KEYS = {"psi_api_key", "anthropic_api_key", "gemini_api_key", "groq_api_key", "openrouter_api_key",
                   "openai_api_key", "imgbb_api_key", "archive_org_access_key",
                   "archive_org_secret_key", "firecrawl_api_key", "gsc_client_id",
                   "gsc_client_secret", "auth_api_url", "user_auth_url", "gsc_projects",
@@ -6922,7 +6925,9 @@ def api_admin_sync_keys():
 
 @app.route("/api/admin/keys_status")
 def api_admin_keys_status():
-    key_names = {"psi_api_key": "PageSpeed API Key", "gemini_api_key": "Gemini API Key",
+    key_names = {"psi_api_key": "PageSpeed API Key",
+                "anthropic_api_key": "Anthropic (Claude) API Key (tried first, bulk-gated paid tier)",
+                "gemini_api_key": "Gemini API Key",
                 "groq_api_key": "Groq API Key", "openrouter_api_key": "OpenRouter API Key",
                 "openai_api_key": "OpenAI API Key (bulk-gated paid tier)",
                 "imgbb_api_key": "ImgBB API Key (ranking screenshot URLs)",
