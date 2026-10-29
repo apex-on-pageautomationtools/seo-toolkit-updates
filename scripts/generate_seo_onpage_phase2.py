@@ -9375,6 +9375,422 @@ def write_meta_xlsx_hexafvr(pages_data, metas, targets, out_path, country=None):
     wb.save(out_path)
 
 
+def _ai_line(instruction, fallback):
+    """One short, direct, client-facing sentence via the shared AI fallback
+    chain (Claude first, then Gemini/Groq/OpenRouter, then OpenAI) - grounded
+    ONLY in the real facts handed to it in `instruction`, never asked to
+    invent anything else. Falls back to a deterministic, template-built
+    sentence (built from the same real facts by the caller) if every
+    provider is unavailable/fails, so the report never breaks or goes blank
+    without AI configured - same "never fabricate past what's verified"
+    rule as every other format's static Conclusion lines."""
+    try:
+        result = _ai_suggest(
+            "You are an SEO analyst writing ONE short, direct, client-facing sentence "
+            "for a website audit report (plain English, confident, no hedging, no "
+            "mention of 'AI', 'crawler', or this prompt). Base it STRICTLY on the facts "
+            "given below - do not invent, assume, or generalize beyond them.\n\n"
+            + instruction + '\n\nReturn ONLY JSON: {"text": "..."}'
+        )
+        if result and result.get("text"):
+            return result["text"].strip()
+    except Exception:
+        pass
+    return fallback
+
+
+def _detect_schema(pages_data):
+    """Scans each crawled page's raw HTML for JSON-LD structured data
+    (<script type="application/ld+json">) and returns {url: [schema @type, ...]}
+    for pages that have it. No schema-detection existed anywhere in this
+    script before - every other format's "Schema"/"Structured Data" mentions
+    are static text with no real check behind them."""
+    out = {}
+    for pd in pages_data:
+        html = pd.get("html") or ""
+        types = []
+        for m in re.finditer(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                              html, re.S | re.I):
+            try:
+                data = json.loads(m.group(1).strip())
+                items = data if isinstance(data, list) else [data]
+                for item in items:
+                    t = item.get("@type") if isinstance(item, dict) else None
+                    if t:
+                        types.append(t if isinstance(t, str) else ", ".join(t))
+            except Exception:
+                continue
+        if types:
+            out[pd["url"]] = types
+    return out
+
+
+def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
+    """Hexa - a narrative/report-style DOCX (verified against the team's "New
+    On Page Format - 2026.docx" template): explanatory paragraph + real,
+    crawl-verified "Conclusion:" line per on-page factor (Meta, Content,
+    Images/Alt, Robots.txt, Sitemap, Redirects, Canonical, External Links,
+    Broken Links, Internal Links, URL Structure, Hyperlinking, Sucuri
+    Security, Noindex, Structured Data/Schema), plus best-effort manual-note
+    sections (Blog, Header/Footer Menu, About Us, Contact Page) built from
+    real page content where this script can actually check it. Conclusion
+    lines are AI-drafted (_ai_line) but strictly grounded in this script's
+    own real findings/pages_data - never a fabricated specific the crawl
+    didn't actually verify, same rule the rest of this file follows."""
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc, h = _setup_docx(domain, use_cover=False)
+    root = h["root"]; d = h["d"]
+    para, label_body, shot = h["para"], h["label_body"], h["shot"]
+    FONT, SIZE = h["FONT"], h["SIZE"]
+
+    def heading(text):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(10)
+        r = p.add_run(text)
+        r.font.name = FONT
+        r.font.bold = True
+        r.font.size = Pt(14)
+        r.font.color.rgb = RGBColor(0x1D, 0x54, 0x89)
+        return p
+
+    def conclusion(text):
+        return label_body("Conclusion: ", text)
+
+    homepage = pages_data[0] if pages_data else None
+    display_domain = (d[:1].upper() + d[1:]) if d else domain
+
+    # ---- Title ----
+    tp = doc.add_paragraph()
+    tr = tp.add_run(f"On Page Analysis: {display_domain}")
+    tr.font.name = FONT; tr.font.bold = True; tr.font.size = Pt(16)
+    para("")
+
+    para("On-page SEO (also known as on-site SEO) refers to the practice of optimizing web "
+         "pages to improve a website's search engine rankings and earn organic traffic. It "
+         "involves refining both the content and HTML source code of individual pages so "
+         "they are more relevant, accessible, and appealing to both users and search engines.")
+    para("This report provides an overview of on-page SEO elements, identifying issues that "
+         "may affect your site's performance and visibility. It includes practical "
+         "recommendations to help improve rankings, user experience, and overall search "
+         "engine compliance.")
+
+    # ---- Meta ----
+    heading("Meta Titles, Descriptions & Headings")
+    para("Meta titles, descriptions, and headings help search engines understand page "
+         "content and improve visibility. A well-optimized title attracts clicks, the "
+         "description summarizes the page's value, and headings structure content for both "
+         "users and crawlers.")
+    label_body("", "Please check the attached sheet for the meta suggestions, which include "
+                   "the meta title, description, and heading for the target pages. Kindly "
+                   "review and update accordingly.")
+
+    # ---- Content quality ----
+    heading("Content Quality")
+    para("High-quality, in-depth content demonstrates expertise, authority, and trust "
+         "(E-E-A-T). Longer, well-researched pages outperform thin or generic content.")
+    thin_pages = [pd for pd in pages_data if (pd.get("content_word_count") or 0) < 300]
+    if thin_pages:
+        fallback = (f"{len(thin_pages)} of {len(pages_data)} target page(s) have thin content "
+                    f"(under 300 words) - we recommend adding more keyword-relevant content "
+                    f"to these pages to help them rank for the target keywords.")
+        conclusion(_ai_line(
+            f"{len(thin_pages)} of {len(pages_data)} crawled target pages have under 300 "
+            f"words of visible content (thin content), including: "
+            + ", ".join(pd['url'] for pd in thin_pages[:5]) + ".", fallback))
+    else:
+        conclusion(f"All {len(pages_data)} target page(s) have a reasonable amount of visible "
+                   f"content (300+ words each). No thin-content issue found.")
+    for pd in pages_data:
+        label_body("Webpage URL - ", pd["url"])
+        label_body("Target Keywords - ", ", ".join(pd.get("keywords") or []) or "(none set)")
+        para("")
+
+    # ---- Images / Alt tags ----
+    heading("Image Alt Tag Optimization")
+    para("Images contribute to both UX and SEO. Optimized images load faster, improve Core "
+         "Web Vitals, and rank in image search. Alt text also supports accessibility.")
+    alt_rows = []
+    for pd in pages_data:
+        self_hosted, _ = suggest_alt(pd, pd.get("keywords") or [], brand, domain)
+        for entry in self_hosted:
+            if not entry.get("existing_alt"):
+                alt_rows.append(entry)
+    if alt_rows:
+        fallback = (f"We have not found the Image ALT Tag on {len(alt_rows)} image(s) across "
+                    f"the target pages. It's not good from an SEO point of view. Please "
+                    f"update the image alt tags as per best practice.")
+        conclusion(_ai_line(
+            f"{len(alt_rows)} image(s) across the crawled target pages are missing an alt "
+            f"attribute entirely.", fallback))
+        h["simple_table"](
+            ["Webpage URL", "Image URL", "Suggested Image Alt Tag"],
+            [[e["page"], e["image"], e.get("suggested_alt") or "(see attached sheet)"]
+             for e in alt_rows[:30]])
+        if len(alt_rows) > 30:
+            para(f"({len(alt_rows) - 30} more missing-alt image(s) listed in the attached "
+                 f"Image Alt Tag Suggestions sheet.)")
+    else:
+        conclusion("All images on the target pages already have an alt attribute set. No "
+                   "action needed.")
+
+    # ---- Robots.txt ----
+    heading("Robots.txt")
+    para("The robots.txt file controls which parts of a site search engines can crawl. A "
+         "well-configured file ensures important content is accessible while preventing "
+         "crawl budget waste on low-value pages.")
+    if findings.get("robots_found"):
+        conclusion("An optimized robots.txt file was found on the website. It's good from a "
+                   "search engine point of view - no change needed in the existing file.")
+    else:
+        conclusion("No valid robots.txt file was found (or it doesn't declare any "
+                   "rules) at " + root + "/robots.txt. We recommend adding one.")
+    label_body("", root + "/robots.txt")
+    shot("robots", captured)
+
+    # ---- Sitemap ----
+    heading("XML Sitemap File")
+    para("XML sitemaps guide crawlers to discover and index content efficiently. An updated "
+         "sitemap helps with new pages and reduces crawl waste.")
+    if findings.get("sitemap_found"):
+        conclusion("An existing sitemap.xml file was found and is reachable. It's good from "
+                   "a search engine point of view - no changes needed to the existing "
+                   "sitemap.")
+    else:
+        conclusion("No reachable sitemap.xml was found. We recommend adding one and "
+                   "submitting it via Google Search Console.")
+    shot("sitemap", captured)
+
+    # ---- Redirection ----
+    heading("URL Redirection Check")
+    para("Proper redirections (301 for permanent, 302 for temporary) ensure users and "
+         "crawlers reach the right content. Incorrect or missing redirects cause crawl "
+         "waste and duplicate-content issues.")
+    if findings.get("www_redirect_issue"):
+        conclusion("We found more than one version of the website (www/non-www or http/"
+                   "https) resolving independently instead of redirecting to a single "
+                   "preferred version - this can split ranking signals. We recommend "
+                   "301-redirecting every variant to one canonical version.")
+    else:
+        conclusion("We did not find any redirection issue on the website - every URL "
+                   "version correctly resolves to a single preferred version. Good from a "
+                   "search engine perspective.")
+    shot("redirect", captured)
+
+    # ---- Canonical ----
+    heading("Canonical Tag")
+    para("Canonical tags prevent duplicate content issues by telling Google the preferred "
+         "version of a page. Without them, duplicate URLs may compete with each other in "
+         "search results.")
+    if findings.get("canonical_issue"):
+        conclusion("After reviewing the target pages, we noticed the canonical tag is "
+                   "missing or not pointing to the correct URL on at least one page. We "
+                   "recommend fixing this.")
+    else:
+        conclusion("After reviewing the target pages, we noticed the canonical tag is "
+                   "pointing to the correct URL. It is good from an SEO perspective.")
+    shot("canonical", captured)
+
+    # ---- External links ----
+    heading("External Linking")
+    para("Outbound links to authoritative sources signal trustworthiness and contextual "
+         "relevance. Linking to credible sites also enhances user experience by providing "
+         "additional context.")
+    ext_count = findings.get("ext_count", 0)
+    conclusion(f"{ext_count} external link(s) found across the target pages.")
+    shot("externallinks", captured)
+
+    # ---- Broken links ----
+    heading("Broken Link Test")
+    para("Broken links (404 errors) negatively impact user experience, reduce crawl "
+         "efficiency, and can harm a site's credibility. They waste link equity and "
+         "frustrate visitors.")
+    broken = findings.get("broken_links_detail") or []
+    if broken:
+        conclusion(f"{len(broken)} broken link(s) were found on the website. Please review "
+                   f"and fix or redirect these.")
+        h["simple_table"](
+            ["Broken Link", "Page Where Found", "Server Response", "Solution"],
+            [[b.get("url", ""), ", ".join(b.get("found_on") or []) or b.get("url", ""),
+              b.get("code", ""), b.get("suggested_redirect") or "Fix or 301-redirect to a live page"]
+             for b in broken[:30]])
+        if len(broken) > 30:
+            para(f"({len(broken) - 30} more broken link(s) listed in the attached Broken "
+                 f"Link Suggestion sheet.)")
+    else:
+        conclusion("No broken links were found on the website. It's good from a search "
+                   "engine point of view.")
+    shot("the404", captured)
+
+    # ---- Internal links ----
+    heading("Internal Linking")
+    para("Internal links distribute link equity, guide crawlers, and help users explore "
+         "more content. Pages without internal links risk becoming \"orphan pages\", which "
+         "search engines struggle to find.")
+    int_counts = {pd["url"]: len(pd.get("internal_links") or []) for pd in pages_data}
+    orphan = [u for u, c in int_counts.items() if c == 0]
+    if orphan:
+        conclusion(_ai_line(
+            f"{len(orphan)} of {len(pages_data)} crawled target page(s) have zero internal "
+            f"links pointing out to other pages on the site: " + ", ".join(orphan[:5]) + ".",
+            f"{len(orphan)} target page(s) have no internal links to other pages on the "
+            f"site. We recommend adding relevant internal links from these pages."))
+    else:
+        total_int = sum(int_counts.values())
+        conclusion(f"Every target page links internally to other pages on the site "
+                   f"({total_int} internal link(s) total across {len(pages_data)} page(s)). "
+                   f"No orphan pages found among the target pages.")
+
+    # ---- URL structure ----
+    heading("URL Structure Optimization")
+    para("A clean and descriptive URL is easier for users to understand, improves "
+         "click-through rates, and helps search engines identify page relevance. URLs with "
+         "unnecessary parameters, underscores, or uppercase letters are harder to read.")
+    messy = [pd["url"] for pd in pages_data
+             if "_" in urllib.parse.urlparse(pd["url"]).path
+             or urllib.parse.urlparse(pd["url"]).path != urllib.parse.urlparse(pd["url"]).path.lower()
+             or urllib.parse.urlparse(pd["url"]).query]
+    if messy:
+        conclusion(_ai_line(
+            f"{len(messy)} of {len(pages_data)} crawled target page URLs contain an "
+            f"underscore, uppercase letters, or a query string, which makes them harder to "
+            f"read: " + ", ".join(messy[:5]) + ".",
+            f"{len(messy)} target page URL(s) contain underscores, uppercase letters, or "
+            f"query parameters, which makes them harder to read. We recommend cleaner, "
+            f"all-lowercase, hyphen-separated URLs."))
+    else:
+        conclusion("The existing URL structure of the target pages is clean (lowercase, no "
+                   "unnecessary parameters or underscores). It's good from an SEO point of "
+                   "view.")
+
+    # ---- Sucuri security ----
+    heading("Site Security (Sucuri)")
+    para("Sucuri is a website security tool that monitors malware, hacks, and "
+         "vulnerabilities. A clean security scan improves trust with both users and search "
+         "engines.")
+    sc = findings.get("sucuri_clean")
+    if sc is True:
+        conclusion("We have not found any malware/security issue on the website. It is good "
+                   "from a search engine point of view.")
+    elif sc is False:
+        conclusion("The Sucuri scan flagged a potential malware/blacklist issue on the "
+                   "website. We recommend reviewing and resolving this as soon as possible.")
+    else:
+        conclusion("The Sucuri security scan could not be completed for this domain.")
+    shot("sucuri", captured)
+
+    # ---- Noindex ----
+    heading("Noindex Tag Check")
+    para("The noindex tag tells search engines not to index a page. It is useful for thin, "
+         "duplicate, or private content but harmful if applied mistakenly to important "
+         "pages.")
+    noindex_pages = findings.get("noindex_pages") or []
+    if noindex_pages:
+        conclusion(f"A noindex tag was found on {len(noindex_pages)} target page(s): "
+                   + ", ".join(noindex_pages[:5]) + ". Please confirm this is intentional.")
+    else:
+        conclusion("Noindex was not found on any of the target pages of the website.")
+
+    # ---- Structured data / Schema ----
+    heading("Structured Data (Schema)")
+    para("Structured data helps Google understand content context, improving chances of "
+         "rich results like FAQs, reviews, and service highlights. This boosts visibility "
+         "in search.")
+    schema_found = _detect_schema(pages_data)
+    if schema_found:
+        lines = [f"{url}: {', '.join(types)}" for url, types in list(schema_found.items())[:5]]
+        conclusion("Structured data (JSON-LD) was found on the following page(s): "
+                   + "; ".join(lines) + ".")
+    else:
+        conclusion("No structured data (JSON-LD, e.g. Organization, Service, Breadcrumb, "
+                   "or FAQ schema) was found on any of the target pages. We suggest adding "
+                   "Organization schema site-wide and Breadcrumb/FAQ schema where relevant.")
+    if homepage:
+        label_body("Page - ", homepage["url"])
+
+    # ---- Blog ----
+    heading("Blog Posting")
+    para("Regular blog posting strengthens topical authority, improves keyword targeting, "
+         "and attracts organic traffic through long-tail queries.")
+    if findings.get("has_blog"):
+        label_body("Observed - ", "The website has an active blog/news/article section.")
+        label_body("Recommendation - ", "Keep publishing 2-4 high-quality blog posts per "
+                   "month targeting long-tail and informational keywords, with internal "
+                   "links from blog posts to service pages.")
+    else:
+        label_body("Observed - ", "The website currently lacks an active and consistent "
+                   "blog section (no /blog, /news, or /articles section found).")
+        label_body("Recommendation - ", "Publish 2-4 high-quality blog posts per month "
+                   "targeting long-tail and informational keywords. Optimize each post with "
+                   "keyword-rich titles, meta descriptions, and headings, and add internal "
+                   "links from blog posts to service pages to boost topical relevance.")
+
+    # ---- Header & Footer menu (best-effort: homepage nav link text check) ----
+    heading("Header & Footer Menu")
+    nav_keywords = ("shop", "product", "contact", "about", "blog", "service")
+    nav_text = " ".join((t for _, t in (homepage.get("headings") or [])) if homepage else []).lower()
+    home_links_text = " ".join(homepage.get("internal_links") or []).lower() if homepage else ""
+    found_nav = [kw for kw in nav_keywords if kw in nav_text or kw in home_links_text]
+    if len(found_nav) >= 3:
+        label_body("Observed - ", "The homepage's navigation/links reference key sections "
+                   "(" + ", ".join(found_nav) + "). No major navigation gap detected.")
+    else:
+        label_body("Observed - ", "We could not confirm clear links to key pages (Shop, "
+                   "Products, Contact, About Us, Blog) from the homepage's navigation. "
+                   "Please manually verify the header/footer menu structure.")
+        label_body("Recommendation - ", "Create a well-organized header menu featuring key "
+                   "product/service categories and important pages for easy access. Add a "
+                   "footer menu with useful links like Privacy Policy, Terms, and Contact.")
+
+    # ---- About Us / Contact page notes (best-effort, only if a matching target page exists) ----
+    about_pd = next((pd for pd in pages_data if "about" in pd["url"].lower()), None)
+    if about_pd:
+        heading("Note for About Us Page")
+        label_body("URL - ", about_pd["url"])
+        wc = about_pd.get("content_word_count") or 0
+        if wc < 50:
+            label_body("Observed - ", f"The About Us page is present but has very little "
+                       f"visible content ({wc} word(s)). This leaves visitors without key "
+                       f"details about the company.")
+            label_body("Recommendation - ", "Add engaging and informative content to the "
+                       "About Us page, including company background, mission, values, and "
+                       "team information. This will build trust with visitors.")
+        else:
+            label_body("Observed - ", f"The About Us page has {wc} word(s) of visible "
+                       f"content. No content-gap issue detected.")
+
+    contact_pd = next((pd for pd in pages_data if "contact" in pd["url"].lower()), None)
+    if contact_pd:
+        heading("Note for Contact Page")
+        label_body("URL - ", contact_pd["url"])
+        body_text = (contact_pd.get("body_text") or "")
+        looks_like_code = bool(re.search(r"<\?php|function\s*\(|console\.log|\{\{.*\}\}", body_text))
+        if looks_like_code:
+            label_body("Observed - ", "The front-end view of the contact page appears to be "
+                       "showing raw code/template output instead of a visible contact form "
+                       "or information, indicating a possible rendering or CMS issue.")
+            label_body("Recommendation - ", "Review the contact page template and remove or "
+                       "correct the exposed backend code. Ensure the page displays proper "
+                       "contact details or form elements for visitors.")
+        else:
+            label_body("Observed - ", "The contact page displays normally with no exposed "
+                       "backend code detected.")
+
+    # ---- Closing ----
+    para("")
+    closing = doc.add_paragraph()
+    closing.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cr = closing.add_run("Thank You!")
+    cr.font.name = FONT; cr.font.bold = True; cr.font.size = Pt(20)
+    sub = doc.add_paragraph()
+    sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    sr = sub.add_run("We appreciate the opportunity to work with you.")
+    sr.font.name = FONT; sr.font.size = Pt(SIZE)
+
+    doc.save(out_path)
+
+
 def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, fmt="james"):
     """Dispatch to the format-specific DOCX builder - builds EXACTLY the selected
     format, or raises rather than silently defaulting to another one."""
@@ -9393,6 +9809,7 @@ def build_onpage_docx(domain, pages_data, findings, captured, brand, out_path, f
         "eta": _build_docx_eta, "kappa": _build_docx_kappa,
         "theta": _build_docx_theta, "sigma": _build_docx_sigma,
         "hexaup": _build_docx_hexaup, "hexafvr": _build_docx_hexafvr,
+        "hexa": _build_docx_hexa,
     }
     fn = builders.get(str(fmt or "").strip().lower())
     if not fn:
@@ -9410,7 +9827,7 @@ def main():
     ap.add_argument("--out", default=str(OUTPUT_DIR))
     ap.add_argument("--dry-run", action="store_true", help="use mock crawl data (no network)")
     ap.add_argument("--no-capture", action="store_true", help="skip live screenshots (text-only docx)")
-    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma", "sara", "peta", "deltafl", "deltafvr", "deltaup", "octal", "camila", "alpha", "eta", "kappa", "theta", "sigma", "hexaup", "hexafvr"],
+    ap.add_argument("--format", default="james", choices=["james", "omega", "neon", "xenon", "gamma", "sara", "peta", "deltafl", "deltafvr", "deltaup", "octal", "camila", "alpha", "eta", "kappa", "theta", "sigma", "hexaup", "hexafvr", "hexa"],
                     help="Report sub-format: james (Driftzine), omega (alltechco), neon (sumitechengineers), xenon, gamma (Hawkeev), sara (teal template)")
     ap.add_argument("--gsc-token", default=None, help="GSC API access token for URL inspection")
     ap.add_argument("--property-url", default=None, help="GSC property URL (e.g. sc-domain:example.com)")

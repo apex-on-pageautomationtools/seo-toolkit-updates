@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.16.2"
+APP_VERSION = "4.17.0"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -7204,7 +7204,23 @@ def api_indexing_fallback_submit():
         token = gsc_audit.get_access_token(email)
         property_url = gsc_audit.resolve_property(token, domain)
     except Exception as e:
-        return jsonify({"error": f"Could not resolve a GSC property for {domain} on {email}: {e}"}), 400
+        # This account may only have a browser session, never separately
+        # OAuth-connected (get_access_token needs a real refresh token) -
+        # confirmed real case: GSC_Config/_gsc_mapping() already says this
+        # exact account has real "Full (domain)" access to this domain, but
+        # the live sites.list API call above can't even run without OAuth.
+        # A domain-property's property string is deterministic -
+        # "sc-domain:<domain>", always, no ambiguity - so it can be derived
+        # straight from GSC_Config instead of requiring OAuth just to look
+        # up something already known. URL-prefix properties aren't handled
+        # here (scheme/www variant isn't knowable without the live API), so
+        # those still hit the original error.
+        mapping = _gsc_mapping().get(domain.strip().lower()) or {}
+        access_level = (mapping.get("accessLevel") or "")
+        if mapping.get("email", "").lower() == email.lower() and "(domain)" in access_level:
+            property_url = f"sc-domain:{domain}"
+        else:
+            return jsonify({"error": f"Could not resolve a GSC property for {domain} on {email}: {e}"}), 400
 
     def _log(msg):
         activity(f"[indexing fallback] {msg}")
