@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.16.1"
+APP_VERSION = "4.16.2"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -7125,30 +7125,42 @@ def api_indexing_submit():
 
 @app.route("/api/indexing/fallback-accounts")
 def api_indexing_fallback_accounts():
-    """Connected GSC accounts that also have a browser session. If a ?domain=
-    is supplied, also returns that domain's remaining Request-Indexing
-    allowance for today (~10/day PER DOMAIN, tracked locally).
+    """Every email with a browser session, since this fallback only ever
+    clicks the real Search Console UI's Request Indexing button in that live
+    browser session - OAuth/API connection (has_refresh) is irrelevant here,
+    unlike the GSC Audit routes that need it. If a ?domain= is supplied, also
+    returns that domain's remaining Request-Indexing allowance for today
+    (~10/day PER DOMAIN, tracked locally).
 
-    Previously this listed every connected account with a session in
-    arbitrary order, with no signal for which one actually has GSC access to
-    the target domain - confirmed real case: pestwildlifecontrolcompany.com
-    failed with "No GSC property found" because the account picked in the
-    dropdown (...access5@gmail.com) has no access to that domain at all,
-    while another connected account (...access4@gmail.com) does, per
-    GSC_Config's Access Level column. Now cross-references the same
-    domain -> best-access-account mapping GSC Audit/Health Audit already use
-    (_gsc_mapping(), backed by GSC_Config) and sorts/flags the one with real
-    access to the front, so it's what the dropdown pre-selects."""
+    Previously this filtered candidates down to OAuth-connected accounts
+    FIRST, then checked for a session - confirmed real case:
+    gorilla.organic's real access (GSC_Config: Full/domain, "Correct") is on
+    searchconsoleanalyticsaccess9@gmail.com, which has a real active browser
+    session but was never separately OAuth-connected (has_refresh=False) -
+    so it was silently excluded from the dropdown entirely, which then
+    defaulted to a different, OAuth-connected-but-no-real-access account and
+    failed with "No property found". Also previously listed every connected
+    account with a session in arbitrary order, with no signal for which one
+    actually has GSC access to the target domain - confirmed real case:
+    pestwildlifecontrolcompany.com failed the same way because the account
+    picked in the dropdown (...access5@gmail.com) has no access to that
+    domain at all, while another connected account (...access4@gmail.com)
+    does, per GSC_Config's Access Level column. Now cross-references the
+    same domain -> best-access-account mapping GSC Audit/Health Audit
+    already use (_gsc_mapping(), backed by GSC_Config) and sorts/flags the
+    one with real access to the front, so it's what the dropdown
+    pre-selects."""
     try:
-        accounts = [a for a in gsc_audit.list_accounts() if a.get("has_refresh")]
         sessions = gsc_audit.list_sessions()
         out = []
-        for a in accounts:
-            email = a["email"]
-            sess = next((s for s in sessions if email.lower() in [x.lower() for x in s.get("accounts", [])]), None)
-            if not sess:
-                continue
-            out.append({"email": email, "session_id": sess["id"]})
+        seen = set()
+        for s in sessions:
+            for email in s.get("accounts", []):
+                key = email.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append({"email": email, "session_id": s["id"]})
         resp = {"accounts": out}
         domain = to_domain(request.args.get("domain") or "")
         if domain:
