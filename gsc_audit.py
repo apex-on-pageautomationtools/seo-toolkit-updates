@@ -1486,13 +1486,18 @@ _INDEXING_SUCCESS_MARKERS = (
 
 
 def request_indexing_via_session(session_id, property_url, email, urls,
-                                  domain=None, browser_pref="edge", log_fn=None):
+                                  domain=None, browser_pref="edge", log_fn=None,
+                                  screenshot_dir=None):
     """Click "Request Indexing" in the real GSC URL Inspection UI for each
     URL, via an already-logged-in GSC Browser Session. Stops early (without
     burning the rest of the day's clicks) if either this domain's own
     local 10/day tracker or Google's own quota message is hit. Returns a
     list of {"url", "ok", "message"} dicts, one per URL passed in (URLs
-    beyond whichever cap is hit first are marked, not silently dropped).
+    beyond whichever cap is hit first are marked, not silently dropped) -
+    each dict also gets a "screenshot" key (local PNG path) when
+    screenshot_dir is given and that URL's request actually succeeded, a
+    real capture of GSC's own "Indexing requested" confirmation as proof the
+    submission genuinely went through.
 
     Deliberately never routes through a proxy - this drives an already
     logged-in, local Google account session, and suddenly changing its exit
@@ -1699,7 +1704,20 @@ def request_indexing_via_session(session_id, property_url, email, urls,
                         results.append({"url": url, "ok": False, "message": "google_quota_exceeded"})
                         quota_hit = True; done = True; break
                     if any(m in confirm_text for m in _INDEXING_SUCCESS_MARKERS):
-                        results.append({"url": url, "ok": True, "message": "requested"})
+                        entry = {"url": url, "ok": True, "message": "requested"}
+                        if screenshot_dir:
+                            try:
+                                os.makedirs(screenshot_dir, exist_ok=True)
+                                safe_url = re.sub(r"[^a-zA-Z0-9]+", "_", url)[:80].strip("_")
+                                ss_path = os.path.join(
+                                    screenshot_dir,
+                                    f"{(domain or email or 'indexing')}_requestindexing_{safe_url}_"
+                                    f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+                                driver.save_screenshot(ss_path)
+                                entry["screenshot"] = ss_path
+                            except Exception as e:
+                                log_fn(f"  [warn] could not capture confirmation screenshot: {e}")
+                        results.append(entry)
                         done = True; break
                 if not done:
                     results.append({"url": url, "ok": True, "message":

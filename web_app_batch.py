@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.17.0"
+APP_VERSION = "4.17.1"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -7073,6 +7073,42 @@ def _log_indexing_results(user, tier, results):
             logging.warning(f"Indexing log sync failed (non-fatal): {e}")
     threading.Thread(target=_send, daemon=True).start()
 
+@app.route("/api/indexing/check-domain")
+def api_indexing_check_domain():
+    """Instant (no network call) Owner-access hint for one or more domains,
+    from the already-cached _gsc_mapping() (GSC_Config) - same local cache
+    GSC Audit/Health Audit/the Request-Indexing fallback dropdown already
+    use, refreshed in the background every GSC_MAPPING_TTL. Lets the
+    frontend show "will this domain even work" immediately, in parallel with
+    the slower per-URL liveness checks + the VPS/Apps Script submit round
+    trip (which can take up to 120s) - instead of only finding out there's
+    no Owner access after waiting through all of that.
+
+    This mirrors the VPS indexing service's own get_domain_owner_map() rule
+    exactly (Access Level must START WITH "owner" - "Full"/other levels
+    don't count, confirmed in vps_tools/indexing_service/indexing_service.py)
+    so the hint stays consistent with what actually happens when the real
+    submission runs. It's advisory only, never blocks submission - GSC_Config
+    not listing an Owner account doesn't rule out the VPS pool's own
+    dedicated service accounts already having access some other way."""
+    domains_param = (request.args.get("domains") or request.args.get("domain") or "").strip()
+    raw_domains = [d.strip() for d in domains_param.split(",") if d.strip()]
+    if not raw_domains:
+        raw_domains = request.args.getlist("urls") or []
+    domains = sorted({to_domain(d) for d in raw_domains if d})
+    mapping = _gsc_mapping()
+    out = {}
+    for dom in domains:
+        entry = mapping.get(dom.strip().lower()) or {}
+        access_level = (entry.get("accessLevel") or "")
+        out[dom] = {
+            "has_owner_access": access_level.lower().startswith("owner"),
+            "account": entry.get("email") or None,
+            "access_level": access_level or None,
+        }
+    return jsonify({"domains": out})
+
+
 @app.route("/api/indexing/submit", methods=["POST"])
 def api_indexing_submit():
     if not _require_tool("indexing"):
@@ -7225,8 +7261,17 @@ def api_indexing_fallback_submit():
     def _log(msg):
         activity(f"[indexing fallback] {msg}")
 
+    # Screenshots land under the same DOWNLOADS_DIR api_screenshot() already
+    # searches by basename, so no new serving logic is needed - just build
+    # the /api/screenshot/<name> URL from each capture's basename below.
+    screenshot_dir = _domain_folder(domain, "indexing")
     results = gsc_audit.request_indexing_via_session(
-        session_id, property_url, email, urls, domain=domain, log_fn=_log)
+        session_id, property_url, email, urls, domain=domain, log_fn=_log,
+        screenshot_dir=screenshot_dir)
+    for r in results:
+        if r.get("screenshot"):
+            r["screenshot_url"] = f"/api/screenshot/{os.path.basename(r['screenshot'])}"
+            del r["screenshot"]
     results = skipped + results
     submitted = sum(1 for r in results if r["ok"])
     activity(f"GSC Request-Indexing fallback: {submitted}/{len(raw_urls)} submitted via {email} "

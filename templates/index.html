@@ -7396,6 +7396,30 @@ https://example.com/page-2"></textarea>
         _idxLog('Submitting ' + Math.min(urls.length, 10) + ' URL(s)' + (dupes ? ' (' + dupes + ' duplicate(s) removed)' : '')
           + ' - each is checked for a real 200 OK before it counts against quota...');
         $('idx-results').innerHTML = '';
+        $('idx-owner-banner').innerHTML = '';
+        // Instant (no network wait) domain-access hint, fired in parallel with
+        // the per-URL liveness checks below instead of only finding out
+        // there's no Owner access after waiting through those AND the
+        // VPS/Apps Script submit round trip (which can take up to 120s).
+        // Purely advisory - never blocks the real submit, and the real
+        // per-URL results (once they land) replace this banner outright.
+        (async () => {
+          try {
+            const domains = [...new Set(urls.slice(0, 10).map(u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return null; } }).filter(Boolean))];
+            if (!domains.length) return;
+            const hr = await fetch('/api/indexing/check-domain?domains=' + encodeURIComponent(domains.join(',')));
+            const hd = await hr.json();
+            const noOwner = Object.entries(hd.domains || {}).filter(([, v]) => !v.has_owner_access);
+            if (noOwner.length && !$('idx-owner-banner').innerHTML) {
+              $('idx-owner-banner').innerHTML = noOwner.map(([dom, v]) =>
+                '<div style="background:rgba(240,69,58,.08);color:var(--text-2);border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:12px;line-height:1.5">'
+                + '<b>Checking ' + esc(dom) + '...</b> no Owner-access account on record'
+                + (v.account ? ' (' + esc(v.account) + ' has ' + esc(v.access_level) + ' access, not Owner)' : '')
+                + ' - this may need the Request Indexing fallback below. Verifying each URL now...</div>'
+              ).join('');
+            }
+          } catch (e) { /* advisory only - a failed hint never blocks the real submit */ }
+        })();
         try {
           const r = await fetch('/api/indexing/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ urls }) });
           const d = await r.json();
@@ -7437,8 +7461,8 @@ https://example.com/page-2"></textarea>
             const statusHtml = x.ok ? 'Submitted' : (noOwner
               ? '<span style="color:var(--err,#c00)">No Owner access - see note above</span>'
               : '<span style="color:var(--err,#c00);white-space:normal;overflow-wrap:anywhere;word-break:break-word">' + esc(x.message) + '</span>');
-            return '<tr><td style="padding:3px 6px;word-break:break-word;overflow-wrap:break-word">' + esc(x.url) + '</td>'
-              + '<td style="padding:3px 6px;word-break:break-word;overflow-wrap:break-word;' + (x.ok ? 'color:var(--ok)' : '') + '">' + statusHtml + '</td>'
+            return '<tr data-url="' + esc(x.url) + '"><td style="padding:3px 6px;word-break:break-word;overflow-wrap:break-word">' + esc(x.url) + '</td>'
+              + '<td class="idx-status-cell" style="padding:3px 6px;word-break:break-word;overflow-wrap:break-word;' + (x.ok ? 'color:var(--ok)' : '') + '">' + statusHtml + '</td>'
               + '<td style="padding:3px 6px;word-break:break-word;overflow-wrap:break-word;color:var(--text-3)">' + esc(x.account || '–') + '</td>'
               + '<td style="padding:3px 6px;white-space:nowrap;color:var(--text-3)">' + esc(x.time || '–') + '</td></tr>';
           }).join('');
@@ -7524,10 +7548,39 @@ https://example.com/page-2"></textarea>
           // treatment the main results table already uses, plus a fixed table
           // layout so the message column can't force the URL column to collapse.
           let rows = (d.results || []).map(x => '<tr><td style="font-size:11px;padding:3px 6px;word-break:break-word;overflow-wrap:anywhere;white-space:normal">' + esc(x.url) + '</td>'
-            + '<td style="font-size:11px;padding:3px 6px;word-break:break-word;overflow-wrap:anywhere;white-space:normal;color:' + (x.ok ? 'var(--ok)' : 'var(--err,#c00)') + '">' + (x.ok ? 'Submitted' : esc(x.message)) + '</td></tr>').join('');
+            + '<td style="font-size:11px;padding:3px 6px;word-break:break-word;overflow-wrap:anywhere;white-space:normal;color:' + (x.ok ? 'var(--ok)' : 'var(--err,#c00)') + '">' + (x.ok ? 'Submitted' : esc(x.message))
+            + (x.screenshot_url ? ' <a href="' + esc(x.screenshot_url) + '" target="_blank" rel="noopener">(screenshot)</a>' : '') + '</td></tr>').join('');
           box.innerHTML = '<div class="note" style="margin-bottom:6px">Submitted ' + d.submitted + '/' + urls.length + ' via ' + esc(email) + '.</div>'
             + '<table style="width:100%;border-collapse:collapse;table-layout:fixed"><colgroup><col style="width:55%"><col style="width:45%"></colgroup><tbody>' + rows + '</tbody></table>';
           idxLoadFallbackAccounts($('idx-fb-domain').value.trim());
+          // The main results table (right panel) still shows whatever the
+          // original /api/indexing/submit attempt said (e.g. "No Owner
+          // access") for every URL this fallback just handled - confirmed
+          // real complaint: that status never updated, so the only place to
+          // see "did the GSC fallback actually work" was this small sidebar
+          // box, easy to miss. Sync each matching row's status cell in place.
+          (d.results || []).forEach(x => {
+            const row = document.querySelector('#idx-results-body tr[data-url="' + CSS.escape(x.url) + '"]');
+            if (row) {
+              const cell = row.querySelector('.idx-status-cell');
+              if (cell) {
+                if (x.ok) {
+                  cell.style.color = 'var(--ok)';
+                  cell.innerHTML = 'Submitted via GSC' + (x.screenshot_url ? ' <a href="' + esc(x.screenshot_url) + '" target="_blank" rel="noopener">(screenshot)</a>' : '');
+                } else {
+                  cell.innerHTML = '<span style="color:var(--err,#c00);white-space:normal;overflow-wrap:anywhere;word-break:break-word">GSC fallback: ' + esc(x.message) + '</span>';
+                }
+              }
+            }
+            // Keep the CSV export (Download CSV button, main panel) in sync too -
+            // it reads _idxLastResults, which the DOM update above doesn't touch.
+            const rec = _idxLastResults.find(r => r.url === x.url);
+            if (rec) {
+              rec.ok = x.ok;
+              rec.message = x.ok ? ('Submitted via GSC' + (x.screenshot_url ? ' - ' + x.screenshot_url : '')) : ('GSC fallback: ' + x.message);
+              rec.account = email;
+            }
+          });
         } catch (e) { box.innerHTML = '<div class="note" style="color:var(--err,#c00)">Fallback submission failed.</div>'; }
       }
 
