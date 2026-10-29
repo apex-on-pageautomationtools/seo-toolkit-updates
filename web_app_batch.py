@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.16.0"
+APP_VERSION = "4.16.1"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -6973,13 +6973,23 @@ INDEXING_MAX_PER_REQUEST = 10
 
 def _check_url_live(u, timeout=10):
     """A dead/broken URL still costs one submission out of the shared daily
-    quota if we send it anyway - confirm it actually returns 200 first."""
+    quota if we send it anyway - confirm it actually returns 200 first.
+
+    Sends a real browser User-Agent (_NORM_UA) - the default python-requests
+    UA gets blocked outright (403) by some sites' bot protection (Cloudflare
+    etc.), confirmed live on a real domain where EVERY url falsely skipped
+    as "not 200" actually returns a real 200 to a normal GET.
+
+    Falls back from HEAD to a real GET on ANY non-200 HEAD response, not just
+    404/405 - a HEAD-specific block (403, or anything else) must not be
+    trusted as "the URL is dead" when GET is the thing that actually
+    determines indexability. The extra GET only costs something on a URL
+    that's genuinely not live, which is the one case it's fine to spend it."""
+    headers = {"User-Agent": _NORM_UA}
     try:
-        r = http_requests.head(u, timeout=timeout, allow_redirects=True)
-        if r.status_code == 405 or r.status_code == 404:
-            # Some servers don't support HEAD (405) or misreport it (404) -
-            # a real GET is the only way to be sure in that case.
-            r = http_requests.get(u, timeout=timeout, allow_redirects=True, stream=True)
+        r = http_requests.head(u, timeout=timeout, allow_redirects=True, headers=headers)
+        if r.status_code != 200:
+            r = http_requests.get(u, timeout=timeout, allow_redirects=True, stream=True, headers=headers)
         return r.status_code == 200
     except Exception:
         return False
