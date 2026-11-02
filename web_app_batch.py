@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.17.3"
+APP_VERSION = "4.17.4"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1449,34 +1449,35 @@ def _recover(sess, kind):
             if solve_with_buster(sess.driver, 3):
                 return True
 
-        # Buster exhausted all 3 attempts. If a proxy pool is in play, an
-        # endlessly unsolvable/regenerating audio challenge is a well-known
-        # Google response to a distrusted exit IP, not proof the solver itself
-        # is broken - rotating to a fresh identity + proxy (deep_reset wipes
-        # cookies/profile too) usually clears it instantly, where retrying the
-        # SAME captcha on the SAME burned IP just keeps reserving it. Every
-        # caller of _recover() already re-does its own action (re-search,
-        # reload page, etc.) after a True return, so there's no need to solve
-        # a captcha that's no longer even on screen - just hand back a clean
-        # session.
-        if sess.pool:
-            add_log("Buster could not clear the CAPTCHA after 3 attempts - this exit IP "
-                    "is likely flagged by Google. Rotating to a fresh identity/proxy "
-                    "instead of retrying the same blocked IP...")
-            try:
-                sess.start(rotate=True, deep_reset=True)
-                return True
-            except Exception as e:
-                add_log(f"Identity rotation failed ({e}) - falling back to manual solve.")
+        # Buster exhausted all 3 attempts. A STALE profile is a confirmed real
+        # cause of Buster silently failing to load at all into later challenges
+        # (not just failing to solve one) - live inspection of a long-lived
+        # profile's own Preferences file showed extensions.settings completely
+        # empty (Buster, Windscribe, SERP Counter - none of them had ever
+        # registered), while a brand-new profile loaded Buster's service worker
+        # fine on the very first launch. deep_reset wipes the profile back to
+        # that same clean state (also clears cookies/IndexedDB/Local State, so
+        # it doubles as a fresh identity if an endlessly-regenerating audio
+        # challenge was really about a distrusted exit IP rather than Buster).
+        # Always do this before deciding what's next.
+        add_log("Buster could not clear the CAPTCHA after 3 attempts - resetting to a "
+                "fresh browser profile (a stale profile is a known cause of Buster "
+                "silently failing to load at all, not just failing to solve)...")
+        try:
+            sess.start(rotate=bool(sess.pool), deep_reset=True)
+        except Exception as e:
+            add_log(f"Profile reset failed: {e}")
+        else:
+            # If a proxy pool was in play, the reset also rotated to a different
+            # exit IP. If not (VPN/direct), the exit IP is unchanged - a captcha
+            # genuinely caused by a distrusted IP may reappear - but Buster itself
+            # should now actually be able to load into it instead of silently
+            # failing, so it's worth letting the caller's own retry (re-search,
+            # reload page, etc.) hit it with a working solver first. Either way
+            # there's no captcha left on screen here to solve directly.
+            return True
 
-        # Buster failed and there's no proxy pool to rotate to. If the user is on
-        # a manual VPN (system/pause), repeatedly solving/waiting on the SAME VPN
-        # exit IP is the same trap the proxy-pool case above avoids - that IP is
-        # very likely the thing making every challenge unsolvable in the first
-        # place (confirmed real case: Buster clicking correctly but every audio
-        # challenge regenerating endlessly rather than ever clearing). Ask for a
-        # VPN server switch instead of a blind "solve it in the browser" wait that
-        # will probably just hit the same loop again.
+        # Reset itself failed - fall back to whatever manual recovery fits.
         if sess.vpn_method in ("system", "pause") and not sess.headless:
             bring_browser_to_front()
             return _manual_pause(
@@ -1485,8 +1486,6 @@ def _recover(sess, kind):
                 "in your VPN app, then click Resume"
             )
 
-        # No proxy pool, no VPN to switch - pause and auto-detect when solved (no
-        # Resume button needed)
         bring_browser_to_front()
         return _captcha_manual_wait(sess.driver)
 
