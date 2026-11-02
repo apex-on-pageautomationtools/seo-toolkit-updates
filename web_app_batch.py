@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.17.4"
+APP_VERSION = "4.17.5"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -838,21 +838,28 @@ def _click_audio_and_buster(driver, skip_image_reload=False):
         # 1) Switch to the IMAGE challenge (the image / "eye" button) and reload it,
         #    also trying a verify/skip button if reCAPTCHA offers one instead of a
         #    plain reload (e.g. when it can't find matching images) - either clears
-        #    the audio rate-limit for the next step.
+        #    the audio rate-limit for the next step. Slower pacing here (vs. the
+        #    original 1.5s waits) is deliberate: confirmed live that Google can
+        #    still hand back the SAME (bad/undetectable) audio sample if the
+        #    switch-away-and-back happens too fast, same way a human clicking
+        #    quickly wouldn't actually get a fresh challenge either - a real user
+        #    manually doing this exact dance (switch to visual, then back to a
+        #    new audio challenge) reliably got Buster a solvable sample, where
+        #    the faster automated version kept landing on bad audio instead.
         if not skip_image_reload:
             _click(["#recaptcha-image-button", "button[id*='image']", "button[title*='image']"],
                    "Switched to the image challenge (eye)")
-            time.sleep(1.5)
+            time.sleep(2.5)
             for _ in range(2):
                 if _click(["#recaptcha-reload-button", ".reload-button-holder button",
                            "button[id*='reload']", "#recaptcha-verify-button",
                            "button[id*='verify']", "button[id*='skip']"], "Reloaded the challenge"):
-                    time.sleep(1.5)
+                    time.sleep(2.5)
 
         # 2) Switch to a FRESH audio challenge (the headphones button).
         _click(["#recaptcha-audio-button", "button[id*='audio']", "button[title*='audio']"],
                "Switched to a fresh audio challenge")
-        time.sleep(2.5)
+        time.sleep(4.5)
 
         # 3) Click Buster's REAL #solver-button via CDP shadow-DOM piercing first -
         #    give its own injected button a moment to appear after the challenge
@@ -938,16 +945,15 @@ def solve_with_buster(driver, max_attempts=1):
             add_log("Solved by checkbox.")
             return True
 
-        # Try a DIRECT audio-solve first (skip the image-challenge-reload dance) -
-        # only the 3rd+ attempt falls back to the extra image-reload+switch
-        # sequence. Per explicit instruction: always doing that reload dance
-        # (2 reloads + a challenge-type switch) on EVERY single CAPTCHA was
-        # extra interaction with Google's challenge system that could itself add
-        # to detection risk, on top of the CAPTCHA-triggering resubmission issue
-        # already fixed elsewhere - reserve it for when direct audio has
-        # genuinely failed twice and needs the rate-limit reset, not spend it
-        # up front on every CAPTCHA regardless of whether it's needed.
-        if _click_audio_and_buster(driver, skip_image_reload=(attempt <= 2)):
+        # Always do the full image-reload-then-audio dance, not just a direct
+        # audio click. Confirmed live (real repro): Buster failing with "Wit.ai
+        # could not detect any speech" on the FIRST audio sample, then solving
+        # once a fresh one was fetched via switch-to-visual-then-back-to-audio -
+        # the first audio Google serves can itself just be a bad/undetectable
+        # sample, independent of any rate-limit, so skipping this dance on the
+        # first attempts was skipping the one thing that reliably got a
+        # solvable sample.
+        if _click_audio_and_buster(driver, skip_image_reload=False):
             for _ in range(10):
                 time.sleep(2)
                 if not is_alive(driver):
