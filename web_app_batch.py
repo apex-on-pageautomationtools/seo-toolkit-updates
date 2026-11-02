@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.17.1"
+APP_VERSION = "4.17.2"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -722,6 +722,47 @@ def _click_in_bframe(driver, selectors):
             pass
         return False
 
+def _cdp_click_solver_button(driver):
+    """Click Buster's real #solver-button inside its CLOSED shadow DOM via CDP
+    piercing. This is the only way to reach Buster's actual button - a plain
+    Selenium/ActionChains click on div.help-button-holder (the host element)
+    hits Google's own generic "need help" container, not the button Buster
+    injects inside it, and can silently look like a successful click in the
+    logs without ever invoking Buster's solve. Returns True only if a real
+    #solver-button node was found and clicked."""
+    from selenium.webdriver.common.by import By
+    try:
+        driver.switch_to.default_content()
+        fr = driver.find_elements(By.CSS_SELECTOR,
+            "iframe[title*='recaptcha challenge'], iframe[src*='bframe']")
+        if fr:
+            driver.switch_to.frame(fr[0])
+        doc = driver.execute_cdp_cmd("DOM.getDocument", {"depth": -1, "pierce": True})
+        result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
+            "nodeId": doc["root"]["nodeId"],
+            "selector": "#solver-button"
+        })
+        for nid in result.get("nodeIds", []):
+            try:
+                remote = driver.execute_cdp_cmd("DOM.resolveNode", {"nodeId": nid})
+                obj_id = remote["object"]["objectId"]
+                driver.execute_cdp_cmd("Runtime.callFunctionOn", {
+                    "objectId": obj_id,
+                    "functionDeclaration": "function() { this.click(); }",
+                    "silent": True
+                })
+                driver.switch_to.default_content()
+                return True
+            except Exception:
+                continue
+        driver.switch_to.default_content()
+        return False
+    except Exception:
+        try: driver.switch_to.default_content()
+        except Exception: pass
+        return False
+
+
 def _click_buster_button(driver):
     """Find and click Buster's solver button - it may be outside the iframe."""
     from selenium.webdriver.common.by import By
@@ -813,16 +854,37 @@ def _click_audio_and_buster(driver, skip_image_reload=False):
                "Switched to a fresh audio challenge")
         time.sleep(2.5)
 
-        # 3) Click Buster's solve button on the audio challenge.
+        # 3) Click Buster's REAL #solver-button via CDP shadow-DOM piercing first -
+        #    give its own injected button a moment to appear after the challenge
+        #    switch, since clicking it directly (rather than the generic host div
+        #    below) is the only way that reliably triggers an actual solve attempt.
         clicked = False
-        host = driver.find_elements(By.CSS_SELECTOR, "div.help-button-holder")
-        if host:
-            try:
-                ActionChains(driver).move_to_element(host[0]).click().perform()
-                add_log("Buster clicked on the audio challenge")
+        for _ in range(4):
+            if _cdp_click_solver_button(driver):
+                add_log("Buster #solver-button clicked via CDP on the audio challenge")
                 clicked = True
+                break
+            time.sleep(0.75)
+            try:
+                driver.switch_to.default_content()
+                fr2 = driver.find_elements(By.CSS_SELECTOR,
+                    "iframe[title*='recaptcha challenge'], iframe[src*='bframe']")
+                if fr2:
+                    driver.switch_to.frame(fr2[0])
             except Exception:
                 pass
+        if not clicked:
+            # Fallback: click the generic host div (may just hover/expand, not a
+            # guaranteed real solve, but better than nothing if Buster's button
+            # genuinely never rendered).
+            host = driver.find_elements(By.CSS_SELECTOR, "div.help-button-holder")
+            if host:
+                try:
+                    ActionChains(driver).move_to_element(host[0]).click().perform()
+                    add_log("Buster clicked on the audio challenge (fallback host click)")
+                    clicked = True
+                except Exception:
+                    pass
         driver.switch_to.default_content()
         return clicked
     except Exception:
@@ -1391,7 +1453,28 @@ def _recover(sess, kind):
             if solve_with_buster(sess.driver, 3):
                 return True
 
-        # Buster failed - pause and auto-detect when solved (no Resume button needed)
+        # Buster exhausted all 3 attempts. If a proxy pool is in play, an
+        # endlessly unsolvable/regenerating audio challenge is a well-known
+        # Google response to a distrusted exit IP, not proof the solver itself
+        # is broken - rotating to a fresh identity + proxy (deep_reset wipes
+        # cookies/profile too) usually clears it instantly, where retrying the
+        # SAME captcha on the SAME burned IP just keeps reserving it. Every
+        # caller of _recover() already re-does its own action (re-search,
+        # reload page, etc.) after a True return, so there's no need to solve
+        # a captcha that's no longer even on screen - just hand back a clean
+        # session.
+        if sess.pool:
+            add_log("Buster could not clear the CAPTCHA after 3 attempts - this exit IP "
+                    "is likely flagged by Google. Rotating to a fresh identity/proxy "
+                    "instead of retrying the same blocked IP...")
+            try:
+                sess.start(rotate=True, deep_reset=True)
+                return True
+            except Exception as e:
+                add_log(f"Identity rotation failed ({e}) - falling back to manual solve.")
+
+        # Buster failed (and no proxy to rotate to) - pause and auto-detect when
+        # solved (no Resume button needed)
         bring_browser_to_front()
         return _captcha_manual_wait(sess.driver)
 
