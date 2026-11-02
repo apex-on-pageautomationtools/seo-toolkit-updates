@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.17.2"
+APP_VERSION = "4.17.3"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -874,17 +874,16 @@ def _click_audio_and_buster(driver, skip_image_reload=False):
             except Exception:
                 pass
         if not clicked:
-            # Fallback: click the generic host div (may just hover/expand, not a
-            # guaranteed real solve, but better than nothing if Buster's button
-            # genuinely never rendered).
-            host = driver.find_elements(By.CSS_SELECTOR, "div.help-button-holder")
-            if host:
-                try:
-                    ActionChains(driver).move_to_element(host[0]).click().perform()
-                    add_log("Buster clicked on the audio challenge (fallback host click)")
-                    clicked = True
-                except Exception:
-                    pass
+            # Buster's own button never rendered into this challenge at all (not a
+            # click failure - #solver-button genuinely doesn't exist in the shadow
+            # DOM yet). Clicking the generic host div here only expands Google's own
+            # "need help" text, not a real solve attempt - don't report this as a
+            # successful Buster click (that produced a misleading log + a wasted 20s
+            # wait upstream for a "solve" that was never actually attempted). Caller
+            # falls through to its own CDP-piercing retry loop regardless.
+            add_log("Buster's solver button did not render into this challenge "
+                    "(extension may not have activated for it) - skipping the fake "
+                    "click and retrying detection instead.")
         driver.switch_to.default_content()
         return clicked
     except Exception:
@@ -997,22 +996,19 @@ def solve_with_buster(driver, max_attempts=1):
                 except Exception as e:
                     add_log(f"CDP method: {e}")
 
-                # Fallback: switch to bframe and click help-button-holder
+                # Buster's #solver-button still hasn't rendered via CDP piercing on
+                # this pass - do NOT fall back to clicking the generic
+                # help-button-holder host and reporting it as a Buster click (that
+                # div is Google's own "need help" container; clicking it just
+                # expands Google's help text, never triggers an actual solve, and
+                # previously produced misleading "Buster clicked" log lines while
+                # nothing was really attempted). Just keep retrying CDP piercing -
+                # the outer loop's remaining iterations give the shadow DOM more
+                # time to appear.
                 fr = driver.find_elements(By.CSS_SELECTOR,
                     "iframe[title*='recaptcha challenge'], iframe[src*='bframe']")
-                if not fr:
-                    continue
-                driver.switch_to.frame(fr[0])
-                host = driver.find_elements(By.CSS_SELECTOR, "div.help-button-holder")
-                if host:
-                    add_log(f"help-button-holder found, size={host[0].size}")
-                    from selenium.webdriver.common.action_chains import ActionChains
-                    try:
-                        ActionChains(driver).move_to_element(host[0]).click().perform()
-                        add_log("Buster clicked via ActionChains on host")
-                        clicked = True
-                    except Exception:
-                        pass
+                if fr:
+                    driver.switch_to.frame(fr[0])
                 driver.switch_to.default_content()
             except Exception:
                 try: driver.switch_to.default_content()
@@ -1473,8 +1469,24 @@ def _recover(sess, kind):
             except Exception as e:
                 add_log(f"Identity rotation failed ({e}) - falling back to manual solve.")
 
-        # Buster failed (and no proxy to rotate to) - pause and auto-detect when
-        # solved (no Resume button needed)
+        # Buster failed and there's no proxy pool to rotate to. If the user is on
+        # a manual VPN (system/pause), repeatedly solving/waiting on the SAME VPN
+        # exit IP is the same trap the proxy-pool case above avoids - that IP is
+        # very likely the thing making every challenge unsolvable in the first
+        # place (confirmed real case: Buster clicking correctly but every audio
+        # challenge regenerating endlessly rather than ever clearing). Ask for a
+        # VPN server switch instead of a blind "solve it in the browser" wait that
+        # will probably just hit the same loop again.
+        if sess.vpn_method in ("system", "pause") and not sess.headless:
+            bring_browser_to_front()
+            return _manual_pause(
+                "Buster could not clear the CAPTCHA after 3 attempts - this VPN exit IP "
+                "is likely flagged by Google. Switch to a different VPN server/location "
+                "in your VPN app, then click Resume"
+            )
+
+        # No proxy pool, no VPN to switch - pause and auto-detect when solved (no
+        # Resume button needed)
         bring_browser_to_front()
         return _captcha_manual_wait(sess.driver)
 
