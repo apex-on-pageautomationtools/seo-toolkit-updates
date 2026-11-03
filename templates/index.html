@@ -8695,7 +8695,7 @@ https://example.com/page-2"></textarea>
         try {
           const r = await (await fetch('/api/admin/office_ips')).json();
           if (r.error) { $('adm-oip-msg').textContent = r.error; return; }
-          $('adm-oip-building').textContent = r.building ? ('— ' + r.building) : '';
+          $('adm-oip-building').textContent = r.building ? (': ' + r.building) : '';
           $('adm-oip-ips').value = r.allowed_ips || '';
           $('adm-oip-msg').textContent = '';
         } catch (e) { $('adm-oip-msg').textContent = 'Failed to load office IPs.'; }

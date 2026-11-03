@@ -52,7 +52,7 @@ def _run(domain, account_hint, format_hint):
 
     auth_files = gr.get_auth_files()
     if not auth_files:
-        return {"ok": False, "error": "no auth_states session — run: python 01_auth_setup.py <accountKey>"}
+        return {"ok": False, "error": "no auth_states session. Run: python 01_auth_setup.py <accountKey>"}
     if account_hint:
         import re
         hl = re.sub(r'@gmail\.com$', '', account_hint.lower())

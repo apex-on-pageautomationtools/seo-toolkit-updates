@@ -116,7 +116,7 @@ CHECKPOINTS = [
      "body": " The Manual Actions report lists manually detected issues with a "
              "page or site that are mostly attempts to manipulate our search "
              "index, but are not necessarily dangerous for users.",
-     "status": ("Status –", " Not found")},
+     "status": ("Status", ": Not found")},
 
     {"key": "security", "capture": "gsc:security-issues",
      "label": "Security Issues:",
@@ -549,7 +549,7 @@ def check_versions_full(domain):
         is_ok = True
         summary = f"No issue found. All variants redirect to: {list(final_urls)[0]}"
     if not is_ok:
-        summary = (f"Issue found — {len(returning_200)} URL variant(s) return HTTP 200 independently. "
+        summary = (f"Issue found. {len(returning_200)} URL variant(s) return HTTP 200 independently. "
                    f"Fix: redirect (301) all variants to one canonical URL via server config or .htaccess.")
 
     # Build table rows. An independently-200 variant is the problem when there is
@@ -584,7 +584,7 @@ def check_dummy_content(domain):
     titles = _re.findall(r'<h3[^>]*>(.*?)</h3>', html, _re.S)
     titles = [_re.sub(r'<[^>]+>', '', t).strip() for t in titles[:5] if t.strip()]
     if titles:
-        result = f"Possible dummy content found — Google shows {count} result(s) for 'site:{domain} lorem'.\nPages found:\n"
+        result = f"Possible dummy content found. Google shows {count} result(s) for 'site:{domain} lorem'.\nPages found:\n"
         result += "\n".join(f"  • {t}" for t in titles)
     else:
         result = f"Google returned {count} result(s) for 'site:{domain} lorem'. Please verify manually whether these pages contain dummy/lorem content."
@@ -659,7 +659,7 @@ def _render_status200_image(domain, results, path):
         for r in results
     ]
     _render_table_image(
-        f"HTTP Status Check — {domain}",
+        f"HTTP Status Check: {domain}",
         ["Page URL", "Status", "Result"],
         rows,
         [780, 120, 140],
@@ -675,7 +675,7 @@ def _render_canonical_image(domain, results, path):
         for r in results
     ]
     _render_table_image(
-        f"Canonical Tag Check — {domain}",
+        f"Canonical Tag Check: {domain}",
         ["Page URL", "Canonical", "Result"],
         rows,
         [540, 360, 180],
@@ -690,7 +690,7 @@ def _render_double_meta_image(domain, results, path):
         for r in results
     ]
     _render_table_image(
-        f"Meta Tags Check — {domain}",
+        f"Meta Tags Check: {domain}",
         ["Page URL", "Title", "Meta Desc", "Result"],
         rows,
         [600, 90, 110, 240],
@@ -705,7 +705,7 @@ def _render_meta_robots_image(domain, results, path):
         for r in results
     ]
     _render_table_image(
-        f"Meta Robots Check — {domain}",
+        f"Meta Robots Check: {domain}",
         ["Page URL", "Robots Value", "Result"],
         rows,
         [540, 360, 180],
@@ -715,7 +715,7 @@ def _render_meta_robots_image(domain, results, path):
 
 def _render_versions_image(domain, rows, path):
     _render_table_image(
-        f"URL Versions Check — {domain}",
+        f"URL Versions Check: {domain}",
         ["URL Variant", "HTTP", "Result"],
         rows,
         [620, 90, 360],
@@ -769,8 +769,8 @@ def build_health_docx(domain, captured=None, logo=None, score=68, out_path=None,
         if _bl_checked == 0:
             return "Could not check for broken links."
         if not _bl_broken:
-            return f"Checked {_bl_checked} links — no broken links found. See screenshot below."
-        return f"Checked {_bl_checked} links — {len(_bl_broken)} broken link(s) found. See screenshot below."
+            return f"Checked {_bl_checked} links. No broken links found. See screenshot below."
+        return f"Checked {_bl_checked} links. {len(_bl_broken)} broken link(s) found. See screenshot below."
 
     def _s200_summary():
         if not _s200_results: return "No target pages provided."
@@ -1130,11 +1130,11 @@ def _render_broken_links_image(domain, checked, broken, path):
         fs = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 15)
     except Exception:
         bold = f = fs = ImageFont.load_default()
-    d.text((26, 24), f"Broken Links Check — {domain}", fill=(31, 41, 55), font=bold)
+    d.text((26, 24), f"Broken Links Check: {domain}", fill=(31, 41, 55), font=bold)
     if not broken:
-        d.text((26, 74), f"Checked {checked} links — No broken links found.", fill=(22, 128, 67), font=f)
+        d.text((26, 74), f"Checked {checked} links. No broken links found.", fill=(22, 128, 67), font=f)
     else:
-        d.text((26, 74), f"Checked {checked} links — {len(broken)} broken:", fill=(200, 40, 60), font=f)
+        d.text((26, 74), f"Checked {checked} links. {len(broken)} broken:", fill=(200, 40, 60), font=f)
         y = 116
         d.text((26, y), "URL", fill=(120, 120, 120), font=fs)
         d.text((W - 150, y), "Status", fill=(120, 120, 120), font=fs)
@@ -1251,8 +1251,8 @@ def capture_health_screenshots(domain, account_hint=None, format_hint=None):
     if not auth_files:
         print("  [warn] no auth states found - GSC pages will be skipped")
         auth_files = []
-        out["manual"] = {"status": "⚠ GSC account not connected — run: python scripts/python/01_auth_setup.py <accountKey>"}
-        out["security"] = {"status": "⚠ GSC account not connected — run: python scripts/python/01_auth_setup.py <accountKey>"}
+        out["manual"] = {"status": "⚠ GSC account not connected. Run: python scripts/python/01_auth_setup.py <accountKey>"}
+        out["security"] = {"status": "⚠ GSC account not connected. Run: python scripts/python/01_auth_setup.py <accountKey>"}
 
     if account_hint and auth_files:
         hl = account_hint.lower()
@@ -1291,8 +1291,8 @@ def capture_health_screenshots(domain, account_hint=None, format_hint=None):
                 viewport={"width": gr.VIEWPORT_W, "height": gr.VIEWPORT_H}
             ).new_page()
             if auth_files:
-                out["manual"] = {"status": "⚠ GSC account has no access to this domain — reconnect or check permissions"}
-                out["security"] = {"status": "⚠ GSC account has no access to this domain — reconnect or check permissions"}
+                out["manual"] = {"status": "⚠ GSC account has no access to this domain. Reconnect or check permissions"}
+                out["security"] = {"status": "⚠ GSC account has no access to this domain. Reconnect or check permissions"}
 
         # Client logo (header element / og:image) for the report header.
         try:

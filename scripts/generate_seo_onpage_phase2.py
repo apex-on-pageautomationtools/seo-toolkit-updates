@@ -2648,7 +2648,7 @@ def _render_external_links_image(domain, detail, path):
         fs = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 15)
     except Exception:
         bold = f = fs = ImageFont.load_default()
-    d.text((26, 24), f"External Links Check — {domain}", fill=(31, 41, 55), font=bold)
+    d.text((26, 24), f"External Links Check: {domain}", fill=(31, 41, 55), font=bold)
     if not rows:
         d.text((26, 74), "No external links found on the target pages checked.",
                 fill=(22, 128, 67), font=f)
@@ -2684,7 +2684,7 @@ def _render_redirect_check_image(domain, url_version_checks, path):
         fs = ImageFont.truetype("C:/Windows/Fonts/arial.ttf", 15)
     except Exception:
         bold = f = fs = ImageFont.load_default()
-    d.text((26, 24), f"URL Redirection Check — {domain}", fill=(31, 41, 55), font=bold)
+    d.text((26, 24), f"URL Redirection Check: {domain}", fill=(31, 41, 55), font=bold)
     if not rows:
         d.text((26, 74), "Could not check URL versions.", fill=(200, 30, 30), font=f)
     else:

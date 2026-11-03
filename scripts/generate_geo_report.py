@@ -571,7 +571,7 @@ def build_schema_docx(domain, faqs_by_page, out_path):
 
     note_p = doc.add_paragraph()
     note_r = note_p.add_run(
-        "Note – Before adding the new suggested schema, remove the existing FAQs "
+        "Note: Before adding the new suggested schema, remove the existing FAQs "
         "schema from the page and then update the following schema to prevent any conflicts.")
     note_r.bold = True
     rpr = note_r._element.get_or_add_rPr()
