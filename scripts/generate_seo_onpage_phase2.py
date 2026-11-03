@@ -1049,12 +1049,15 @@ def _title_needs_suggestion(title, keywords=None):
 
 
 def _desc_needs_suggestion(desc, keywords=None):
-    """Missing, too short to say anything useful, or missing its target keyword
-    entirely (not optimized) - checked by word coverage, not an exact phrase match."""
+    """Missing, too short to say anything useful, too long (gets truncated in the
+    SERP snippet past ~160 characters - unlike titles, length alone DOES matter
+    here since Google visibly cuts the description off), or missing its target
+    keyword entirely (not optimized) - checked by word coverage, not an exact
+    phrase match."""
     if not desc or desc == MISSING:
         return True
     d = desc.strip().lower()
-    if len(desc.strip()) < 50:
+    if len(desc.strip()) < 50 or len(desc.strip()) > 160:
         return True
     if keywords and not _keyword_covered(d, keywords[0].strip()):
         return True
@@ -1135,6 +1138,14 @@ def suggest_meta(page_data, keywords, brand, keyword_ranks=None):
     effective_kw = primary_kw or (
         existing_h1 if existing_h1 and existing_h1 != MISSING else _slug_topic(page_data["url"]))
 
+    # Blog/article posts conventionally skip the brand suffix in the title (it's
+    # dead weight on an informational post, not a commercial landing page, and
+    # wastes character budget) - confirmed real case: a blog page's existing
+    # title already had the brand name TWICE, and the old suggestion logic kept
+    # appending it a third time regardless since it applied the same "end with
+    # the brand" rule to every page unconditionally.
+    is_blog_page = "/blog" in urllib.parse.urlparse(page_data["url"]).path.lower()
+
     best_rank = _best_rank_for_page(keywords, keyword_ranks)
     ranked_well = best_rank is not None and best_rank <= 20
     title_flagged = _title_needs_suggestion(existing_title, keywords)
@@ -1162,8 +1173,11 @@ def suggest_meta(page_data, keywords, brand, keyword_ranks=None):
                 'Return ONLY JSON: {"title": "...", "description": "..."}. '
                 "The title and description must read naturally, reflect what THIS page "
                 "is actually about (use the content excerpt, not just the keyword), "
-                "include the primary keyword/topic naturally, and end the title with the "
-                "brand name if it fits within the length.")
+                "include the primary keyword/topic naturally, and " +
+                ("NOT include the brand name - this is a blog/article post, so the "
+                 "brand suffix is skipped to save character budget for the actual topic."
+                 if is_blog_page else
+                 "end the title with the brand name if it fits within the length."))
             ai = _ai_suggest(prompt)
 
         def _trim(text, limit):
@@ -1193,7 +1207,11 @@ def suggest_meta(page_data, keywords, brand, keyword_ranks=None):
             topic = existing_h1 if existing_h1 and existing_h1 != MISSING else (effective_kw.title() or "Page")
 
             if need_title:
-                if effective_kw and effective_kw.lower() not in topic.lower():
+                if is_blog_page:
+                    suggested_title = (topic if not effective_kw
+                                        or effective_kw.lower() in topic.lower()
+                                        else f"{topic} - {effective_kw.title()}")
+                elif effective_kw and effective_kw.lower() not in topic.lower():
                     suggested_title = f"{topic} - {effective_kw.title()} | {brand}"
                 else:
                     suggested_title = f"{topic} | {brand}"
@@ -1270,7 +1288,12 @@ _SKIP_PATTERNS = re.compile(
     r"analytics\.|"
     r"pixel\.|"
     r"\.gif\?|"   # tracking pixels are usually tiny GIFs with query strings
-    r"data:image/",  # inline base64 images
+    r"data:image/|"  # inline base64 images
+    # Dynamically-generated, self-hosted API images (map/weather tiles, chart
+    # renders, etc.) - not real content images anyone manually writes alt text
+    # for. Confirmed real case: a site's own "/api/weather/radar?..." tile
+    # endpoint was being listed as an image needing alt-text optimization.
+    r"/api/[^\"'\s]*(?:format=image|layers=|tile)",
     re.I
 )
 
@@ -1303,9 +1326,54 @@ def _is_self_hosted(src, domain):
     return False
 
 
+def _alt_text_from_filename(src, page_data, keywords, brand):
+    """Build a real, readable alt-text suggestion from the image's own filename
+    (the only per-image content signal this crawler has - no vision model call),
+    falling back to the page's topic/keyword when the filename itself is too
+    generic to describe anything (e.g. "img-1234", "DSC0012", a bare hash).
+    Previously this column was left completely blank for every image, asking
+    the user to write all of them manually - this at least gives a concrete
+    starting point grounded in the actual filename/page, to review and refine
+    rather than write from scratch."""
+    parsed = urllib.parse.urlparse(src)
+    path = parsed.path
+    # Next.js (and similar) image-optimizer proxies hide the real filename
+    # inside a "url=" query param ("/_next/image?url=%2Fassets%2Froofing-
+    # hero.jpg&w=3840") - the proxy path itself ("/_next/image") carries no
+    # real content signal, so unwrap the actual source filename when present.
+    qs = urllib.parse.parse_qs(parsed.query)
+    real_url = (qs.get("url") or [None])[0]
+    if real_url:
+        path = urllib.parse.urlparse(urllib.parse.unquote(real_url)).path
+    stem = Path(path).stem
+    stem = re.sub(r"[-_]+", " ", stem).strip()
+    # Strip common CMS/size/hash suffixes ("-1200x800", "-scaled", "-e1623...")
+    stem = re.sub(r"\s*\b\d{2,4}\s*x\s*\d{2,4}\b\s*$", "", stem, flags=re.I)
+    stem = re.sub(r"\s*\b(scaled|thumbnail|thumb)\b\s*$", "", stem, flags=re.I)
+    is_generic = (not stem or len(stem) < 4
+                  or bool(re.fullmatch(r"[\da-f\s-]{4,}", stem, re.I))  # hash/hex-ish
+                  or bool(re.fullmatch(r"(img|image|photo|pic|dsc)[\s\d]*", stem, re.I)))
+    topic = (page_data.get("h1") if page_data.get("h1") and page_data["h1"] != MISSING
+              else (keywords[0] if keywords else ""))
+    if is_generic:
+        base = topic or (brand or "")
+    else:
+        base = stem.title()
+        if topic and topic.lower() not in base.lower():
+            base = f"{base} - {topic}"
+    if not base:
+        return ""
+    if brand and brand.lower() not in base.lower():
+        base = f"{base} | {brand}"
+    return base[:125].rstrip(" -|")
+
+
 def suggest_alt(page_data, keywords, brand, domain=""):
-    """List all images with their existing alt text. Suggested alt is left empty —
-    the user checks the actual image and fills it in manually.
+    """List all images with their existing alt text, plus a suggested alt text
+    derived from the image's own filename + page topic/keyword (see
+    _alt_text_from_filename) - a concrete starting point to review, not a
+    final answer (no vision model is called, so it can't describe what's
+    actually IN the image, only what its filename/context implies).
     Only includes self-hosted / easily updatable images.
     External CDN images are listed separately with a dev-check note."""
     self_hosted = []
@@ -1316,7 +1384,9 @@ def suggest_alt(page_data, keywords, brand, domain=""):
         if not src or _SKIP_PATTERNS.search(src):
             continue
         existing_alt = img.get("alt", "") or ""
-        entry = {"page": page_data["url"], "image": src, "existing_alt": existing_alt, "suggested_alt": ""}
+        suggested = "" if existing_alt else _alt_text_from_filename(src, page_data, keywords, brand)
+        entry = {"page": page_data["url"], "image": src, "existing_alt": existing_alt,
+                 "suggested_alt": suggested}
 
         if _is_self_hosted(src, domain):
             self_hosted.append(entry)
@@ -2292,16 +2362,6 @@ def _detect_footer_logo(home_html):
     return False
 
 
-def _strip_scheme_www(url):
-    """Normalize to host+path so canonical comparisons don't flag a legitimate
-    scheme (http/https) or 'www.' prefix difference as a mismatch."""
-    parts = urllib.parse.urlsplit(url)
-    host = parts.netloc.lower()
-    if host.startswith("www."):
-        host = host[4:]
-    return host + parts.path.rstrip("/")
-
-
 _FAQ_LINK_RE = re.compile(r"/faq", re.I)
 _FAQ_TEXT_RE = re.compile(r"\bfaqs?\b|frequently asked questions", re.I)
 
@@ -2479,12 +2539,21 @@ def audit_site(domain, pages_data, dry_run=False):
         # set" result.
         f["canonical_issue"] = True
     else:
-        canon_norm = _strip_scheme_www(f["home_canonical"])
-        root_norm = _strip_scheme_www(root)
-        # A canonical that only differs from root by scheme (http/https) or a
-        # "www." prefix is still self-referencing to the one preferred version,
-        # not a real mismatch.
-        f["canonical_issue"] = canon_norm != root_norm
+        # Compare against the homepage's ACTUAL served URL (post-redirect, so it
+        # reflects whichever www/non-www version the site really loads on), not
+        # the raw input "root" - and only strip scheme (http/https), never
+        # "www.". A canonical pointing to the non-www version while the site
+        # actually serves www (or vice versa) IS a real mismatch worth flagging
+        # - confirmed real case: a site loading on www with its canonical tag
+        # pointing to the non-www version was being reported as "correct"
+        # because the old check stripped www from both sides before comparing,
+        # silently treating two different origins as the same one.
+        def _strip_scheme(u):
+            return re.sub(r"^https?://", "", u or "", flags=re.I).rstrip("/")
+        served = home.get("url") or root
+        canon_norm = _strip_scheme(f["home_canonical"])
+        served_norm = _strip_scheme(served)
+        f["canonical_issue"] = canon_norm != served_norm
 
     # noindex check - look for meta robots noindex in each target page's HTML
     noindex_pages = []
@@ -8667,8 +8736,19 @@ def _build_docx_hexaup(domain, pages_data, findings, captured, brand, out_path):
          "pages. It ensures that all pages are crawled efficiently, improving visibility and SEO "
          "performance.")
     if findings.get("sitemap_found"):
-        lead("Suggestions– ", "Sitemap file found on the website and appears correctly "
-             "configured. This is good from an SEO point of view." + _sitemap_missing_suffix(findings))
+        _sm_missing = _sitemap_missing_suffix(findings)
+        if _sm_missing:
+            # Don't call it "correctly configured"/"good from an SEO point of
+            # view" in the same breath as listing target pages missing from it
+            # - confirmed real case: a sitemap missing ALL 11 of 11 target
+            # pages was still being praised as good, directly contradicting
+            # the very next sentence.
+            lead("Suggestions– ", "Sitemap file found on the website, but it is not fully "
+                 "optimized." + _sm_missing + " We recommend updating the sitemap to include "
+                 "these pages.")
+        else:
+            lead("Suggestions– ", "Sitemap file found on the website and appears correctly "
+                 "configured. This is good from an SEO point of view.")
         p = doc.add_paragraph()
         _run(p, findings.get("sitemap_url") or (root + "/sitemap.xml"), bold=True)
     else:
@@ -8812,7 +8892,13 @@ def _build_docx_hexaup(domain, pages_data, findings, captured, brand, out_path):
     subheading("Schema Code Suggestions")
     homepage = pages_data[0] if pages_data else {}
     home_html = homepage.get("html") or ""
-    has_org_schema = bool(re.search(r'"@type"\s*:\s*"[^"]*Organization[^"]*"', home_html))
+    # "@type" can be a bare string ("@type": "Organization") or an array
+    # ("@type": ["Organization", "LocalBusiness", ...]) - confirmed real case:
+    # a site's actual Organization schema used the array form and was being
+    # reported as entirely missing because the old regex only matched a
+    # literal quote right after the colon, never a "[".
+    has_org_schema = bool(re.search(
+        r'"@type"\s*:\s*\[?\s*"[^"]*Organization[^"]*"', home_html))
     if not has_org_schema:
         body("As per the website audit, we observed that the homepage does not include "
              "Organization Schema Markup. Adding this Schema will help search engines better "
@@ -9086,8 +9172,14 @@ def _build_docx_hexafvr(domain, pages_data, findings, captured, brand, out_path)
            "visibility and SEO performance.")
     findings_heading()
     if findings.get("sitemap_found"):
-        body("An optimized XML sitemap file is present on the website. For now, no need changes "
-             "in it." + _sitemap_missing_suffix(findings))
+        _sm_missing = _sitemap_missing_suffix(findings)
+        if _sm_missing:
+            body("An XML sitemap file is present on the website, but it is not fully up to "
+                 "date." + _sm_missing + " We recommend updating the sitemap to include "
+                 "these pages.")
+        else:
+            body("An optimized XML sitemap file is present on the website. For now, no need "
+                 "changes in it.")
         p = doc.add_paragraph()
         _run(p, findings.get("sitemap_url") or (root + "/sitemap.xml"), bold=True)
     else:
@@ -9204,7 +9296,13 @@ def _build_docx_hexafvr(domain, pages_data, findings, captured, brand, out_path)
     findings_heading()
     homepage = pages_data[0] if pages_data else {}
     home_html = homepage.get("html") or ""
-    has_org_schema = bool(re.search(r'"@type"\s*:\s*"[^"]*Organization[^"]*"', home_html))
+    # "@type" can be a bare string ("@type": "Organization") or an array
+    # ("@type": ["Organization", "LocalBusiness", ...]) - confirmed real case:
+    # a site's actual Organization schema used the array form and was being
+    # reported as entirely missing because the old regex only matched a
+    # literal quote right after the colon, never a "[".
+    has_org_schema = bool(re.search(
+        r'"@type"\s*:\s*\[?\s*"[^"]*Organization[^"]*"', home_html))
     if not has_org_schema:
         body("As per the website audit, and observed that the homepage does not include "
              "Organization Schema Markup. Adding these Schema will help search engines better "
@@ -9413,7 +9511,18 @@ def _detect_schema(pages_data):
                               html, re.S | re.I):
             try:
                 data = json.loads(m.group(1).strip())
-                items = data if isinstance(data, list) else [data]
+                # A single JSON-LD block commonly bundles several schema types
+                # together under "@graph" (e.g. Organization + BreadcrumbList +
+                # LocalBusiness in one script tag) rather than as a top-level
+                # list - confirmed real case: a site's homepage schema was
+                # entirely missed because its 4 types were all nested inside
+                # one @graph array, and the old code only ever looked at
+                # data["@type"] on the outer object (which has no @type of its
+                # own when @graph is used) or a bare top-level list.
+                if isinstance(data, dict) and isinstance(data.get("@graph"), list):
+                    items = data["@graph"]
+                else:
+                    items = data if isinstance(data, list) else [data]
                 for item in items:
                     t = item.get("@type") if isinstance(item, dict) else None
                     if t:
@@ -9554,9 +9663,15 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
     para("XML sitemaps guide crawlers to discover and index content efficiently. An updated "
          "sitemap helps with new pages and reduces crawl waste.")
     if findings.get("sitemap_found"):
-        conclusion("An existing sitemap.xml file was found and is reachable. It's good from "
-                   "a search engine point of view - no changes needed to the existing "
-                   "sitemap.")
+        _sm_missing = _sitemap_missing_suffix(findings)
+        if _sm_missing:
+            conclusion("An existing sitemap.xml file was found and is reachable, but it is "
+                       "not fully up to date." + _sm_missing + " We recommend updating the "
+                       "sitemap to include these pages.")
+        else:
+            conclusion("An existing sitemap.xml file was found and is reachable. It's good "
+                       "from a search engine point of view - no changes needed to the "
+                       "existing sitemap.")
     else:
         conclusion("No reachable sitemap.xml was found. We recommend adding one and "
                    "submitting it via Google Search Console.")
@@ -10016,7 +10131,11 @@ def main():
     # already generated above), built strictly from real data this script has
     # already collected. See D:\Report Formats\On-Page Report Formats\<Format>\
     # for the reference this is matched against.
-    if fmt in ("camila", "deltafvr", "theta", "eta", "hexaup"):
+    # Skipped entirely (no blank/headers-only sheet) when there are no broken
+    # links to report - matches the "never fabricate / never a blank file"
+    # convention above, and the team's own reference package for a clean site
+    # simply omits this deliverable rather than attaching an empty one.
+    if fmt in ("camila", "deltafvr", "theta", "eta", "hexaup") and findings.get("broken_links_detail"):
         # Hexa Up's real reference file is "Broken link Suggestion - <domain>.xlsx"
         # (lowercase "link") with its own sheet name/header color - every other
         # format here keeps the shared default name/style.
