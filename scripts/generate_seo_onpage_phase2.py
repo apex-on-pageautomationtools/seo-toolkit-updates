@@ -179,8 +179,15 @@ def load_targets(targets_path, domain):
     # The homepage should always be part of the audited target pages - checks like
     # canonical/noindex/meta robots are meant to cover it even when the team's
     # keyword sheet only lists inner pages, not the domain root itself.
+    # Compare www-insensitively - site_root() always builds the non-www form,
+    # but the sheet's own homepage row may use "https://www.{domain}/". A plain
+    # string compare missed that match and inserted a second, blank homepage
+    # entry (no keywords, no word count) alongside the real one - a real case
+    # confirmed in a report where the sheet listed the www homepage.
+    def _www_insensitive(u):
+        return re.sub(r"^https?://(?:www\.)?", "", u, flags=re.I).rstrip("/")
     home = site_root(domain) + "/"
-    if not any(r["page"].rstrip("/") + "/" == home for r in result):
+    if not any(_www_insensitive(r["page"]) == _www_insensitive(home) for r in result):
         result.insert(0, {"page": home, "keywords": [], "keyword_ranks": {}})
     return result
 
