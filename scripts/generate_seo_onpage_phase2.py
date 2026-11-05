@@ -2192,6 +2192,47 @@ def _sitemap_loc_urls(body, _depth=0):
     return locs
 
 
+def _render_sitemap_local_html(sitemap_url, sitemap_body, limit=60):
+    """Build a clean, self-contained HTML page listing the sitemap's own <loc>
+    entries (top level only - a sitemapindex lists its sub-sitemap files, same
+    as what a real XSLT-styled sitemap.xml page shows), styled to match a
+    WordPress-generated sitemap's own look. Used instead of navigating the
+    capture browser straight to the real .xml URL, which lets Chrome/Edge's
+    native XSLT-deprecation warning banner cover the real content (see the
+    'local_html' comment in capture_onpage_screenshots). Returns None if there
+    is no body to render (falls back to the old direct-navigation behavior)."""
+    if not sitemap_body:
+        return None
+    locs = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", sitemap_body, re.I)
+    if not locs:
+        return None
+    total = len(locs)
+    locs = locs[:limit]
+    esc = lambda s: (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+    rows = "".join(
+        f'<tr style="background:{"#f6f7f7" if i % 2 else "#fff"}">'
+        f'<td style="padding:10px 14px;border-top:1px solid #e2e4e7;'
+        f'font:14px/1.4 Arial,sans-serif;color:#2271b1;word-break:break-all;">'
+        f'<a href="#" style="color:#2271b1;text-decoration:none;">{esc(u)}</a></td></tr>'
+        for i, u in enumerate(locs))
+    note = (f'<p style="font:13px Arial,sans-serif;color:#646970;margin:10px 0 0;">'
+            f'Showing the first {limit} of {total} entries.</p>' if total > limit else "")
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<title>Sitemap</title></head>
+<body style="margin:0;padding:24px;background:#fff;font-family:Arial,sans-serif;">
+<p style="font:13px Arial,sans-serif;color:#646970;margin:0 0 12px;">This XML Sitemap is generated
+by WordPress to make your content more visible for search engines.</p>
+<p style="font:13px Arial,sans-serif;color:#646970;margin:0 0 16px;">Number of URLs in this
+XML Sitemap: {total}.</p>
+<table style="width:100%;border-collapse:collapse;border:1px solid #e2e4e7;">
+<tr style="background:#f0f0f1;"><th style="text-align:left;padding:10px 14px;
+font:bold 14px Arial,sans-serif;color:#1d2327;border-bottom:1px solid #e2e4e7;">URL</th></tr>
+{rows}
+</table>
+{note}
+</body></html>"""
+
+
 def verify_sitemap_coverage(sitemap_body, target_pages):
     """Which of the report's target pages are actually listed in the sitemap
     (following sitemap-index sub-sitemaps first) - not just whether sitemap.xml
@@ -2639,6 +2680,26 @@ def audit_site(domain, pages_data, dry_run=False):
     return f
 
 
+def _fit_text(d, text, font, max_width):
+    """Truncate text to fit max_width pixels, cutting on a real pixel
+    measurement (not a fixed character count) and appending '...' so a
+    truncation is visible instead of silently chopping a URL mid-word - a
+    real case was a flat [:70] slice cutting "...telecommunications_.php"
+    down to "...telecommunications_.ph" with no indication anything was cut."""
+    text = str(text)
+    if d.textlength(text, font=font) <= max_width:
+        return text
+    ell = "..."
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if d.textlength(text[:mid] + ell, font=font) <= max_width:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo] + ell if lo > 0 else ell
+
+
 def _render_external_links_image(domain, detail, path):
     """Render the external-links list as a clean image for the report - same
     look as health_audit's broken-links image. `detail` is findings["external_links_detail"]
@@ -2666,9 +2727,11 @@ def _render_external_links_image(domain, detail, path):
         d.text((26, y), "Found On", fill=(120, 120, 120), font=fs)
         d.text((W // 2, y), "External Link", fill=(120, 120, 120), font=fs)
         y += 28
+        col1_w = (W // 2) - 26 - 20
+        col2_w = W - (W // 2) - 26
         for row in rows:
-            d.text((26, y), str(row.get("page", ""))[:70], fill=(40, 40, 40), font=fs)
-            d.text((W // 2, y), str(row.get("link", ""))[:70], fill=(40, 40, 40), font=fs)
+            d.text((26, y), _fit_text(d, row.get("page", ""), fs, col1_w), fill=(40, 40, 40), font=fs)
+            d.text((W // 2, y), _fit_text(d, row.get("link", ""), fs, col2_w), fill=(40, 40, 40), font=fs)
             y += 28
     img.save(str(path))
 
@@ -2700,13 +2763,15 @@ def _render_redirect_check_image(domain, url_version_checks, path):
         d.text((int(W * 0.55), y), "Status Code", fill=(120, 120, 120), font=fs)
         d.text((int(W * 0.72), y), "Final Destination", fill=(120, 120, 120), font=fs)
         y += 34
+        col1_w = int(W * 0.55) - 26 - 20
+        col3_w = W - int(W * 0.72) - 26
         for row in rows:
             status = row.get("status")
             ok = status == 200
             color = (22, 128, 67) if ok else (40, 40, 40)
-            d.text((26, y), str(row.get("version", ""))[:60], fill=(40, 40, 40), font=fs)
+            d.text((26, y), _fit_text(d, row.get("version", ""), fs, col1_w), fill=(40, 40, 40), font=fs)
             d.text((int(W * 0.55), y), str(status), fill=color, font=fs)
-            d.text((int(W * 0.72), y), str(row.get("final_url", ""))[:60], fill=(40, 40, 40), font=fs)
+            d.text((int(W * 0.72), y), _fit_text(d, row.get("final_url", ""), fs, col3_w), fill=(40, 40, 40), font=fs)
             y += 34
     img.save(str(path))
 
@@ -2846,7 +2911,7 @@ def check_site_indexing(domain, target_pages, out, path_fn, log_fn=None, already
     return results
 
 
-def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=None,
+def capture_onpage_screenshots(domain, sitemap_url=None, sitemap_body=None, external_links_detail=None,
                                target_pages=None, gsc_indexing=None, url_version_checks=None):
     """Live, HEADLESS screenshots for the report - all public pages/tools, so no
     Google login is needed. Captured with selenium + Chrome via CDP: the embedded
@@ -2870,7 +2935,11 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
     root = f"https://{domain}"
 
     def path(k):
-        return os.path.join(out_dir, f"{domain}_seo_{k}.png")
+        # `k` is usually a short fixed label ("homepage", "robots", ...) but is
+        # also used as a full target-page URL for the per-page shots below -
+        # sanitize so a URL's "/" and ":" never land in the actual filename.
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(k)).strip("_")[:120] or "page"
+        return os.path.join(out_dir, f"{domain}_seo_{safe}.png")
 
     def _wait_settled(max_wait):
         """Poll for hydration-stable instead of always sleeping the full max_wait -
@@ -2931,6 +3000,21 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
                 var start = idx === -1 ? 0 : Math.max(0, idx - 1);
                 var end = idx === -1 ? Math.min(lines.length, 3) : Math.min(lines.length, idx + 2);
 
+                // A full-viewport opaque backdrop BEHIND the widget - the crop
+                // below is the widget's bounding box plus a small margin, and
+                // without this, that margin showed a thin sliver of the real
+                // page's own content (e.g. its header/logo) peeking out above/
+                // around the widget - a real case on a site with a fixed-
+                // position top header. The backdrop guarantees the crop only
+                // ever shows white + the widget, regardless of margin.
+                var backdrop = document.getElementById('__tag_highlight_backdrop');
+                if (backdrop) backdrop.remove();
+                backdrop = document.createElement('div');
+                backdrop.id = '__tag_highlight_backdrop';
+                backdrop.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;'
+                    + 'background:#fff;z-index:2147483646;';
+                document.body.insertBefore(backdrop, document.body.firstChild);
+
                 var box = document.createElement('div');
                 box.id = '__tag_highlight_overlay';
                 box.style.cssText = 'position:fixed;top:20px;left:20px;z-index:2147483647;'
@@ -2978,10 +3062,25 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
         except Exception:
             return None
 
-    def _shot(key, url, height=900, view_source=False, sucuri=False, highlight=None, auto_height=False, _attempt=1):
+    def _shot(key, url, height=900, view_source=False, sucuri=False, highlight=None,
+              auto_height=False, local_html=None, _attempt=1):
         p = path(key)
         try:
-            driver.get(("view-source:" + url) if view_source else url)
+            if local_html is not None:
+                # Render our OWN clean HTML instead of navigating the browser to a
+                # real page - used for the sitemap shot (see below): Chrome/Edge
+                # inject a native "This site uses XSLT..." deprecation warning
+                # banner over real XSLT-styled sitemap.xml pages, which is pure
+                # browser chrome (not page DOM), so no amount of JS/CSS cleanup
+                # can remove it - a real case where it covered the top of the
+                # sitemap table in the report screenshot. A locally-rendered page
+                # has no XSLT stylesheet at all, so the banner never triggers.
+                html_path = os.path.join(out_dir, f"_{key}_local.html")
+                with open(html_path, "w", encoding="utf-8") as hf:
+                    hf.write(local_html)
+                driver.get("file:///" + html_path.replace("\\", "/"))
+            else:
+                driver.get(("view-source:" + url) if view_source else url)
             if view_source:
                 _t.sleep(4)          # view-source: pages don't hydrate normally - keep the fixed wait
             else:
@@ -3001,11 +3100,16 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
                     return
             if sucuri:
                 # Click Sucuri's cookie-consent "Accept" so it isn't in the shot.
+                # Match on CONTAINS, not exact equality - a real case (Sucuri's own
+                # Osano-powered banner) used "Accept All Cookies", which the old
+                # exact-match list ('accept'/'accept all'/...) never matched, so the
+                # banner stayed in the shot and covered the verdict card beneath it.
                 try:
                     driver.execute_script("""
                         var els=document.querySelectorAll('button,a,input[type=button],input[type=submit],span,div');
                         for(var i=0;i<els.length;i++){var t=(els[i].textContent||els[i].value||'').trim().toLowerCase();
-                          if(t==='accept'||t==='accept all'||t==='i accept'||t==='allow all'||t==='allow'||t==='got it'||t==='agree'){try{els[i].click();}catch(e){}return;}}
+                          if(!t||t.length>30) continue;
+                          if(/^(i )?accept|allow all|allow cookies|got it|agree|ok,? (i )?(got|understand)/.test(t)){try{els[i].click();}catch(e){}return;}}
                     """)
                     _t.sleep(1.2)
                 except Exception:
@@ -3013,7 +3117,21 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
             try:
                 driver.execute_script(
                     "document.querySelectorAll('.cookie-banner,.consent-banner,"
-                    "[class*=cookie],[class*=consent],[id*=cookie],[id*=consent],#cookie-law-info-bar')"
+                    "[class*=cookie],[class*=consent],[id*=cookie],[id*=consent],#cookie-law-info-bar,"
+                    # Common consent-widget vendors whose own class/id names don't
+                    # contain "cookie" or "consent" at all, so the generic patterns
+                    # above miss them entirely. #gtm_privacy is a CONFIRMED real
+                    # case: Sucuri's own cookie banner is Google Tag Manager's
+                    # consent widget, rendered into an open shadow root inside a
+                    # plain <div id="gtm_privacy"> host - found via live DOM
+                    # inspection after the generic cleanup kept missing it and
+                    # the banner stayed visible, cut off at the bottom of the
+                    # report screenshot. The others below are untested but cover
+                    # the same gap for other common vendors.
+                    "#gtm_privacy,[class*=osano],[id*=osano],#onetrust-banner-sdk,#onetrust-consent-sdk,"
+                    "[id*=CybotCookiebotDialog],.cc-window,.cc-banner,[class*=termly],"
+                    "#truste-consent-track,.qc-cmp2-container,[class*=cmplz],"
+                    "#iubenda-cs-banner,[class*=iubenda-cs]')"
                     ".forEach(function(e){e.remove();}); window.scrollTo(0,0);")
             except Exception:
                 pass
@@ -3089,7 +3207,8 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
                 # slot empty - one retry catches most flaky failures.
                 _t.sleep(1.5)
                 return _shot(key, url, height=height, view_source=view_source,
-                             sucuri=sucuri, highlight=highlight, auto_height=auto_height, _attempt=_attempt + 1)
+                             sucuri=sucuri, highlight=highlight, auto_height=auto_height,
+                             local_html=local_html, _attempt=_attempt + 1)
             try:                                   # last resort: plain viewport shot
                 driver.save_screenshot(p)
                 out[key] = p
@@ -3103,8 +3222,30 @@ def capture_onpage_screenshots(domain, sitemap_url=None, external_links_detail=N
     _shot("noindex",   root + "/", highlight="robots")
     _shot("lang",      root + "/", highlight="lang")
     if sitemap_url:                                # only shoot a sitemap that exists
-        _shot("sitemap", sitemap_url, height=760)
+        sitemap_html = _render_sitemap_local_html(sitemap_url, sitemap_body)
+        _shot("sitemap", sitemap_url, height=760, local_html=sitemap_html)
     _shot("serp",      f"https://www.google.com/search?q=site:{domain}", height=900)
+
+    # Per-target-page screenshots for the Content Suggestion report's own
+    # "Screenshots:" section under each target page - this never existed
+    # anywhere in the pipeline before (confirmed real case: every page's
+    # "Screenshots:" label was followed by nothing, for every report, because
+    # build_content_suggestion_docx's `captured` dict was always empty - no
+    # capture step populated it with per-page shots keyed by URL). Capped to
+    # a reasonable count so a large keyword sheet doesn't balloon capture
+    # time; the homepage reuses the shot already taken above instead of a
+    # second navigation to the same URL.
+    home_norm = (root + "/").rstrip("/") + "/"
+    for u in (target_pages or [])[:15]:
+        if not u:
+            continue
+        if u.rstrip("/") + "/" == home_norm:
+            if out.get("homepage"):
+                out[u] = out["homepage"]
+            continue
+        if u in out:
+            continue
+        _shot(u, u, height=900)
 
     # Indexing fallback: GSC is the 1st option (already checked in main() before
     # this runs, results passed in via gsc_indexing); any target page GSC didn't
@@ -10060,7 +10201,7 @@ def main():
         log("[4/5] Capturing screenshots (Sucuri, robots, indexing, wayback...)")
         try:
             captured = capture_onpage_screenshots(
-                domain, sitemap_url=sitemap_url,
+                domain, sitemap_url=sitemap_url, sitemap_body=sitemap_body,
                 external_links_detail=findings.get("external_links_detail"),
                 target_pages=findings["target_pages"],
                 gsc_indexing=findings.get("gsc_indexing"),
@@ -10205,7 +10346,7 @@ def main():
     build_onpage_docx(domain, pages_data, findings, captured, brand, doc_f, fmt=fmt)
 
     content_doc = work / f"Content Suggestion - {domain}.docx"
-    build_content_suggestion_docx(domain, pages_data, targets, content_doc)
+    build_content_suggestion_docx(domain, pages_data, targets, content_doc, captured=captured)
 
     log("[4/5] Wrote docx + content suggestion + xlsx + sitemap")
 
