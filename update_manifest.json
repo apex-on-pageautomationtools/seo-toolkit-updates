@@ -1,5 +1,5 @@
 {
-  "version": "4.18.7",
+  "version": "4.18.8",
   "files": [
     {
       "path": "da_checker.py",
@@ -43,7 +43,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "a6bcb0af71c832c8f0606d41188eb2e9e9f941594e574ace4952c80cdaeb804c",
+      "hash": "7df34f90da6802f0604205ef017c69d986c5836d45a409759ebdb9d2450afc50",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -285,6 +285,11 @@
       "path": "scripts/generate_index_coverage_report.py",
       "hash": "b5d270e08891c9240ee9a9266824fe5f54573e0ddcec95a8a14b07093c540eef",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/scripts/generate_index_coverage_report.py"
+    },
+    {
+      "path": "extensions/buster/src/base/script.js",
+      "hash": "2bca67b0f551875db7ea0f5a4935f04c37c21f0b8e557cc40b268568d8c1c0c5",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/extensions/buster/src/base/script.js"
     }
   ]
 }
