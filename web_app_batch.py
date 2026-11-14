@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.18.6"
+APP_VERSION = "4.18.7"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -722,47 +722,6 @@ def _click_in_bframe(driver, selectors):
             pass
         return False
 
-def _cdp_click_solver_button(driver):
-    """Click Buster's real #solver-button inside its CLOSED shadow DOM via CDP
-    piercing. This is the only way to reach Buster's actual button - a plain
-    Selenium/ActionChains click on div.help-button-holder (the host element)
-    hits Google's own generic "need help" container, not the button Buster
-    injects inside it, and can silently look like a successful click in the
-    logs without ever invoking Buster's solve. Returns True only if a real
-    #solver-button node was found and clicked."""
-    from selenium.webdriver.common.by import By
-    try:
-        driver.switch_to.default_content()
-        fr = driver.find_elements(By.CSS_SELECTOR,
-            "iframe[title*='recaptcha challenge'], iframe[src*='bframe']")
-        if fr:
-            driver.switch_to.frame(fr[0])
-        doc = driver.execute_cdp_cmd("DOM.getDocument", {"depth": -1, "pierce": True})
-        result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
-            "nodeId": doc["root"]["nodeId"],
-            "selector": "#solver-button"
-        })
-        for nid in result.get("nodeIds", []):
-            try:
-                remote = driver.execute_cdp_cmd("DOM.resolveNode", {"nodeId": nid})
-                obj_id = remote["object"]["objectId"]
-                driver.execute_cdp_cmd("Runtime.callFunctionOn", {
-                    "objectId": obj_id,
-                    "functionDeclaration": "function() { this.click(); }",
-                    "silent": True
-                })
-                driver.switch_to.default_content()
-                return True
-            except Exception:
-                continue
-        driver.switch_to.default_content()
-        return False
-    except Exception:
-        try: driver.switch_to.default_content()
-        except Exception: pass
-        return False
-
-
 def _click_buster_button(driver):
     """Find and click Buster's solver button - it may be outside the iframe."""
     from selenium.webdriver.common.by import By
@@ -796,109 +755,6 @@ def _click_buster_button(driver):
     return _click_in_bframe(driver, ["#solver-button", ".help-button-holder button",
                                      "[id*='solver']", "[class*='solver']"])
 
-def _click_audio_and_buster(driver, skip_image_reload=False):
-    """Recovery when Buster/audio keeps failing: FIRST toggle to the IMAGE challenge
-    (the image / 'eye' button) and reload it a couple of times - this clears the audio
-    'automated queries' rate-limit - THEN switch to a fresh AUDIO challenge and click
-    Buster (which solves audio). Image-reload → audio → Buster is what gets it unstuck.
-
-    skip_image_reload=True skips step 1 and goes straight to switching to audio -
-    used for the first, direct attempt (see solve_with_buster), since the image-
-    reload dance is itself extra interaction with Google's challenge system (2
-    reloads + a challenge-type switch) on every single CAPTCHA if always run
-    unconditionally - reserved as a fallback for when a direct audio attempt
-    genuinely needs the rate-limit reset, not spent on every CAPTCHA regardless."""
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.common.action_chains import ActionChains
-    try:
-        driver.switch_to.default_content()
-        fr = driver.find_elements(By.CSS_SELECTOR,
-            "iframe[title*='recaptcha challenge'], iframe[src*='bframe']")
-        if not fr:
-            return False
-        driver.switch_to.frame(fr[0])
-
-        def _click(selectors, label=None):
-            for sel in selectors:
-                els = driver.find_elements(By.CSS_SELECTOR, sel)
-                if not els:
-                    continue
-                try:
-                    els[0].click()
-                except Exception:
-                    try:
-                        ActionChains(driver).move_to_element(els[0]).click().perform()
-                    except Exception:
-                        continue
-                if label:
-                    add_log(label)
-                return True
-            return False
-
-        # 1) Switch to the IMAGE challenge (the image / "eye" button) and reload it,
-        #    also trying a verify/skip button if reCAPTCHA offers one instead of a
-        #    plain reload (e.g. when it can't find matching images) - either clears
-        #    the audio rate-limit for the next step. Slower pacing here (vs. the
-        #    original 1.5s waits) is deliberate: confirmed live that Google can
-        #    still hand back the SAME (bad/undetectable) audio sample if the
-        #    switch-away-and-back happens too fast, same way a human clicking
-        #    quickly wouldn't actually get a fresh challenge either - a real user
-        #    manually doing this exact dance (switch to visual, then back to a
-        #    new audio challenge) reliably got Buster a solvable sample, where
-        #    the faster automated version kept landing on bad audio instead.
-        if not skip_image_reload:
-            _click(["#recaptcha-image-button", "button[id*='image']", "button[title*='image']"],
-                   "Switched to the image challenge (eye)")
-            time.sleep(2.5)
-            for _ in range(2):
-                if _click(["#recaptcha-reload-button", ".reload-button-holder button",
-                           "button[id*='reload']", "#recaptcha-verify-button",
-                           "button[id*='verify']", "button[id*='skip']"], "Reloaded the challenge"):
-                    time.sleep(2.5)
-
-        # 2) Switch to a FRESH audio challenge (the headphones button).
-        _click(["#recaptcha-audio-button", "button[id*='audio']", "button[title*='audio']"],
-               "Switched to a fresh audio challenge")
-        time.sleep(4.5)
-
-        # 3) Click Buster's REAL #solver-button via CDP shadow-DOM piercing first -
-        #    give its own injected button a moment to appear after the challenge
-        #    switch, since clicking it directly (rather than the generic host div
-        #    below) is the only way that reliably triggers an actual solve attempt.
-        clicked = False
-        for _ in range(4):
-            if _cdp_click_solver_button(driver):
-                add_log("Buster #solver-button clicked via CDP on the audio challenge")
-                clicked = True
-                break
-            time.sleep(0.75)
-            try:
-                driver.switch_to.default_content()
-                fr2 = driver.find_elements(By.CSS_SELECTOR,
-                    "iframe[title*='recaptcha challenge'], iframe[src*='bframe']")
-                if fr2:
-                    driver.switch_to.frame(fr2[0])
-            except Exception:
-                pass
-        if not clicked:
-            # Buster's own button never rendered into this challenge at all (not a
-            # click failure - #solver-button genuinely doesn't exist in the shadow
-            # DOM yet). Clicking the generic host div here only expands Google's own
-            # "need help" text, not a real solve attempt - don't report this as a
-            # successful Buster click (that produced a misleading log + a wasted 20s
-            # wait upstream for a "solve" that was never actually attempted). Caller
-            # falls through to its own CDP-piercing retry loop regardless.
-            add_log("Buster's solver button did not render into this challenge "
-                    "(extension may not have activated for it) - skipping the fake "
-                    "click and retrying detection instead.")
-        driver.switch_to.default_content()
-        return clicked
-    except Exception:
-        try: driver.switch_to.default_content()
-        except Exception: pass
-        return False
-
-
 def _buster_service_worker_present(driver):
     """Quiet (non-logging) check for whether Buster's extension actually
     registered a service worker target in this browser - the same signal
@@ -926,8 +782,29 @@ def _verify_buster_loaded(driver):
 
 
 def solve_with_buster(driver, max_attempts=1):
+    """Despite the name (kept to avoid touching the one call site), this no
+    longer actually depends on Buster's own injected button at all. Root
+    cause confirmed live, repeatedly, across the public api2 demo AND a
+    real Enterprise reCAPTCHA block - both automated and on an actual
+    manual block on this machine, across every challenge state (checkbox,
+    image grid, audio): Google's current reCAPTCHA footer never includes
+    the #recaptcha-help-button element inside .help-button-holder that
+    Buster's content script requires to anchor its own shadow-root button.
+    With that anchor gone, Buster's button-creation code never runs at
+    all - a genuine upstream Google/Buster break that no browser choice,
+    launch flag, or policy fix on our side can work around (see engine.py's
+    Chrome for Testing section for the history of ruling those out).
+
+    Instead this drives Google's OWN stable widget elements directly -
+    #recaptcha-audio-button, #audio-source, #audio-response,
+    #recaptcha-verify-button - and transcribes the challenge's own audio
+    clip with Gemini (engine.solve_recaptcha_audio_directly /
+    _transcribe_recaptcha_audio), the same approach a human solving it by
+    hand effectively does. Buster's extension is still loaded (harmless,
+    and ready to help again if its own project ever updates to match
+    Google's current markup), but nothing here waits on it."""
     from selenium.webdriver.common.by import By
-    add_log("Trying Buster CAPTCHA solver...")
+    add_log("Trying automated CAPTCHA solver...")
     found = False
     for _ in range(12):
         if not is_alive(driver):
@@ -940,26 +817,10 @@ def solve_with_buster(driver, max_attempts=1):
         add_log("No reCAPTCHA iframe (text-only block).")
         return False
 
-    # Check ONCE, up front, whether Buster's extension actually loaded into this
-    # profile - a confirmed real case had it missing from chrome://extensions
-    # entirely (the 4.17.4 profile-reset fix doesn't always stick), and without
-    # this check every attempt below still switched the challenge to audio and
-    # waited for Buster's button to click Play - since the button can never
-    # exist, that left the page stuck on "Press PLAY to listen" with nothing
-    # able to click it, for all 3 attempts, before recovery finally reset the
-    # profile. Checking first means a missing Buster goes straight to that
-    # reset (or manual solve) without ever touching/breaking the CAPTCHA UI.
-    buster_loaded = _buster_service_worker_present(driver)
-    if not buster_loaded:
-        add_log("Buster's extension has no service worker in this browser profile (not "
-                "actually loaded, regardless of what --load-extension was passed) - "
-                "skipping the audio-challenge automation entirely instead of switching "
-                "to audio with nothing able to click Play. Falling through to recovery.")
-
     for attempt in range(1, max_attempts + 1):
         if stop_event.is_set() or not is_alive(driver):
             return False
-        add_log(f"Buster attempt {attempt}/{max_attempts}")
+        add_log(f"CAPTCHA solve attempt {attempt}/{max_attempts}")
         if _recaptcha_status(driver) == "CHECKED":
             return True
         _click_checkbox(driver)
@@ -968,116 +829,39 @@ def solve_with_buster(driver, max_attempts=1):
             add_log("Solved by checkbox.")
             return True
 
-        if not buster_loaded:
-            # Nothing below this point can do anything useful without Buster's
-            # own button to click - leave the CAPTCHA on its default (image)
-            # challenge instead of switching to audio and stalling there, and
-            # don't burn the other max_attempts-1 passes repeating the same
-            # no-op.
-            break
+        solved_directly = False
+        try:
+            driver.switch_to.default_content()
+            fr = driver.find_elements(By.CSS_SELECTOR,
+                "iframe[title*='recaptcha challenge'], iframe[src*='bframe']")
+            if fr:
+                driver.switch_to.frame(fr[0])
+                solved_directly = engine.solve_recaptcha_audio_directly(driver, logger=add_log)
+            driver.switch_to.default_content()
+        except Exception as e:
+            add_log(f"Direct audio solve attempt failed: {e}")
+            try:
+                driver.switch_to.default_content()
+            except Exception:
+                pass
 
-        # Always do the full image-reload-then-audio dance, not just a direct
-        # audio click. Confirmed live (real repro): Buster failing with "Wit.ai
-        # could not detect any speech" on the FIRST audio sample, then solving
-        # once a fresh one was fetched via switch-to-visual-then-back-to-audio -
-        # the first audio Google serves can itself just be a bad/undetectable
-        # sample, independent of any rate-limit, so skipping this dance on the
-        # first attempts was skipping the one thing that reliably got a
-        # solvable sample.
-        if _click_audio_and_buster(driver, skip_image_reload=False):
-            for _ in range(10):
+        if solved_directly:
+            for _ in range(8):
                 time.sleep(2)
                 if not is_alive(driver):
                     return False
                 if _recaptcha_status(driver) == "CHECKED":
-                    add_log("CAPTCHA solved by Buster on the audio challenge!")
+                    add_log("CAPTCHA solved (audio challenge transcribed automatically)!")
                     return True
                 try:
                     if classify_page(page_source(driver)) == "ok":
-                        add_log("CAPTCHA solved manually!")
+                        add_log("CAPTCHA solved!")
                         return True
                 except Exception:
                     pass
 
-        # Wait for Buster to inject its button in the bframe's help-button-holder
-        # Buster uses a CLOSED shadow DOM - use CDP to pierce it
-        clicked = False
-        for _w in range(6):
-            time.sleep(1.5)
-            try:
-                driver.switch_to.default_content()
-                # Use CDP to find and click the solver-button inside closed shadow DOM
-                try:
-                    doc = driver.execute_cdp_cmd("DOM.getDocument", {"depth": -1, "pierce": True})
-                    result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
-                        "nodeId": doc["root"]["nodeId"],
-                        "selector": "#solver-button"
-                    })
-                    if result.get("nodeIds"):
-                        for nid in result["nodeIds"]:
-                            try:
-                                remote = driver.execute_cdp_cmd("DOM.resolveNode", {"nodeId": nid})
-                                obj_id = remote["object"]["objectId"]
-                                driver.execute_cdp_cmd("Runtime.callFunctionOn", {
-                                    "objectId": obj_id,
-                                    "functionDeclaration": "function() { this.click(); }",
-                                    "silent": True
-                                })
-                                add_log("Buster #solver-button clicked via CDP")
-                                clicked = True
-                                break
-                            except Exception as e2:
-                                add_log(f"CDP click attempt: {e2}")
-                        if clicked:
-                            break
-                except Exception as e:
-                    add_log(f"CDP method: {e}")
-
-                # Buster's #solver-button still hasn't rendered via CDP piercing on
-                # this pass - do NOT fall back to clicking the generic
-                # help-button-holder host and reporting it as a Buster click (that
-                # div is Google's own "need help" container; clicking it just
-                # expands Google's help text, never triggers an actual solve, and
-                # previously produced misleading "Buster clicked" log lines while
-                # nothing was really attempted). Just keep retrying CDP piercing -
-                # the outer loop's remaining iterations give the shadow DOM more
-                # time to appear.
-                fr = driver.find_elements(By.CSS_SELECTOR,
-                    "iframe[title*='recaptcha challenge'], iframe[src*='bframe']")
-                if fr:
-                    driver.switch_to.frame(fr[0])
-                driver.switch_to.default_content()
-            except Exception:
-                try: driver.switch_to.default_content()
-                except Exception: pass
-            if clicked:
-                break
-        if clicked:
-            add_log("Buster button clicked, waiting up to 20s... (solve manually if you can)")
-        else:
-            add_log("Buster button not found - waiting for manual solve...")
-        for _ in range(10):
-            time.sleep(2)
-            if not is_alive(driver):
-                return False
-            if _recaptcha_status(driver) == "CHECKED":
-                add_log("CAPTCHA solved by Buster!")
-                return True
-            try:
-                kind = classify_page(page_source(driver))
-                if kind == "ok":
-                    add_log("CAPTCHA solved manually!")
-                    return True
-            except Exception:
-                pass
-
-        # Buster didn't solve - try reloading CAPTCHA and retrying (up to 3 times)
-        for reload_try in range(3):
-            if stop_event.is_set() or not is_alive(driver):
-                return False
-            add_log(f"Reloading CAPTCHA (retry {reload_try + 1}/3)...")
-            # Click reload button inside bframe
-            reloaded = False
+        if attempt < max_attempts:
+            add_log("That attempt didn't pass - reloading for a fresh challenge...")
             try:
                 driver.switch_to.default_content()
                 fr = driver.find_elements(By.CSS_SELECTOR,
@@ -1089,67 +873,19 @@ def solve_with_buster(driver, max_attempts=1):
                         "button[id*='reload']")
                     if reload_btn:
                         reload_btn[0].click()
-                        reloaded = True
                         add_log("Clicked CAPTCHA reload button")
-                    driver.switch_to.default_content()
+                driver.switch_to.default_content()
             except Exception:
-                try: driver.switch_to.default_content()
-                except Exception: pass
-            if not reloaded:
-                # Reload button not found - wait and check for manual solve before giving up
-                for _ in range(10):
-                    time.sleep(2)
-                    if not is_alive(driver):
-                        return False
-                    try:
-                        if classify_page(page_source(driver)) == "ok":
-                            add_log("CAPTCHA solved manually!")
-                            return True
-                    except Exception:
-                        pass
-                break
+                try:
+                    driver.switch_to.default_content()
+                except Exception:
+                    pass
             time.sleep(3)
             if _recaptcha_status(driver) == "CHECKED":
                 add_log("CAPTCHA solved after reload!")
                 return True
-            # On the reloaded challenge, force a FRESH AUDIO challenge (the "eye"/
-            # headphones toggle) and re-click Buster. Buster solves AUDIO challenges best,
-            # and switching to a fresh audio challenge clears the "automated queries"
-            # audio rate-limit that makes repeated solves fail.
-            clicked2 = _click_audio_and_buster(driver)
-            if clicked2:
-                for _ in range(10):
-                    time.sleep(2)
-                    if not is_alive(driver):
-                        return False
-                    if _recaptcha_status(driver) == "CHECKED":
-                        add_log("CAPTCHA solved by Buster after reload!")
-                        return True
-                    try:
-                        if classify_page(page_source(driver)) == "ok":
-                            add_log("CAPTCHA solved manually!")
-                            return True
-                    except Exception:
-                        pass
 
-    # Final fallback: force a FRESH audio challenge (the "eye"/headphones button)
-    # then let Buster try once more - often solves when reloads alone didn't.
-    if is_alive(driver) and not stop_event.is_set() and _click_audio_and_buster(driver):
-        for _ in range(12):
-            time.sleep(2)
-            if not is_alive(driver):
-                return False
-            if _recaptcha_status(driver) == "CHECKED":
-                add_log("CAPTCHA solved by Buster on the audio challenge!")
-                return True
-            try:
-                if classify_page(page_source(driver)) == "ok":
-                    add_log("CAPTCHA solved!")
-                    return True
-            except Exception:
-                pass
-
-    add_log("Buster could not solve.")
+    add_log("Automated CAPTCHA solver could not solve.")
     return False
 
 def _kill_stale_profile_processes(profile_dir):

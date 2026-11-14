@@ -1857,6 +1857,132 @@ def ensure_chrome_for_testing(logger=print, timeout=180):
         return None
 
 
+# --------------------------------------------------------------------------- #
+# Direct reCAPTCHA audio-challenge solving (bypasses Buster's own UI)
+# --------------------------------------------------------------------------- #
+# Confirmed live, across both the public api2 demo AND a real Enterprise
+# reCAPTCHA block (automated AND manually, on the actual machine): Google's
+# current audio-challenge footer never includes a #recaptcha-help-button
+# element inside .help-button-holder. Buster's own content script only
+# creates its solver button by finding that exact element, removing it, and
+# replacing it with its own shadow-root button - with the anchor gone,
+# Buster's button-creation code never runs at all, regardless of browser,
+# policy, or launch flags. This isn't fixable by changing how we load the
+# extension, so the fix is to not depend on Buster's injected UI at all:
+# drive Google's OWN stable widget ids directly (#recaptcha-audio-button,
+# #audio-source, #audio-response, #recaptcha-verify-button - unchanged
+# throughout this entire investigation) and transcribe the audio ourselves.
+def _gemini_api_key():
+    """Read the centrally-configured Gemini key straight from config.json -
+    engine.py runs in-process (not as a subprocess like the report
+    generators), so it can't rely on _ai_key_env()'s subprocess-env
+    plumbing in web_app_batch.py; this mirrors that same config.json
+    lookup independently to avoid a circular import."""
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+        pfx = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        if script_dir.lower().startswith(pf.lower()) or script_dir.lower().startswith(pfx.lower()):
+            data_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "SEO Toolkit Pro")
+        else:
+            data_dir = script_dir
+        cfg_path = os.path.join(data_dir, "config.json")
+        if os.path.isfile(cfg_path):
+            import json as _json
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = _json.load(f)
+            key = (cfg.get("gemini_api_key") or "").strip()
+            if key:
+                return key
+    except Exception:
+        pass
+    return os.environ.get("GEMINI_API_KEY", "").strip()
+
+
+def _transcribe_recaptcha_audio(audio_bytes, logger=print):
+    """Send the challenge's own audio clip straight to Gemini (multimodal,
+    accepts inline audio) and return a cleaned transcription. Returns None
+    on any failure so the caller can fall through to manual solve."""
+    key = _gemini_api_key()
+    if not key:
+        logger("No Gemini API key configured - can't transcribe the audio "
+               "challenge directly.")
+        return None
+    try:
+        import urllib.request
+        import json as _json
+        import base64 as _b64
+        model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+        url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
+               f"{model}:generateContent?key={key}")
+        body = _json.dumps({
+            "contents": [{"parts": [
+                {"text": "Transcribe only the words spoken in this short audio "
+                         "clip. Reply with just the words themselves, lowercase, "
+                         "no punctuation, no extra commentary."},
+                {"inline_data": {"mime_type": "audio/mp3",
+                                  "data": _b64.b64encode(audio_bytes).decode()}},
+            ]}],
+            "generationConfig": {"temperature": 0},
+        }).encode("utf-8")
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = _json.loads(r.read())
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        text = re.sub(r"[^\w\s]", "", text).strip().lower()
+        return text or None
+    except Exception as e:
+        logger(f"Gemini audio transcription failed: {e}")
+        return None
+
+
+def solve_recaptcha_audio_directly(driver, logger=print):
+    """Solve the audio challenge ourselves via Google's own stable widget
+    elements, instead of waiting on Buster's (currently non-functional,
+    see module docstring above) injected button. Caller must already be
+    switched into the bframe iframe. Returns True if the response was
+    submitted (not necessarily that it was ACCEPTED - caller still checks
+    _recaptcha_status() afterward, same as the old Buster path)."""
+    from selenium.webdriver.common.by import By
+    try:
+        audio_btn = driver.find_elements(By.ID, "recaptcha-audio-button")
+        if audio_btn and audio_btn[0].is_displayed():
+            audio_btn[0].click()
+            time.sleep(2)
+    except Exception:
+        pass
+    try:
+        src_el = driver.find_element(By.ID, "audio-source")
+        audio_url = src_el.get_attribute("src")
+    except Exception as e:
+        logger(f"Could not find the audio challenge's own audio element: {e}")
+        return False
+    if not audio_url:
+        logger("Audio challenge's audio element has no src yet.")
+        return False
+    try:
+        import urllib.request
+        with urllib.request.urlopen(audio_url, timeout=20) as r:
+            audio_bytes = r.read()
+    except Exception as e:
+        logger(f"Could not download the challenge audio: {e}")
+        return False
+    text = _transcribe_recaptcha_audio(audio_bytes, logger)
+    if not text:
+        return False
+    logger(f"Transcribed audio challenge as: {text!r}")
+    try:
+        resp = driver.find_element(By.ID, "audio-response")
+        resp.clear()
+        resp.send_keys(text)
+        time.sleep(0.5)
+        driver.find_element(By.ID, "recaptcha-verify-button").click()
+    except Exception as e:
+        logger(f"Could not fill/submit the audio challenge response: {e}")
+        return False
+    return True
+
+
 def find_browser_binary(pref="auto"):
     """Return (path, type). pref: 'auto' | 'edge' | 'chrome'.
     'auto' tries Edge first (fewer CAPTCHAs), then Chrome."""
