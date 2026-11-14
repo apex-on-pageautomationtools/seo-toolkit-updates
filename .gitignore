@@ -5,6 +5,9 @@ __pycache__/
 # never distributed via the OTA updater or pushed to the team's repos.
 standalone_tools/
 chrome_profile*/
+# Downloaded on first use by engine.py's ensure_chrome_for_testing() -
+# a ~130MB binary, never committed or shipped via the installer/OTA.
+chrome_for_testing/
 *.log
 *.csv
 *.zip

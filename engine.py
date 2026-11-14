@@ -1777,6 +1777,86 @@ BROWSER_PATHS = {
 }
 
 
+# --------------------------------------------------------------------------- #
+# Chrome for Testing - a dedicated, policy-independent binary for Buster
+# --------------------------------------------------------------------------- #
+# Google's own unbranded build made specifically for browser automation. It
+# never reads the "Google\Chrome" or "Microsoft\Edge" policy registry keys at
+# all, since it's a different product identity - confirmed live that a real
+# machine already had a pre-existing enterprise ExtensionInstallForcelist
+# policy (unrelated to this app, left behind by other software) that blocked
+# --load-extension on BOTH the system's Chrome (extension never loaded at
+# all) and Edge (loaded, but its content scripts never got host permissions
+# to actually inject the Buster solver button into the page) even after
+# adding --enable-unsafe-extension-debugging. A dedicated binary used only by
+# this tool sidesteps that entirely - no registry changes, no admin rights,
+# no effect on the user's real browser, and scoped to exactly the sessions
+# that need Buster (see build_driver()).
+def _cft_root_dir():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+    pfx = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    if script_dir.lower().startswith(pf.lower()) or script_dir.lower().startswith(pfx.lower()):
+        base = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "SEO Toolkit Pro")
+    else:
+        base = script_dir
+    return os.path.join(base, "chrome_for_testing")
+
+
+CFT_DIR = _cft_root_dir()
+CFT_EXE = os.path.join(CFT_DIR, "chrome-win64", "chrome.exe")
+CFT_VERSIONS_URL = ("https://googlechromelabs.github.io/chrome-for-testing/"
+                     "last-known-good-versions-with-downloads.json")
+
+
+def ensure_chrome_for_testing(logger=print, timeout=180):
+    """Return the path to a locally-available Chrome for Testing chrome.exe,
+    downloading and extracting it into our own app folder on first use if
+    it isn't there yet. Fails open - any error (no internet, blocked
+    download, etc.) just returns None so the caller falls back to the
+    system Chrome/Edge discovery path that already existed."""
+    if os.path.isfile(CFT_EXE):
+        return CFT_EXE
+    try:
+        import requests
+        import zipfile
+        logger("Setting up Chrome for Testing (one-time download, ~130MB) - this "
+               "runs Buster through a dedicated browser that no existing Chrome/"
+               "Edge policy on this machine can block...")
+        resp = requests.get(CFT_VERSIONS_URL, timeout=20)
+        resp.raise_for_status()
+        downloads = resp.json()["channels"]["Stable"]["downloads"]["chrome"]
+        url = next((d["url"] for d in downloads if d.get("platform") == "win64"), None)
+        if not url:
+            logger("Chrome for Testing has no win64 build listed right now - "
+                   "falling back to the system browser.")
+            return None
+        os.makedirs(CFT_DIR, exist_ok=True)
+        zpath = os.path.join(CFT_DIR, "_download.zip")
+        with requests.get(url, stream=True, timeout=timeout) as r:
+            r.raise_for_status()
+            with open(zpath, "wb") as f:
+                for chunk in r.iter_content(chunk_size=1 << 20):
+                    if chunk:
+                        f.write(chunk)
+        with zipfile.ZipFile(zpath) as zf:
+            zf.extractall(CFT_DIR)
+        try:
+            os.remove(zpath)
+        except OSError:
+            pass
+        if os.path.isfile(CFT_EXE):
+            logger("Chrome for Testing ready.")
+            return CFT_EXE
+        logger("Chrome for Testing download didn't produce chrome.exe where "
+               "expected - falling back to the system browser.")
+        return None
+    except Exception as e:
+        logger(f"Could not set up Chrome for Testing ({e}) - falling back to "
+               f"the system browser.")
+        return None
+
+
 def find_browser_binary(pref="auto"):
     """Return (path, type). pref: 'auto' | 'edge' | 'chrome'.
     'auto' tries Edge first (fewer CAPTCHAs), then Chrome."""
@@ -2080,6 +2160,13 @@ def _spawn_and_attach(binary, browser_type, args, logger, headless=False):
     attach_opts = Opts()
     if browser_type == "edge":
         attach_opts.use_chromium = True
+    # Pin binary_location even in attach mode so Selenium Manager resolves a
+    # matching driver executable against THIS exact binary's version, not
+    # whatever Chrome/Edge it finds installed by default - matters for a
+    # custom binary like a bundled Chrome for Testing build, which can be a
+    # different version than the system browser.
+    if binary:
+        attach_opts.binary_location = binary
     attach_opts.add_experimental_option("debuggerAddress", f"127.0.0.1:{port}")
     driver = Cls(options=attach_opts)
     driver._spawned_proc = proc
@@ -2253,12 +2340,23 @@ def build_driver(profile_dir, proxy=None, headless=False, country="us",
     detection this solves, and pass False here to skip straight to the
     plain native launch instead of burning through extra failure-prone
     launch attempts for no benefit."""
-    binary, btype = find_browser_binary(browser_pref)
-    label = {"edge": "Edge", "chrome": "Chrome"}.get(btype, "browser")
-    if binary:
-        logger(f"Using {label}: {binary}")
-    else:
-        btype = "chrome"
+    binary, btype = None, None
+    # Only the sessions that actually load an extension (Buster, Windscribe)
+    # need a dedicated binary - everything else (GSC/GA4 tools, headless
+    # runs, which never pass extensions at all) keeps using the system
+    # Edge/Chrome exactly as before, unaffected by this.
+    if extra_extensions and not headless:
+        cft = ensure_chrome_for_testing(logger)
+        if cft:
+            binary, btype = cft, "chrome"
+            logger(f"Using Chrome for Testing: {binary}")
+    if not binary:
+        binary, btype = find_browser_binary(browser_pref)
+        label = {"edge": "Edge", "chrome": "Chrome"}.get(btype, "browser")
+        if binary:
+            logger(f"Using {label}: {binary}")
+        else:
+            btype = "chrome"
 
     args = _common_args(profile_dir, headless, proxy, extra_extensions, lang, logger)
 
