@@ -2471,11 +2471,28 @@ def build_driver(profile_dir, proxy=None, headless=False, country="us",
     # need a dedicated binary - everything else (GSC/GA4 tools, headless
     # runs, which never pass extensions at all) keeps using the system
     # Edge/Chrome exactly as before, unaffected by this.
+    #
+    # Chrome for Testing is a CHROME substitute specifically (a separate
+    # product that never reads the Chrome/Edge enterprise policy registry
+    # keys some machines have) - it used to be forced on unconditionally
+    # here any time extensions were needed, which silently ignored the
+    # user's own Browser dropdown (confirmed live: "Auto (Edge first)" and
+    # even an explicit Edge selection still launched Chrome every time).
+    # Resolve the user's actual preference FIRST - if that resolves to Edge
+    # (either picked explicitly, or "auto" finding Edge installed), use
+    # real Edge like before 4.18.6; only substitute Chrome for Testing when
+    # the resolved choice is genuinely Chrome (or Edge isn't installed at
+    # all), so the dropdown means what it says again.
     if extra_extensions and not headless:
-        cft = ensure_chrome_for_testing(logger)
-        if cft:
-            binary, btype = cft, "chrome"
-            logger(f"Using Chrome for Testing: {binary}")
+        pref_binary, pref_btype = find_browser_binary(browser_pref)
+        if pref_btype == "edge":
+            binary, btype = pref_binary, "edge"
+            logger(f"Using Edge: {binary}")
+        else:
+            cft = ensure_chrome_for_testing(logger)
+            if cft:
+                binary, btype = cft, "chrome"
+                logger(f"Using Chrome for Testing: {binary}")
     if not binary:
         binary, btype = find_browser_binary(browser_pref)
         label = {"edge": "Edge", "chrome": "Chrome"}.get(btype, "browser")
