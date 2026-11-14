@@ -2505,25 +2505,30 @@ def build_driver(profile_dir, proxy=None, headless=False, country="us",
     #
     # Chrome for Testing is a CHROME substitute specifically (a separate
     # product that never reads the Chrome/Edge enterprise policy registry
-    # keys some machines have) - it used to be forced on unconditionally
-    # here any time extensions were needed, which silently ignored the
-    # user's own Browser dropdown (confirmed live: "Auto (Edge first)" and
-    # even an explicit Edge selection still launched Chrome every time).
-    # Resolve the user's actual preference FIRST - if that resolves to Edge
-    # (either picked explicitly, or "auto" finding Edge installed), use
-    # real Edge like before 4.18.6; only substitute Chrome for Testing when
-    # the resolved choice is genuinely Chrome (or Edge isn't installed at
-    # all), so the dropdown means what it says again.
+    # keys some machines have). This used to respect the user's Browser
+    # dropdown here (using real Edge whenever that resolved to Edge), but
+    # that reintroduced a confirmed, machine-specific blocker: real Edge on
+    # this dev machine is flagged as enterprise-managed (an unrelated
+    # ExtensionInstallForcelist entry for pre-installed corporate software
+    # is enough to trigger this) and Chromium then disables "Developer
+    # mode" by default - greyed out, "Managed by your organization" - which
+    # silently disables ANY unpacked/--load-extension extension including
+    # Buster, no matter what gets written into the profile's own
+    # Preferences (_ensure_developer_mode). The real fix for that is the
+    # ExtensionDeveloperModeAllowed policy, but that lives in the Windows
+    # registry (HKLM/HKCU) and isn't scoped per user-data-dir - setting it
+    # would re-enable Developer mode for the user's own personal Edge too,
+    # not just this app's tool profiles, which was explicitly rejected.
+    # Chrome for Testing is therefore the only way to guarantee extensions
+    # actually load that stays scoped to just this app's own launches:
+    # always use it when an extension needs to load, regardless of the
+    # Browser dropdown - the dropdown still governs non-extension sessions
+    # (GSC/GA4 tools) below exactly as before.
     if extra_extensions and not headless:
-        pref_binary, pref_btype = find_browser_binary(browser_pref)
-        if pref_btype == "edge":
-            binary, btype = pref_binary, "edge"
-            logger(f"Using Edge: {binary}")
-        else:
-            cft = ensure_chrome_for_testing(logger)
-            if cft:
-                binary, btype = cft, "chrome"
-                logger(f"Using Chrome for Testing: {binary}")
+        cft = ensure_chrome_for_testing(logger)
+        if cft:
+            binary, btype = cft, "chrome"
+            logger(f"Using Chrome for Testing: {binary}")
     if not binary:
         binary, btype = find_browser_binary(browser_pref)
         label = {"edge": "Edge", "chrome": "Chrome"}.get(btype, "browser")
