@@ -1,5 +1,5 @@
 {
-  "version": "4.18.19",
+  "version": "4.18.20",
   "files": [
     {
       "path": "da_checker.py",
@@ -13,7 +13,7 @@
     },
     {
       "path": "engine.py",
-      "hash": "86c9c490125f2b8d17eb996f05a29a46245346f65b2c7d2a0f565900334eb9e3",
+      "hash": "492de044b008d06b58506ae5f150967b52e144c9344de77285639142dacb2acc",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/engine.py"
     },
     {
@@ -43,7 +43,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "f2204b9371ed298e343ec55a6308bcb5a967bf854228c72a54bdc5d3a2fcff40",
+      "hash": "a58bd5c75931d0cf6bd31d2308721350d90b7eee2ca0c4850939b70dfd8deba6",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -290,6 +290,11 @@
       "path": "extensions/buster/src/base/script.js",
       "hash": "2bca67b0f551875db7ea0f5a4935f04c37c21f0b8e557cc40b268568d8c1c0c5",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/extensions/buster/src/base/script.js"
+    },
+    {
+      "path": "extensions/buster/src/background/script.js",
+      "hash": "cef4752cb011dcbaaa585567179e9a4e97f4cba86e2e2829ac9117419d909723",
+      "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/extensions/buster/src/background/script.js"
     }
   ]
 }
