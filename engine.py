@@ -2069,6 +2069,36 @@ def fetch_free_proxy_pool(country_code="us", count=15, logger=print):
 # --------------------------------------------------------------------------- #
 # Driver factory (Edge via native Selenium, Chrome via undetected-chromedriver)
 # --------------------------------------------------------------------------- #
+def _ensure_developer_mode(profile_dir, ext_dirs):
+    """An unpacked extension loaded via --load-extension (Buster, Windscribe)
+    is NOT actually enabled by Chromium/Edge unless the profile's own
+    "Developer mode" preference is on - confirmed live via edge://extensions
+    showing Buster greyed out with "To use this extension, turn on developer
+    mode", with no service worker and no content-script injection at all.
+    Normally a manual one-time toggle per profile; writing the preference
+    directly into the profile's own Preferences file before launch makes it
+    automatic, since --load-extension alone does not imply it."""
+    if not ext_dirs:
+        return
+    import json as _json
+    try:
+        default_dir = os.path.join(profile_dir, "Default")
+        os.makedirs(default_dir, exist_ok=True)
+        prefs_path = os.path.join(default_dir, "Preferences")
+        prefs = {}
+        if os.path.isfile(prefs_path):
+            try:
+                with open(prefs_path, "r", encoding="utf-8") as f:
+                    prefs = _json.load(f)
+            except Exception:
+                prefs = {}
+        prefs.setdefault("extensions", {}).setdefault("ui", {})["developer_mode"] = True
+        with open(prefs_path, "w", encoding="utf-8") as f:
+            _json.dump(prefs, f)
+    except Exception:
+        pass
+
+
 def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logger=print):
     """Arguments shared by Edge and Chrome. Returns list of CLI args."""
     vw, vh = random.choice(_VIEWPORTS)
@@ -2110,6 +2140,7 @@ def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logg
             if e and os.path.isdir(e):
                 ext_dirs.append(e)
     if ext_dirs:
+        _ensure_developer_mode(profile_dir, ext_dirs)
         args.append("--load-extension=" + ",".join(ext_dirs))
         # Chrome 136+ (shipped ~April 2025) silently ignores --load-extension
         # entirely on the Stable channel unless this companion flag is also
