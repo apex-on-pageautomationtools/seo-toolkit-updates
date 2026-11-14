@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.18.9"
+APP_VERSION = "4.18.10"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -858,7 +858,7 @@ def _click_audio_and_buster(driver, skip_image_reload=False):
             _click(["#recaptcha-image-button", "button[id*='image']", "button[title*='image']"],
                    "Switched to the image challenge (eye)")
             time.sleep(2.5)
-            for _ in range(2):
+            for _ in range(random.randint(1, 2)):
                 if _click(["#recaptcha-reload-button", ".reload-button-holder button",
                            "button[id*='reload']", "#recaptcha-verify-button",
                            "button[id*='verify']", "button[id*='skip']"], "Reloaded the challenge"):
@@ -1025,10 +1025,11 @@ def solve_with_buster(driver, max_attempts=1):
             except Exception:
                 pass
 
-        for reload_try in range(3):
+        reload_tries = random.randint(1, 3)
+        for reload_try in range(reload_tries):
             if stop_event.is_set() or not is_alive(driver):
                 return False
-            add_log(f"Reloading CAPTCHA (retry {reload_try + 1}/3)...")
+            add_log(f"Reloading CAPTCHA (retry {reload_try + 1}/{reload_tries})...")
             reloaded = False
             try:
                 driver.switch_to.default_content()
@@ -1463,9 +1464,11 @@ def _recover(sess, kind):
     add_log(f"Block detected ({kind}). Starting recovery...")
 
     if kind == "captcha" and not sess.headless:
-        # Try Buster up to 3 times before falling back to manual
+        # Try Buster a few times before falling back to manual - randomized
+        # (1-3) instead of always exactly 3, so recovery doesn't retry in the
+        # same fixed count every single block (an easy pattern to fingerprint).
         if CONFIG.get("use_buster", True):
-            if solve_with_buster(sess.driver, 3):
+            if solve_with_buster(sess.driver, random.randint(1, 3)):
                 return True
 
         # Buster exhausted all 3 attempts. A STALE profile is a confirmed real
