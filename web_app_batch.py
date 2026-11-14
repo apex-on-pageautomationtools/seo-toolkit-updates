@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.18.10"
+APP_VERSION = "4.18.11"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -757,7 +757,20 @@ def _click_buster_button(driver):
 
 def _cdp_click_solver_button(driver):
     """Click Buster's real #solver-button inside its CLOSED shadow DOM via CDP
-    piercing. This is the only way to reach Buster's actual button - a plain
+    piercing.
+
+    Surrounding DOM (confirmed live via DevTools, current Google markup, for
+    reference next time this needs debugging): the challenge's button row
+    div.rc-buttons contains, left to right: .reload-button-holder (refresh
+    icon), .audio-button-holder (headphones), .image-button-holder (eye),
+    .liveness-button-holder (hidden), .help-button-holder (THIS one -
+    contains Buster's closed shadow root with button#solver-button, title
+    "Solve the challenge" - the button this function targets),
+    .undo-button-holder, .verify-button-holder (the VERIFY button). A real
+    physical mouse click directly on the help-button-holder's icon is the
+    only way to manually test this by hand - a scripted .click() typed into
+    DevTools console is isTrusted:false too, same as the bug this function
+    exists to work around (see its Input.dispatchMouseEvent below). This is the only way to reach Buster's actual button - a plain
     Selenium/ActionChains click on div.help-button-holder (the host element)
     hits Google's own generic "need help" container, not the button Buster
     injects inside it, and can silently look like a successful click in the
