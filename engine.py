@@ -2666,10 +2666,26 @@ def classify_page(src: str) -> str:
         return "ok"
     if "403. that" in s or "does not have permission" in s or "error 403" in s:
         return "http_403"
-    if 'id="captcha-form"' in s or "g-recaptcha" in s or "/sorry/" in s:
+    # "/sorry/" alone used to be treated as proof of an actual CAPTCHA challenge,
+    # but Google serves TWO different pages under /sorry/: a real reCAPTCHA
+    # challenge (checkbox/audio/image widget to solve) AND a plain "Try again
+    # later" hard block with no widget at all - just static text and a reload
+    # icon (confirmed live: this exact page, own HTML still references "/sorry/"
+    # in its own links/forms, with no g-recaptcha/captcha-form anywhere). That
+    # second page was misclassified as "captcha", so solve_with_buster correctly
+    # found no reCAPTCHA iframe (there isn't one) and returned False after
+    # wasting 12s looking, then _recover treated it as "Buster failed" and did
+    # an immediate deep_reset + retry with NO cooldown/backoff - unlike the
+    # soft_block/http_403 path below, which backs off exponentially and gives a
+    # clear "connect a VPN/proxy" message after exhausting retries. A real IP-
+    # level rate-limit block needs that backoff, not an instant retry on the
+    # exact same (now even more flagged) IP. Only classify as "captcha" when an
+    # actual challenge widget marker is present.
+    if 'id="captcha-form"' in s or "g-recaptcha" in s:
         return "captcha"
     if ("unusual traffic" in s or "automated queries" in s
-            or "our systems have detected" in s):
+            or "our systems have detected" in s or "try again later" in s
+            or "/sorry/" in s):
         return "soft_block"
     # Chromium's own network-error page ("Hmmm... can't reach this page",
     # ERR_TIMED_OUT/ERR_PROXY_CONNECTION_FAILED/ERR_CONNECTION_* etc.) - this is NOT
