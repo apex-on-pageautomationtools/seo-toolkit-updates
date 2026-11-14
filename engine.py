@@ -2505,33 +2505,27 @@ def build_driver(profile_dir, proxy=None, headless=False, country="us",
     #
     # Chrome for Testing is a CHROME substitute specifically (a separate
     # product that never reads the Chrome/Edge enterprise policy registry
-    # keys some machines have) - it used to be forced on unconditionally
-    # here any time extensions were needed, which silently ignored the
-    # user's own Browser dropdown (confirmed live: "Auto (Edge first)" and
-    # even an explicit Edge selection still launched Chrome every time).
-    # Resolve the user's actual preference FIRST - if that resolves to Edge
-    # (either picked explicitly, or "auto" finding Edge installed), use
-    # real Edge like before 4.18.6; only substitute Chrome for Testing when
-    # the resolved choice is genuinely Chrome (or Edge isn't installed at
-    # all), so the dropdown means what it says again.
-    #
-    # (Real Edge being flagged "enterprise-managed" - Developer mode
-    # greyed out, "Managed by your organization" - looked like it would
-    # block Buster entirely, but confirmed live it does NOT: an extension
-    # already loaded via --load-extension with developer_mode written into
-    # the profile's own Preferences (_ensure_developer_mode) stays enabled
-    # regardless of that banner. Buster's actual remaining blocker was its
-    # own default config - see the speechService fix in background/script.js.)
+    # keys some machines have). This DID briefly respect the user's Browser
+    # dropdown here (using real Edge whenever that resolved to Edge), on
+    # the theory that writing developer_mode into the profile's own
+    # Preferences (_ensure_developer_mode) was enough to keep Buster
+    # enabled despite real Edge on this machine being flagged
+    # "enterprise-managed" (Developer mode greyed out, "Managed by your
+    # organization", from an unrelated pre-existing ExtensionInstallForcelist
+    # entry). Confirmed live that this is NOT reliable: it worked once on
+    # one fresh profile, then failed the very next fresh profile (back to
+    # disabled, "turn on developer mode") with no code change in between -
+    # Chromium evidently doesn't always honor a raw Preferences write for
+    # this value. Chrome for Testing never has this problem at all (it
+    # doesn't read the policy that triggers the managed-browser lock in the
+    # first place), so extension-needing sessions always use it regardless
+    # of the Browser dropdown - the dropdown still governs non-extension
+    # sessions (GSC/GA4 tools) below exactly as before.
     if extra_extensions and not headless:
-        pref_binary, pref_btype = find_browser_binary(browser_pref)
-        if pref_btype == "edge":
-            binary, btype = pref_binary, "edge"
-            logger(f"Using Edge: {binary}")
-        else:
-            cft = ensure_chrome_for_testing(logger)
-            if cft:
-                binary, btype = cft, "chrome"
-                logger(f"Using Chrome for Testing: {binary}")
+        cft = ensure_chrome_for_testing(logger)
+        if cft:
+            binary, btype = cft, "chrome"
+            logger(f"Using Chrome for Testing: {binary}")
     if not binary:
         binary, btype = find_browser_binary(browser_pref)
         label = {"edge": "Edge", "chrome": "Chrome"}.get(btype, "browser")
