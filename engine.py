@@ -1905,6 +1905,19 @@ def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logg
                 ext_dirs.append(e)
     if ext_dirs:
         args.append("--load-extension=" + ",".join(ext_dirs))
+        # Chrome 136+ (shipped ~April 2025) silently ignores --load-extension
+        # entirely on the Stable channel unless this companion flag is also
+        # passed - a security hardening change to stop malware sideloading
+        # unpacked extensions via the command line. This is a SEPARATE, newer
+        # blocker on top of the Developer-mode requirement already handled by
+        # _ensure_developer_mode: Buster can go from "was loading fine" to
+        # "silently absent from chrome://extensions, no error" purely from a
+        # routine Chrome/Edge auto-update crossing this version, with zero
+        # code change on our side - confirmed as the live symptom reported
+        # (extension missing entirely, not just failing to solve). Scoped to
+        # only this tool's own launched browser instances/profiles, not a
+        # machine-wide policy affecting the user's personal browser.
+        args.append("--enable-unsafe-extension-debugging")
 
     if headless:
         # extensions can't run headless; keep the window off-screen instead so

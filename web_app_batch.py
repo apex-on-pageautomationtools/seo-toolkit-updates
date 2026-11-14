@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.18.3"
+APP_VERSION = "4.18.4"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -899,23 +899,30 @@ def _click_audio_and_buster(driver, skip_image_reload=False):
         return False
 
 
+def _buster_service_worker_present(driver):
+    """Quiet (non-logging) check for whether Buster's extension actually
+    registered a service worker target in this browser - the same signal
+    _verify_buster_loaded checks, split out so solve_with_buster can test it
+    once per CAPTCHA without spamming the warning log on every attempt."""
+    try:
+        targets = driver.execute_cdp_cmd("Target.getTargets", {}).get("targetInfos", [])
+        return any(t.get("type") == "service_worker" and "chrome-extension://" in (t.get("url") or "")
+                   for t in targets)
+    except Exception:
+        return False
+
+
 def _verify_buster_loaded(driver):
     """Confirm Buster actually registered a service worker target, instead of
     just trusting that --load-extension was passed on the command line (see
     _ensure_developer_mode's docstring for why that assumption was wrong)."""
-    try:
-        targets = driver.execute_cdp_cmd("Target.getTargets", {}).get("targetInfos", [])
-        for t in targets:
-            if t.get("type") == "service_worker" and "chrome-extension://" in (t.get("url") or ""):
-                add_log("Buster CAPTCHA solver confirmed loaded.")
-                return True
-        add_log("WARNING: Buster did NOT load into this browser profile (Developer mode "
-                "was probably off until just now) - CAPTCHA recovery will need manual "
-                "solving this run. It should load normally on the next run.")
-        return False
-    except Exception as e:
-        add_log(f"Could not verify Buster load status: {e}")
-        return False
+    if _buster_service_worker_present(driver):
+        add_log("Buster CAPTCHA solver confirmed loaded.")
+        return True
+    add_log("WARNING: Buster did NOT load into this browser profile (Developer mode "
+            "was probably off until just now) - CAPTCHA recovery will need manual "
+            "solving this run. It should load normally on the next run.")
+    return False
 
 
 def solve_with_buster(driver, max_attempts=1):
@@ -933,6 +940,22 @@ def solve_with_buster(driver, max_attempts=1):
         add_log("No reCAPTCHA iframe (text-only block).")
         return False
 
+    # Check ONCE, up front, whether Buster's extension actually loaded into this
+    # profile - a confirmed real case had it missing from chrome://extensions
+    # entirely (the 4.17.4 profile-reset fix doesn't always stick), and without
+    # this check every attempt below still switched the challenge to audio and
+    # waited for Buster's button to click Play - since the button can never
+    # exist, that left the page stuck on "Press PLAY to listen" with nothing
+    # able to click it, for all 3 attempts, before recovery finally reset the
+    # profile. Checking first means a missing Buster goes straight to that
+    # reset (or manual solve) without ever touching/breaking the CAPTCHA UI.
+    buster_loaded = _buster_service_worker_present(driver)
+    if not buster_loaded:
+        add_log("Buster's extension has no service worker in this browser profile (not "
+                "actually loaded, regardless of what --load-extension was passed) - "
+                "skipping the audio-challenge automation entirely instead of switching "
+                "to audio with nothing able to click Play. Falling through to recovery.")
+
     for attempt in range(1, max_attempts + 1):
         if stop_event.is_set() or not is_alive(driver):
             return False
@@ -944,6 +967,14 @@ def solve_with_buster(driver, max_attempts=1):
         if _recaptcha_status(driver) == "CHECKED":
             add_log("Solved by checkbox.")
             return True
+
+        if not buster_loaded:
+            # Nothing below this point can do anything useful without Buster's
+            # own button to click - leave the CAPTCHA on its default (image)
+            # challenge instead of switching to audio and stalling there, and
+            # don't burn the other max_attempts-1 passes repeating the same
+            # no-op.
+            break
 
         # Always do the full image-reload-then-audio dance, not just a direct
         # audio click. Confirmed live (real repro): Buster failing with "Wit.ai
