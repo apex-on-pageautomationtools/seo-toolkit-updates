@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.18.11"
+APP_VERSION = "4.18.12"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -909,10 +909,17 @@ def _click_audio_and_buster(driver, skip_image_reload=False):
 
 
 def _buster_service_worker_present(driver):
-    """Quiet (non-logging) check for whether Buster's extension actually
-    registered a service worker target in this browser - the same signal
-    _verify_buster_loaded checks, split out so solve_with_buster can test it
-    once per CAPTCHA without spamming the warning log on every attempt."""
+    """Quiet (non-logging) check for whether Buster's extension CURRENTLY has
+    an active service worker target in this browser. Only used once, right
+    after launch, by _verify_buster_loaded - NOT a reliable live signal of
+    whether Buster is loaded at any later point: Manifest V3 suspends an
+    idle extension service worker after ~30s, at which point it simply stops
+    appearing in Target.getTargets even though the extension is still fully
+    there and wakes back up on its own when needed. solve_with_buster used
+    to re-check this per CAPTCHA and treat a (normal, expected) suspended
+    worker as "not loaded", skipping Buster entirely on real blocks that
+    happened more than ~30s into a run - see solve_with_buster's own
+    comment for the confirmed live case."""
     try:
         targets = driver.execute_cdp_cmd("Target.getTargets", {}).get("targetInfos", [])
         return any(t.get("type") == "service_worker" and "chrome-extension://" in (t.get("url") or "")
@@ -964,12 +971,25 @@ def solve_with_buster(driver, max_attempts=1):
         add_log("No reCAPTCHA iframe (text-only block).")
         return False
 
-    buster_loaded = _buster_service_worker_present(driver)
-    if not buster_loaded:
-        add_log("Buster's extension has no service worker in this browser profile (not "
-                "actually loaded, regardless of what --load-extension was passed) - "
-                "skipping the audio-challenge automation entirely instead of switching "
-                "to audio with nothing able to click Play. Falling through to recovery.")
+    # NOT checking _buster_service_worker_present() here anymore. Confirmed live
+    # (real Rank Checker run, 3 real CAPTCHAs): Buster's extension was verified
+    # loaded right after launch ("Buster CAPTCHA solver confirmed loaded."), yet
+    # this per-CAPTCHA re-check reported "no service worker" on EVERY single one
+    # of the 3 blocks that followed, even though nothing restarted the browser
+    # in between. Root cause: Manifest V3 suspends an extension's background
+    # service worker after ~30s of inactivity to save resources - it goes
+    # dormant, not gone, and wakes back up on its own when its content script
+    # needs it (e.g. a real click). Target.getTargets simply stops listing a
+    # suspended service worker's target, so this check was a false negative on
+    # a perfectly fine extension almost every time a search took >30s before
+    # hitting a block - which skipped the entire Buster-button attempt (the
+    # `if not buster_loaded: break` below) despite Buster genuinely being
+    # available. Session.start() already confirms Buster loaded ONCE via
+    # _verify_buster_loaded() right after launch - that's the real signal;
+    # just always attempt the button dance below instead of re-deciding this
+    # per CAPTCHA. If the button genuinely never renders (missing anchor, a
+    # different block-page template, whatever), the existing retry loop
+    # already logs that honestly and falls through on its own.
 
     for attempt in range(1, max_attempts + 1):
         if stop_event.is_set() or not is_alive(driver):
@@ -982,9 +1002,6 @@ def solve_with_buster(driver, max_attempts=1):
         if _recaptcha_status(driver) == "CHECKED":
             add_log("Solved by checkbox.")
             return True
-
-        if not buster_loaded:
-            break
 
         if _click_audio_and_buster(driver, skip_image_reload=False):
             for _ in range(10):
