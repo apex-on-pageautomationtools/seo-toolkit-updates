@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.18.8"
+APP_VERSION = "4.18.9"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -762,7 +762,18 @@ def _cdp_click_solver_button(driver):
     hits Google's own generic "need help" container, not the button Buster
     injects inside it, and can silently look like a successful click in the
     logs without ever invoking Buster's solve. Returns True only if a real
-    #solver-button node was found and clicked."""
+    #solver-button node was found and clicked.
+
+    Clicks via CDP's Input domain (a real mouse event dispatched at the
+    button's own screen coordinates), NOT a scripted element.click() call.
+    Confirmed live (button now renders correctly after the script.js anchor
+    fix, yet still never solved): Buster's own click handler gates on
+    `event.isTrusted` - `r.isTrusted&&!e&&(...)` in script.js - and Chrome
+    always reports a Runtime.callFunctionOn-invoked .click() as
+    isTrusted:false, so that call silently did nothing even though it
+    "succeeded" with no error. Input.dispatchMouseEvent simulates real
+    OS-level input through Chrome's actual input pipeline, which Chrome
+    does report as isTrusted:true - the only way to pass Buster's guard."""
     from selenium.webdriver.common.by import By
     try:
         driver.switch_to.default_content()
@@ -777,12 +788,20 @@ def _cdp_click_solver_button(driver):
         })
         for nid in result.get("nodeIds", []):
             try:
-                remote = driver.execute_cdp_cmd("DOM.resolveNode", {"nodeId": nid})
-                obj_id = remote["object"]["objectId"]
-                driver.execute_cdp_cmd("Runtime.callFunctionOn", {
-                    "objectId": obj_id,
-                    "functionDeclaration": "function() { this.click(); }",
-                    "silent": True
+                box = driver.execute_cdp_cmd("DOM.getBoxModel", {"nodeId": nid})
+                quad = box["model"]["content"]
+                cx = (quad[0] + quad[2] + quad[4] + quad[6]) / 4
+                cy = (quad[1] + quad[3] + quad[5] + quad[7]) / 4
+                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                    "type": "mouseMoved", "x": cx, "y": cy
+                })
+                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                    "type": "mousePressed", "x": cx, "y": cy,
+                    "button": "left", "clickCount": 1
+                })
+                driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                    "type": "mouseReleased", "x": cx, "y": cy,
+                    "button": "left", "clickCount": 1
                 })
                 driver.switch_to.default_content()
                 return True
