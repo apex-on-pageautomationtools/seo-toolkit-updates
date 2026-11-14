@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.18.13"
+APP_VERSION = "4.18.14"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -786,17 +786,48 @@ def _cdp_click_solver_button(driver):
     isTrusted:false, so that call silently did nothing even though it
     "succeeded" with no error. Input.dispatchMouseEvent simulates real
     OS-level input through Chrome's actual input pipeline, which Chrome
-    does report as isTrusted:true - the only way to pass Buster's guard."""
+    does report as isTrusted:true - the only way to pass Buster's guard.
+
+    Finding the node: confirmed live via real screenshots that the button IS
+    genuinely rendered (both on the audio AND image challenge states) every
+    time this function still reported "did not render" - so the bug was
+    never rendering, it was THIS LOOKUP. DOM.getDocument's pierce:true makes
+    the returned tree STRUCTURE include iframe content documents and shadow
+    roots, but DOM.querySelectorAll does not search across an iframe
+    boundary into its content document from the parent document's root
+    nodeId - only shadow-root piercing within a single document actually
+    works that way. #solver-button lives inside the bframe's OWN content
+    document (a separate document from the top page), so querying from the
+    top document's root nodeId never finds it, regardless of Selenium's
+    switch_to.frame (which only affects classic WebDriver element lookups,
+    not execute_cdp_cmd - CDP always talks to the top-level page target).
+    Fixed by explicitly resolving the bframe iframe's contentDocument node
+    first and querying from THAT document's own root instead."""
     from selenium.webdriver.common.by import By
     try:
         driver.switch_to.default_content()
-        fr = driver.find_elements(By.CSS_SELECTOR,
-            "iframe[title*='recaptcha challenge'], iframe[src*='bframe']")
-        if fr:
-            driver.switch_to.frame(fr[0])
         doc = driver.execute_cdp_cmd("DOM.getDocument", {"depth": -1, "pierce": True})
+        top_root = doc["root"]["nodeId"]
+
+        search_root = top_root
+        try:
+            fr_result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
+                "nodeId": top_root,
+                "selector": "iframe[title*='recaptcha challenge'], iframe[src*='bframe']"
+            })
+            fr_ids = fr_result.get("nodeIds", [])
+            if fr_ids:
+                described = driver.execute_cdp_cmd("DOM.describeNode", {
+                    "nodeId": fr_ids[0], "depth": -1, "pierce": True
+                })
+                content_doc = described.get("node", {}).get("contentDocument")
+                if content_doc and content_doc.get("nodeId"):
+                    search_root = content_doc["nodeId"]
+        except Exception:
+            pass
+
         result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
-            "nodeId": doc["root"]["nodeId"],
+            "nodeId": search_root,
             "selector": "#solver-button"
         })
         for nid in result.get("nodeIds", []):
