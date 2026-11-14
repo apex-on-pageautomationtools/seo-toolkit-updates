@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.18.16"
+APP_VERSION = "4.18.17"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -804,12 +804,15 @@ def _cdp_click_solver_button(driver):
     Fixed by explicitly resolving the bframe iframe's contentDocument node
     first and querying from THAT document's own root instead."""
     from selenium.webdriver.common.by import By
+    diag = []
     try:
         driver.switch_to.default_content()
         doc = driver.execute_cdp_cmd("DOM.getDocument", {"depth": -1, "pierce": True})
         top_root = doc["root"]["nodeId"]
 
         search_root = top_root
+        fr_ids = []
+        content_doc = None
         try:
             fr_result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
                 "nodeId": top_root,
@@ -823,14 +826,36 @@ def _cdp_click_solver_button(driver):
                 content_doc = described.get("node", {}).get("contentDocument")
                 if content_doc and content_doc.get("nodeId"):
                     search_root = content_doc["nodeId"]
-        except Exception:
-            pass
+        except Exception as e:
+            diag.append(f"iframe-lookup error: {e}")
+        diag.append(f"iframes found: {len(fr_ids)}, contentDocument resolved: "
+                     f"{bool(content_doc and content_doc.get('nodeId'))}")
 
         result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
             "nodeId": search_root,
             "selector": "#solver-button"
         })
-        for nid in result.get("nodeIds", []):
+        found_ids = result.get("nodeIds", [])
+        diag.append(f"#solver-button via resolved root: {len(found_ids)} node(s)")
+        # Diagnostic only (not used for clicking): if the resolved root found
+        # nothing, also check the TOP document directly and a broader
+        # .help-button-holder selector, so a future failure log tells us
+        # exactly which assumption was wrong instead of needing another
+        # blind guess.
+        if not found_ids:
+            try:
+                top_result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
+                    "nodeId": top_root, "selector": "#solver-button"
+                })
+                diag.append(f"#solver-button via top document: {len(top_result.get('nodeIds', []))} node(s)")
+                holder_result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
+                    "nodeId": search_root, "selector": ".help-button-holder"
+                })
+                diag.append(f".help-button-holder via resolved root: {len(holder_result.get('nodeIds', []))} node(s)")
+            except Exception as e:
+                diag.append(f"fallback diag error: {e}")
+            add_log("Buster button lookup diagnostic: " + " | ".join(diag))
+        for nid in found_ids:
             try:
                 box = driver.execute_cdp_cmd("DOM.getBoxModel", {"nodeId": nid})
                 quad = box["model"]["content"]
