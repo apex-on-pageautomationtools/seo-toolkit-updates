@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.18.21"
+APP_VERSION = "4.18.22"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -791,18 +791,24 @@ def _cdp_click_solver_button(driver):
     Finding the node: confirmed live via real screenshots that the button IS
     genuinely rendered (both on the audio AND image challenge states) every
     time this function still reported "did not render" - so the bug was
-    never rendering, it was THIS LOOKUP. DOM.getDocument's pierce:true makes
-    the returned tree STRUCTURE include iframe content documents and shadow
-    roots, but DOM.querySelectorAll does not search across an iframe
-    boundary into its content document from the parent document's root
-    nodeId - only shadow-root piercing within a single document actually
-    works that way. #solver-button lives inside the bframe's OWN content
-    document (a separate document from the top page), so querying from the
-    top document's root nodeId never finds it, regardless of Selenium's
-    switch_to.frame (which only affects classic WebDriver element lookups,
-    not execute_cdp_cmd - CDP always talks to the top-level page target).
-    Fixed by explicitly resolving the bframe iframe's contentDocument node
-    first and querying from THAT document's own root instead."""
+    never rendering, it was THIS LOOKUP, twice over. First: DOM.getDocument's
+    pierce:true makes the returned tree STRUCTURE include iframe content
+    documents and shadow roots, but DOM.querySelectorAll does not search
+    across an iframe boundary into its content document from the parent
+    document's root nodeId - fixed by explicitly resolving the bframe
+    iframe's contentDocument node first and querying from THAT document's
+    own root instead. Second (confirmed live via the diagnostic log itself -
+    ".help-button-holder via resolved root: 1 node(s)" alongside
+    "#solver-button via resolved root: 0 node(s)", at the exact moment a
+    real screenshot showed the button rendered): #solver-button is NOT a
+    plain descendant of .help-button-holder in the regular DOM - Buster's
+    own script attaches it with `.attachShadow({mode:"closed"})` and appends
+    the button INSIDE that shadow root. DOM.querySelectorAll never recurses
+    into an element's shadow root (open or closed) from an ancestor nodeId -
+    that's a second, completely separate boundary from the iframe one above,
+    and has to be pierced the same way: resolve .help-button-holder's own
+    node, describe it with pierce:true to get its shadowRoots, then query
+    #solver-button from THAT shadow root's own nodeId."""
     from selenium.webdriver.common.by import By
     diag = []
     try:
@@ -831,29 +837,35 @@ def _cdp_click_solver_button(driver):
         diag.append(f"iframes found: {len(fr_ids)}, contentDocument resolved: "
                      f"{bool(content_doc and content_doc.get('nodeId'))}")
 
-        result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
-            "nodeId": search_root,
-            "selector": "#solver-button"
-        })
-        found_ids = result.get("nodeIds", [])
-        diag.append(f"#solver-button via resolved root: {len(found_ids)} node(s)")
-        # Diagnostic only (not used for clicking): if the resolved root found
-        # nothing, also check the TOP document directly and a broader
-        # .help-button-holder selector, so a future failure log tells us
-        # exactly which assumption was wrong instead of needing another
-        # blind guess.
+        # #solver-button lives inside .help-button-holder's own CLOSED shadow
+        # root, not the light DOM - resolve that shadow root's nodeId first
+        # (DOM.describeNode with pierce:true exposes it even though it's
+        # closed, since CDP has elevated access page JS doesn't) and query
+        # from there instead of from search_root directly.
+        found_ids = []
+        holder_ids = []
+        shadow_root_id = None
+        try:
+            holder_result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
+                "nodeId": search_root, "selector": ".help-button-holder"
+            })
+            holder_ids = holder_result.get("nodeIds", [])
+            if holder_ids:
+                holder_described = driver.execute_cdp_cmd("DOM.describeNode", {
+                    "nodeId": holder_ids[0], "depth": -1, "pierce": True
+                })
+                shadow_roots = holder_described.get("node", {}).get("shadowRoots") or []
+                if shadow_roots:
+                    shadow_root_id = shadow_roots[0]["nodeId"]
+                    sr_result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
+                        "nodeId": shadow_root_id, "selector": "#solver-button"
+                    })
+                    found_ids = sr_result.get("nodeIds", [])
+        except Exception as e:
+            diag.append(f"shadow-root lookup error: {e}")
+        diag.append(f".help-button-holder found: {len(holder_ids)}, shadow root resolved: "
+                     f"{bool(shadow_root_id)}, #solver-button via shadow root: {len(found_ids)} node(s)")
         if not found_ids:
-            try:
-                top_result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
-                    "nodeId": top_root, "selector": "#solver-button"
-                })
-                diag.append(f"#solver-button via top document: {len(top_result.get('nodeIds', []))} node(s)")
-                holder_result = driver.execute_cdp_cmd("DOM.querySelectorAll", {
-                    "nodeId": search_root, "selector": ".help-button-holder"
-                })
-                diag.append(f".help-button-holder via resolved root: {len(holder_result.get('nodeIds', []))} node(s)")
-            except Exception as e:
-                diag.append(f"fallback diag error: {e}")
             add_log("Buster button lookup diagnostic: " + " | ".join(diag))
         for nid in found_ids:
             try:
