@@ -1357,6 +1357,36 @@ def _alt_text_from_filename(src, page_data, keywords, brand):
     # Strip common CMS/size/hash suffixes ("-1200x800", "-scaled", "-e1623...")
     stem = re.sub(r"\s*\b\d{2,4}\s*x\s*\d{2,4}\b\s*$", "", stem, flags=re.I)
     stem = re.sub(r"\s*\b(scaled|thumbnail|thumb)\b\s*$", "", stem, flags=re.I)
+    # Bundler/build-tool cache-busting hashes (Vite/webpack/esbuild - e.g.
+    # "...-CHQ6ulvw.webp", or a hash split across two dash segments like
+    # "...-B1PY-60A.webp" since these hashes can themselves contain a dash)
+    # are pure noise, not real filename content - confirmed live on
+    # findmarbella.com's own asset names, which produced suggestions like
+    # "Area Golden Mile Mobile Chq6Ulvw" before this. Strip up to 2 trailing
+    # tokens that mix letters and digits (real words don't look like this);
+    # stop as soon as a token doesn't match so legitimate trailing words
+    # (e.g. "...-1024" alone, a size tag with no letters) are left alone.
+    for _ in range(2):
+        m = re.search(r"\s+([A-Za-z0-9]{1,10})$", stem)
+        if not m:
+            break
+        token = m.group(1)
+        # Not every build hash mixes letters and digits - confirmed live on
+        # findmarbella.com's own asset names, several of its hashes landed on
+        # all-letters ("BNyghQsH", "DdUdAwCF") with no digit at all, which a
+        # digit-presence check alone would miss entirely. A hash fragment is
+        # recognizable instead by NOT looking like a real word: real words are
+        # all-lowercase, all-uppercase (an acronym), or exactly one leading
+        # capital then lowercase (Title Case) - a hash's capitalization is
+        # random, so it breaks that pattern. Any fragment of 1-2 characters
+        # left dangling (e.g. the "O" in "...-7Xs7BV-O.webp", the "Ch" half of
+        # "...-Ch_9dMcX.webp") is also always noise, too short to be a real
+        # standalone trailing word.
+        looks_like_word = re.fullmatch(r"[a-z]+|[A-Z]+|[A-Z][a-z]*", token)
+        if len(token) <= 2 or re.search(r"\d", token) or not looks_like_word:
+            stem = stem[:m.start()]
+        else:
+            break
     is_generic = (not stem or len(stem) < 4
                   or bool(re.fullmatch(r"[\da-f\s-]{4,}", stem, re.I))  # hash/hex-ish
                   or bool(re.fullmatch(r"(img|image|photo|pic|dsc)[\s\d]*", stem, re.I)))
