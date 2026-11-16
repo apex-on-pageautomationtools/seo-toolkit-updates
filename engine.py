@@ -2123,7 +2123,7 @@ def _unpacked_extension_id(ext_dir):
         return None
 
 
-def _reset_buster_storage(profile_dir, ext_dirs):
+def _reset_buster_storage(profile_dir, ext_dirs, logger=None):
     """Force Buster to reinitialize its own extension storage on every
     launch, rather than relying on a wipe of the whole profile.
 
@@ -2151,6 +2151,8 @@ def _reset_buster_storage(profile_dir, ext_dirs):
             continue
         ext_id = _unpacked_extension_id(ext_dir)
         if not ext_id:
+            if logger:
+                logger("Buster storage reset: could not compute extension ID (no 'key' in manifest.json?)")
             continue
         default_dir = os.path.join(profile_dir, "Default")
         candidates = [
@@ -2158,12 +2160,20 @@ def _reset_buster_storage(profile_dir, ext_dirs):
             os.path.join(default_dir, "IndexedDB", f"chrome-extension_{ext_id}_0.indexeddb.leveldb"),
             os.path.join(default_dir, "databases", f"chrome-extension_{ext_id}_0"),
         ]
-        for path in candidates:
+        existed = [p for p in candidates if os.path.isdir(p)]
+        for path in existed:
             try:
-                if os.path.isdir(path):
-                    shutil.rmtree(path, ignore_errors=True)
+                shutil.rmtree(path, ignore_errors=True)
             except Exception:
                 pass
+        still_there = [p for p in existed if os.path.isdir(p)]
+        if logger:
+            if existed:
+                logger(f"Buster storage reset: cleared {len(existed) - len(still_there)}/{len(existed)} "
+                       f"stale storage dir(s) for {ext_id}"
+                       + (f" - {len(still_there)} could not be removed (file in use?)" if still_there else ""))
+            else:
+                logger(f"Buster storage reset: no existing storage found for {ext_id} (first launch in this profile)")
 
 
 def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logger=print):
@@ -2208,7 +2218,7 @@ def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logg
                 ext_dirs.append(e)
     if ext_dirs:
         _ensure_developer_mode(profile_dir, ext_dirs)
-        _reset_buster_storage(profile_dir, ext_dirs)
+        _reset_buster_storage(profile_dir, ext_dirs, logger=logger)
         args.append("--load-extension=" + ",".join(ext_dirs))
         # Chrome 136+ (shipped ~April 2025) silently ignores --load-extension
         # entirely on the Stable channel unless this companion flag is also
