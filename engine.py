@@ -2099,6 +2099,73 @@ def _ensure_developer_mode(profile_dir, ext_dirs):
         pass
 
 
+def _unpacked_extension_id(ext_dir):
+    """Chrome/Edge extension ID for an unpacked extension loaded via
+    --load-extension, computed from its manifest.json "key" field (present on
+    Buster, among others) the same way Chromium does: SHA256 of the raw
+    DER-encoded public key, first 16 bytes, each hex nibble mapped to a
+    letter a-p. Without a "key" field the ID is derived from the load path
+    instead and isn't predictable ahead of launch - returns None then, since
+    there's nothing stable to reset storage for."""
+    import json as _json
+    import hashlib
+    import base64
+    try:
+        with open(os.path.join(ext_dir, "manifest.json"), "r", encoding="utf-8") as f:
+            manifest = _json.load(f)
+        key_b64 = manifest.get("key")
+        if not key_b64:
+            return None
+        der = base64.b64decode(key_b64)
+        digest = hashlib.sha256(der).hexdigest()[:32]
+        return "".join(chr(ord("a") + int(c, 16)) for c in digest)
+    except Exception:
+        return None
+
+
+def _reset_buster_storage(profile_dir, ext_dirs):
+    """Force Buster to reinitialize its own extension storage on every
+    launch, rather than relying on a wipe of the whole profile.
+
+    Confirmed live and repeatedly: Buster's fresh-install default sets
+    speechService to "googleSpeechApiDemo" with an empty API key ("API key
+    missing" toast, genuinely blocks solving) - fixed at the source in
+    extensions/buster/src/background/script.js to default to the
+    bundled-key "witSpeechApiDemo" service instead, but that fix only
+    actually takes effect on a genuinely fresh install: once Buster has
+    EVER run in a given profile, its chrome.storage.local already has the
+    old broken value saved, and the "Initial version" installer code that
+    sets the default never runs again for that profile - confirmed live via
+    a profile that predated this fix still showing "API key missing" long
+    after the fix shipped, simply because it was an existing profile, not a
+    new one. This app reuses/pools profiles (doesn't create a fresh one per
+    run), so without this, every affected profile stays broken until
+    someone manually deletes it. Deleting just Buster's own storage
+    directories (not the whole profile - keeps Google cookies/session
+    intact) forces a clean reinstall of Buster specifically on every
+    launch, so it always gets the current correct default regardless of
+    profile age."""
+    import shutil
+    for ext_dir in ext_dirs:
+        if "buster" not in os.path.basename(ext_dir).lower() and "buster" not in ext_dir.lower():
+            continue
+        ext_id = _unpacked_extension_id(ext_dir)
+        if not ext_id:
+            continue
+        default_dir = os.path.join(profile_dir, "Default")
+        candidates = [
+            os.path.join(default_dir, "Local Extension Settings", ext_id),
+            os.path.join(default_dir, "IndexedDB", f"chrome-extension_{ext_id}_0.indexeddb.leveldb"),
+            os.path.join(default_dir, "databases", f"chrome-extension_{ext_id}_0"),
+        ]
+        for path in candidates:
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+            except Exception:
+                pass
+
+
 def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logger=print):
     """Arguments shared by Edge and Chrome. Returns list of CLI args."""
     vw, vh = random.choice(_VIEWPORTS)
@@ -2141,6 +2208,7 @@ def _common_args(profile_dir, headless, proxy, extra_extensions, lang="en", logg
                 ext_dirs.append(e)
     if ext_dirs:
         _ensure_developer_mode(profile_dir, ext_dirs)
+        _reset_buster_storage(profile_dir, ext_dirs)
         args.append("--load-extension=" + ",".join(ext_dirs))
         # Chrome 136+ (shipped ~April 2025) silently ignores --load-extension
         # entirely on the Stable channel unless this companion flag is also
