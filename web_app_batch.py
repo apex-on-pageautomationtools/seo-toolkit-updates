@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.18.22"
+APP_VERSION = "4.18.23"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -1766,15 +1766,30 @@ def _recover_page(sess, page_num):
             reason = "blocked"
             add_log(f"Block ({kind}) on page {page_num} - cooling down and reloading "
                     f"(attempt {attempt}/{retries})...")
-            # Reload the same page after a backoff. Deliberately avoid a full browser
-            # restart here so we don't lose our place in the pagination.
-            backoff = min(90.0, 10.0 * attempt) + random.uniform(0, 5)
-            slept = 0.0
-            while slept < backoff and not stop_event.is_set():
-                time.sleep(1); slept += 1
+            # A hard soft_block/http_403 means Google is flagging this specific
+            # IP/identity, not a transient render glitch - just refreshing the
+            # SAME page on the SAME IP can never clear that (confirmed live:
+            # 3 refreshes in a row, still 403, even with a 25-entry proxy pool
+            # configured and sitting unused). _recover() already knows how to
+            # actually fix this (cooldown + proxy rotation + deep profile
+            # reset via sess.start(rotate=...)) - it was only ever wired up at
+            # the per-keyword level, never here for a block mid-pagination.
+            # sess.start() launches a brand new session with no memory of
+            # where we were, so capture the exact URL first and navigate back
+            # to it after recovery succeeds, same pattern as the captcha
+            # branch above - that's what keeps our place in the pagination
+            # instead of restarting the keyword from page 1.
+            cur = None
             try:
-                if is_alive(sess.driver):
-                    sess.driver.refresh()
+                cur = sess.driver.current_url
+            except Exception:
+                pass
+            if not _recover(sess, kind):
+                add_log(f"Could not clear block on page {page_num} - stopping (results incomplete)")
+                return [], "blocked"
+            try:
+                if cur and is_alive(sess.driver):
+                    safe_get(sess.driver, cur)
                     human_pause(1.5, 2.5)
             except BrowserClosedError:
                 raise
@@ -3717,16 +3732,14 @@ def api_start():
                                       "Proxy / VPN in the sidebar - enter one there, or switch the "
                                       "VPN method to \"Admin Proxy\"."}), 400
     elif vpn_method in ("proxy_admin", "proxy"):
-        shared = _shared_proxies()
-        if shared:
-            pick = _least_recently_used(shared)
-            _mark_proxy_used_async(pick)
-            proxies = [pick] + [p for p in shared if p is not pick]
-            add_log(f"Using admin-configured shared proxy: {pick.get('host')}:{pick.get('port')} "
-                    f"({len(shared)} in the shared pool).")
-        else:
-            add_log(f"No admin-configured proxies available - fetching free proxies for {country.upper()}...")
-            proxies = engine.fetch_free_proxy_pool(country, count=15, logger=add_log)
+        # Explicit instruction: stop relying on any paid/shared proxy pool -
+        # go straight to free public proxies instead, with the user's own
+        # system VPN (vpn_method "system"/"pause", untouched by this) as the
+        # manual fallback when even that isn't enough. _shared_proxies() (the
+        # central admin-managed sheet) is intentionally no longer consulted
+        # here.
+        add_log(f"Fetching free proxies for {country.upper()}...")
+        proxies = engine.fetch_free_proxy_pool(country, count=15, logger=add_log)
 
     if mode == "ranking" and (not domain or not keywords):
         return jsonify({"error": "Domain and at least one keyword required."}), 400

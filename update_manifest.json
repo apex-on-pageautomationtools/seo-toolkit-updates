@@ -1,5 +1,5 @@
 {
-  "version": "4.18.22",
+  "version": "4.18.23",
   "files": [
     {
       "path": "da_checker.py",
@@ -43,7 +43,7 @@
     },
     {
       "path": "web_app_batch.py",
-      "hash": "a9f355f3521b06abc205ef803c73f5f9f4df295c7dcdcbb8d4db81a19a1e73ca",
+      "hash": "2a0ce45890b76dae6dc50a4274c26bcaeb8a3b6b3599812b8ec3f4029afad78e",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/web_app_batch.py"
     },
     {
@@ -163,7 +163,7 @@
     },
     {
       "path": "templates/index.html",
-      "hash": "7f46e0feaac72f4cd4687cf6503076ed68719e8cff5e550c8d56b6e7f45745d8",
+      "hash": "26554dc62bf5990ded1db39d0996632721c466ce68ce112baf9b718f23db591a",
       "url": "https://raw.githubusercontent.com/apex-on-pageautomationtools/seo-toolkit-updates/main/templates/index.html"
     },
     {
