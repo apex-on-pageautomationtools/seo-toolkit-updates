@@ -9713,33 +9713,63 @@ def _detect_schema(pages_data):
 
 
 def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
-    """Hexa - a narrative/report-style DOCX (verified against the team's "New
-    On Page Format - 2026.docx" template): explanatory paragraph + real,
-    crawl-verified "Conclusion:" line per on-page factor (Meta, Content,
-    Images/Alt, Robots.txt, Sitemap, Redirects, Canonical, External Links,
-    Broken Links, Internal Links, URL Structure, Hyperlinking, Sucuri
-    Security, Noindex, Structured Data/Schema), plus best-effort manual-note
-    sections (Blog, Header/Footer Menu, About Us, Contact Page) built from
-    real page content where this script can actually check it. Conclusion
-    lines are AI-drafted (_ai_line) but strictly grounded in this script's
-    own real findings/pages_data - never a fabricated specific the crawl
-    didn't actually verify, same rule the rest of this file follows."""
+    """Hexa - a narrative/report-style DOCX, verified against the team's real
+    reference ("On Page-Analysis-Report - halfpriceroof.net.docx"): each
+    section title renders as a full-width colored banner (centered, white,
+    bold - the reference uses a rounded-rectangle shape; python-docx can't
+    place a floating shape easily, so a shaded centered paragraph reproduces
+    the same look) with an explanatory paragraph + real, crawl-verified
+    "Conclusion:" line underneath, for exactly the 15 banners the reference
+    has, in its order: Meta Tag Suggestion, Content Optimization
+    Suggestions, Image Alt Tag Suggestion, Robots.txt file Suggestion, XML
+    Sitemap Suggestion, Redirection Issue Check, Canonical Tag Suggestion,
+    Broken Link Suggestion, Internal Linking Suggestion, URL Structure
+    Suggestion, Hyperlinking Suggestion, Website Security Suggestion,
+    Noindex Tag Check, Schema Code Suggestions, Additional Suggestions (the
+    reference has no standalone "External Linking" section - that's
+    deliberately not included here). Additional Suggestions carries the
+    Blog Posting note the reference actually shows, plus best-effort
+    Header/Footer Menu and About Us/Contact Page notes as extra bullets in
+    that same section when genuinely applicable, rather than as their own
+    banners the reference doesn't have. Conclusion lines are AI-drafted
+    (_ai_line) but strictly grounded in this script's own real
+    findings/pages_data - never a fabricated specific the crawl didn't
+    actually verify, same rule the rest of this file follows."""
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc, h = _setup_docx(domain, use_cover=False)
     root = h["root"]; d = h["d"]
-    para, label_body, shot = h["para"], h["label_body"], h["shot"]
+    para, shot = h["para"], h["shot"]
     FONT, SIZE = h["FONT"], h["SIZE"]
 
+    def label_body(label, body_text=""):
+        # Hexa's reference uses an en dash ("Webpage URL – https://...")
+        # rather than a hyphen for these label lines.
+        return h["label_body"](label, body_text)
+
     def heading(text):
+        # Real reference ("On Page-Analysis-Report - halfpriceroof.net.docx")
+        # renders each section title as a full-width colored banner (a
+        # rounded-rectangle shape with centered white bold text), not plain
+        # colored text - that mismatch is why the report "displays wrong".
+        # A shaded, centered paragraph reproduces the same visual result
+        # without needing a floating drawing shape.
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
         p = doc.add_paragraph()
-        p.paragraph_format.space_before = Pt(10)
+        p.paragraph_format.space_before = Pt(14)
+        p.paragraph_format.space_after = Pt(8)
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         r = p.add_run(text)
         r.font.name = FONT
         r.font.bold = True
-        r.font.size = Pt(14)
-        r.font.color.rgb = RGBColor(0x1D, 0x54, 0x89)
+        r.font.size = Pt(16)
+        r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:fill'), '1F497D')
+        shd.set(qn('w:val'), 'clear')
+        p._p.get_or_add_pPr().append(shd)
         return p
 
     def conclusion(text):
@@ -9764,7 +9794,7 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
          "engine compliance.")
 
     # ---- Meta ----
-    heading("Meta Titles, Descriptions & Headings")
+    heading("Meta Tag Suggestion")
     para("Meta titles, descriptions, and headings help search engines understand page "
          "content and improve visibility. A well-optimized title attracts clicks, the "
          "description summarizes the page's value, and headings structure content for both "
@@ -9774,7 +9804,7 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
                    "review and update accordingly.")
 
     # ---- Content quality ----
-    heading("Content Quality")
+    heading("Content Optimization Suggestions")
     para("High-quality, in-depth content demonstrates expertise, authority, and trust "
          "(E-E-A-T). Longer, well-researched pages outperform thin or generic content.")
     thin_pages = [pd for pd in pages_data if (pd.get("content_word_count") or 0) < 300]
@@ -9790,12 +9820,12 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
         conclusion(f"All {len(pages_data)} target page(s) have a reasonable amount of visible "
                    f"content (300+ words each). No thin-content issue found.")
     for pd in pages_data:
-        label_body("Webpage URL - ", pd["url"])
-        label_body("Target Keywords - ", ", ".join(pd.get("keywords") or []) or "(none set)")
+        label_body("Webpage URL – ", pd["url"])
+        label_body("Target Keywords – ", ", ".join(pd.get("keywords") or []) or "(none set)")
         para("")
 
     # ---- Images / Alt tags ----
-    heading("Image Alt Tag Optimization")
+    heading("Image Alt Tag Suggestion")
     para("Images contribute to both UX and SEO. Optimized images load faster, improve Core "
          "Web Vitals, and rank in image search. Alt text also supports accessibility.")
     alt_rows = []
@@ -9823,7 +9853,7 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
                    "action needed.")
 
     # ---- Robots.txt ----
-    heading("Robots.txt")
+    heading("Robots.txt file Suggestion")
     para("The robots.txt file controls which parts of a site search engines can crawl. A "
          "well-configured file ensures important content is accessible while preventing "
          "crawl budget waste on low-value pages.")
@@ -9837,7 +9867,7 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
     shot("robots", captured)
 
     # ---- Sitemap ----
-    heading("XML Sitemap File")
+    heading("XML Sitemap Suggestion")
     para("XML sitemaps guide crawlers to discover and index content efficiently. An updated "
          "sitemap helps with new pages and reduces crawl waste.")
     if findings.get("sitemap_found"):
@@ -9856,7 +9886,7 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
     shot("sitemap", captured)
 
     # ---- Redirection ----
-    heading("URL Redirection Check")
+    heading("Redirection Issue Check")
     para("Proper redirections (301 for permanent, 302 for temporary) ensure users and "
          "crawlers reach the right content. Incorrect or missing redirects cause crawl "
          "waste and duplicate-content issues.")
@@ -9872,7 +9902,7 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
     shot("redirect", captured)
 
     # ---- Canonical ----
-    heading("Canonical Tag")
+    heading("Canonical Tag Suggestion")
     para("Canonical tags prevent duplicate content issues by telling Google the preferred "
          "version of a page. Without them, duplicate URLs may compete with each other in "
          "search results.")
@@ -9885,17 +9915,8 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
                    "pointing to the correct URL. It is good from an SEO perspective.")
     shot("canonical", captured)
 
-    # ---- External links ----
-    heading("External Linking")
-    para("Outbound links to authoritative sources signal trustworthiness and contextual "
-         "relevance. Linking to credible sites also enhances user experience by providing "
-         "additional context.")
-    ext_count = findings.get("ext_count", 0)
-    conclusion(f"{ext_count} external link(s) found across the target pages.")
-    shot("externallinks", captured)
-
     # ---- Broken links ----
-    heading("Broken Link Test")
+    heading("Broken Link Suggestion")
     para("Broken links (404 errors) negatively impact user experience, reduce crawl "
          "efficiency, and can harm a site's credibility. They waste link equity and "
          "frustrate visitors.")
@@ -9917,7 +9938,7 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
     shot("the404", captured)
 
     # ---- Internal links ----
-    heading("Internal Linking")
+    heading("Internal Linking Suggestion")
     para("Internal links distribute link equity, guide crawlers, and help users explore "
          "more content. Pages without internal links risk becoming \"orphan pages\", which "
          "search engines struggle to find.")
@@ -9936,7 +9957,7 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
                    f"No orphan pages found among the target pages.")
 
     # ---- URL structure ----
-    heading("URL Structure Optimization")
+    heading("URL Structure Suggestion")
     para("A clean and descriptive URL is easier for users to understand, improves "
          "click-through rates, and helps search engines identify page relevance. URLs with "
          "unnecessary parameters, underscores, or uppercase letters are harder to read.")
@@ -9957,8 +9978,22 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
                    "unnecessary parameters or underscores). It's good from an SEO point of "
                    "view.")
 
+    # ---- Hyperlinking (anchor text / internal hyperlink quality - a
+    # distinct section from "Internal Linking Suggestion" above in the real
+    # reference, even though both draw on the same crawled link data) ----
+    heading("Hyperlinking Suggestion")
+    para("Internal hyperlinks distribute link equity, guide user navigation, and improve "
+         "crawl depth. Optimized anchor text improves keyword relevance.")
+    total_int = sum(int_counts.values())
+    if total_int > 0:
+        conclusion("Hyper-linking of the website is good. It's good from an SEO point of "
+                   "view.")
+    else:
+        conclusion("We did not find internal hyperlinks on the target pages. We recommend "
+                   "adding relevant internal hyperlinks with descriptive anchor text.")
+
     # ---- Sucuri security ----
-    heading("Site Security (Sucuri)")
+    heading("Website Security Suggestion")
     para("Sucuri is a website security tool that monitors malware, hacks, and "
          "vulnerabilities. A clean security scan improves trust with both users and search "
          "engines.")
@@ -9986,7 +10021,7 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
         conclusion("Noindex was not found on any of the target pages of the website.")
 
     # ---- Structured data / Schema ----
-    heading("Structured Data (Schema)")
+    heading("Schema Code Suggestions")
     para("Structured data helps Google understand content context, improving chances of "
          "rich results like FAQs, reviews, and service highlights. This boosts visibility "
          "in search.")
@@ -10000,75 +10035,94 @@ def _build_docx_hexa(domain, pages_data, findings, captured, brand, out_path):
                    "or FAQ schema) was found on any of the target pages. We suggest adding "
                    "Organization schema site-wide and Breadcrumb/FAQ schema where relevant.")
     if homepage:
-        label_body("Page - ", homepage["url"])
+        label_body("Page: ", homepage["url"])
 
-    # ---- Blog ----
-    heading("Blog Posting")
-    para("Regular blog posting strengthens topical authority, improves keyword targeting, "
-         "and attracts organic traffic through long-tail queries.")
+    # ---- Additional Suggestions (the reference's single closing section -
+    # Blog Posting is the note that was actually checkable for this domain;
+    # Header/Footer menu and About Us/Contact page notes are kept as extra
+    # bullets in this same section, only when genuinely applicable, rather
+    # than as their own banners that the reference doesn't have) ----
+    heading("Additional Suggestions")
+
+    note_p = doc.add_paragraph()
+    note_p.paragraph_format.space_after = Pt(2)
+    h["_style_run"](note_p.add_run("Note Blog Posting"), bold=True)
+    para("Summary: Regular blog posting strengthens topical authority, improves keyword "
+         "targeting, and attracts organic traffic through long-tail queries. Blogs also "
+         "provide fresh content signals to Google, improve internal linking opportunities, "
+         "and establish thought leadership in your niche.")
     if findings.get("has_blog"):
-        label_body("Observed - ", "The website has an active blog/news/article section.")
-        label_body("Recommendation - ", "Keep publishing 2-4 high-quality blog posts per "
-                   "month targeting long-tail and informational keywords, with internal "
-                   "links from blog posts to service pages.")
+        para("Observed: The website has an active blog/news/article section.")
+        rec_items = ["Keep publishing 2-4 high-quality blog posts per month targeting "
+                     "long-tail and informational keywords.",
+                     "Add internal links from blog posts to service pages to boost "
+                     "topical relevance."]
     else:
-        label_body("Observed - ", "The website currently lacks an active and consistent "
-                   "blog section (no /blog, /news, or /articles section found).")
-        label_body("Recommendation - ", "Publish 2-4 high-quality blog posts per month "
-                   "targeting long-tail and informational keywords. Optimize each post with "
-                   "keyword-rich titles, meta descriptions, and headings, and add internal "
-                   "links from blog posts to service pages to boost topical relevance.")
+        para("Observed: The website currently lacks an active and consistent blog section.")
+        rec_items = ["Publish 2-4 high-quality blog posts per month targeting long-tail "
+                     "and informational keywords.",
+                     "Optimize each post with keyword-rich titles, meta descriptions, and "
+                     "headings.",
+                     "Add internal links from blog posts to service pages to boost "
+                     "topical relevance."]
+    rec_p = doc.add_paragraph()
+    rec_p.paragraph_format.space_after = Pt(2)
+    h["_style_run"](rec_p.add_run("Recommendation:"), bold=True)
+    for item in rec_items:
+        bp = doc.add_paragraph(style="List Bullet")
+        h["_style_run"](bp.add_run(item), bold=False)
+    para("")
 
     # ---- Header & Footer menu (best-effort: homepage nav link text check) ----
-    heading("Header & Footer Menu")
     nav_keywords = ("shop", "product", "contact", "about", "blog", "service")
     nav_text = " ".join((t for _, t in (homepage.get("headings") or [])) if homepage else []).lower()
     home_links_text = " ".join(homepage.get("internal_links") or []).lower() if homepage else ""
     found_nav = [kw for kw in nav_keywords if kw in nav_text or kw in home_links_text]
-    if len(found_nav) >= 3:
-        label_body("Observed - ", "The homepage's navigation/links reference key sections "
-                   "(" + ", ".join(found_nav) + "). No major navigation gap detected.")
-    else:
-        label_body("Observed - ", "We could not confirm clear links to key pages (Shop, "
+    if len(found_nav) < 3:
+        note_p = doc.add_paragraph()
+        note_p.paragraph_format.space_before = Pt(8)
+        note_p.paragraph_format.space_after = Pt(2)
+        h["_style_run"](note_p.add_run("Note Header & Footer Menu"), bold=True)
+        label_body("Observed: ", "We could not confirm clear links to key pages (Shop, "
                    "Products, Contact, About Us, Blog) from the homepage's navigation. "
                    "Please manually verify the header/footer menu structure.")
-        label_body("Recommendation - ", "Create a well-organized header menu featuring key "
+        label_body("Recommendation: ", "Create a well-organized header menu featuring key "
                    "product/service categories and important pages for easy access. Add a "
                    "footer menu with useful links like Privacy Policy, Terms, and Contact.")
 
     # ---- About Us / Contact page notes (best-effort, only if a matching target page exists) ----
     about_pd = next((pd for pd in pages_data if "about" in pd["url"].lower()), None)
     if about_pd:
-        heading("Note for About Us Page")
-        label_body("URL - ", about_pd["url"])
         wc = about_pd.get("content_word_count") or 0
         if wc < 50:
-            label_body("Observed - ", f"The About Us page is present but has very little "
+            note_p = doc.add_paragraph()
+            note_p.paragraph_format.space_before = Pt(8)
+            note_p.paragraph_format.space_after = Pt(2)
+            h["_style_run"](note_p.add_run("Note for About Us Page"), bold=True)
+            label_body("URL: ", about_pd["url"])
+            label_body("Observed: ", f"The About Us page is present but has very little "
                        f"visible content ({wc} word(s)). This leaves visitors without key "
                        f"details about the company.")
-            label_body("Recommendation - ", "Add engaging and informative content to the "
+            label_body("Recommendation: ", "Add engaging and informative content to the "
                        "About Us page, including company background, mission, values, and "
                        "team information. This will build trust with visitors.")
-        else:
-            label_body("Observed - ", f"The About Us page has {wc} word(s) of visible "
-                       f"content. No content-gap issue detected.")
 
     contact_pd = next((pd for pd in pages_data if "contact" in pd["url"].lower()), None)
     if contact_pd:
-        heading("Note for Contact Page")
-        label_body("URL - ", contact_pd["url"])
         body_text = (contact_pd.get("body_text") or "")
         looks_like_code = bool(re.search(r"<\?php|function\s*\(|console\.log|\{\{.*\}\}", body_text))
         if looks_like_code:
-            label_body("Observed - ", "The front-end view of the contact page appears to be "
+            note_p = doc.add_paragraph()
+            note_p.paragraph_format.space_before = Pt(8)
+            note_p.paragraph_format.space_after = Pt(2)
+            h["_style_run"](note_p.add_run("Note for Contact Page"), bold=True)
+            label_body("URL: ", contact_pd["url"])
+            label_body("Observed: ", "The front-end view of the contact page appears to be "
                        "showing raw code/template output instead of a visible contact form "
                        "or information, indicating a possible rendering or CMS issue.")
-            label_body("Recommendation - ", "Review the contact page template and remove or "
+            label_body("Recommendation: ", "Review the contact page template and remove or "
                        "correct the exposed backend code. Ensure the page displays proper "
                        "contact details or form elements for visitors.")
-        else:
-            label_body("Observed - ", "The contact page displays normally with no exposed "
-                       "backend code detected.")
 
     # ---- Closing ----
     para("")
