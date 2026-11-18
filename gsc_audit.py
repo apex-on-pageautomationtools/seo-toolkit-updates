@@ -1429,13 +1429,21 @@ def capture_index_coverage_urls(session_id, property_url, email, browser_pref="e
 # ---------------------------------------------------------------------------
 FALLBACK_DAILY_CAP_PER_DOMAIN = 10
 
+# "Test Live URL" turns out to have its own, separate, much higher daily
+# limit from "Request Indexing" - NOT the same quota (corrected after
+# initially, wrongly, assuming they were shared - see
+# test_live_url_via_session's docstring). Community-reported figure
+# (Search Central Community / r/TechSEO), not an official Google number,
+# so kept conservative rather than pushed to the reported ceiling.
+LIVE_TEST_DAILY_CAP_PER_DOMAIN = 50
 
-def _indexing_fallback_state_path():
-    return os.path.join(os.path.dirname(_sessions_dir()), "indexing_fallback_usage.json")
+
+def _usage_state_path(filename):
+    return os.path.join(os.path.dirname(_sessions_dir()), filename)
 
 
-def _load_indexing_fallback_state():
-    p = _indexing_fallback_state_path()
+def _load_usage_state(filename):
+    p = _usage_state_path(filename)
     today = datetime.now().strftime("%Y-%m-%d")
     try:
         if os.path.exists(p):
@@ -1448,11 +1456,23 @@ def _load_indexing_fallback_state():
     return {"date": today, "accounts": {}}
 
 
-def _save_indexing_fallback_state(state):
-    p = _indexing_fallback_state_path()
+def _save_usage_state(filename, state):
+    p = _usage_state_path(filename)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
+
+
+def _indexing_fallback_state_path():
+    return _usage_state_path("indexing_fallback_usage.json")
+
+
+def _load_indexing_fallback_state():
+    return _load_usage_state("indexing_fallback_usage.json")
+
+
+def _save_indexing_fallback_state(state):
+    _save_usage_state("indexing_fallback_usage.json", state)
 
 
 def indexing_fallback_remaining(domain):
@@ -1469,6 +1489,23 @@ def _record_indexing_fallback_use(domain, n=1):
     accounts = state.setdefault("accounts", {})
     accounts[key] = accounts.get(key, 0) + n
     _save_indexing_fallback_state(state)
+
+
+def live_test_remaining(domain):
+    """How many more "Test Live URL" clicks this DOMAIN has left today -
+    tracked independently of Request Indexing's own allowance (separate
+    Google-side quota, see LIVE_TEST_DAILY_CAP_PER_DOMAIN above)."""
+    state = _load_usage_state("live_test_usage.json")
+    used = state.get("accounts", {}).get((domain or "").lower(), 0)
+    return max(0, LIVE_TEST_DAILY_CAP_PER_DOMAIN - used)
+
+
+def _record_live_test_use(domain, n=1):
+    state = _load_usage_state("live_test_usage.json")
+    key = (domain or "").lower()
+    accounts = state.setdefault("accounts", {})
+    accounts[key] = accounts.get(key, 0) + n
+    _save_usage_state("live_test_usage.json", state)
 
 
 _INDEXING_QUOTA_MARKERS = (
@@ -1769,12 +1806,10 @@ def test_live_url_via_session(session_id, property_url, email, urls,
     indexability/errors (robots.txt blocks, 404s, 5xx, redirects, noindex,
     etc.) without submitting anything for indexing.
 
-    Google draws "Test Live URL" from the SAME per-property daily URL
-    Inspection quota as "Request Indexing" (confirmed: GSC's own UI shows
-    the same "exceeded your quota" message for either action) - so this
-    deliberately shares request_indexing_via_session's local 10/day-per-
-    domain tracker rather than keeping a separate counter, to avoid the two
-    tools together quietly blowing past Google's real shared limit.
+    "Test Live URL" has its OWN daily quota, separate from and much higher
+    than "Request Indexing"'s (community-reported ~50/day vs ~10-12/day per
+    property) - tracked here via live_test_remaining/_record_live_test_use,
+    its own counter independent of request_indexing_via_session's.
 
     Returns a list of {"url", "ok", "indexable", "reason", "message"} dicts,
     one per URL passed in - "ok" means the tool itself ran without error,
@@ -1789,10 +1824,10 @@ def test_live_url_via_session(session_id, property_url, email, urls,
         log_fn = print
     track_key = (domain or email or "")
     results = []
-    remaining = indexing_fallback_remaining(track_key)
+    remaining = live_test_remaining(track_key)
     if remaining <= 0:
-        log_fn(f"  {domain or email}: today's URL Inspection allowance (10/day per domain, "
-               f"shared with Request Indexing) is already used.")
+        log_fn(f"  {domain or email}: today's Test Live URL allowance "
+               f"({LIVE_TEST_DAILY_CAP_PER_DOMAIN}/day per domain) is already used.")
         return [{"url": u, "ok": False, "indexable": None, "reason": "",
                  "message": "domain_daily_cap_reached"} for u in urls]
 
@@ -1962,7 +1997,7 @@ def test_live_url_via_session(session_id, property_url, email, urls,
                         driver.execute_script("arguments[0].click();", btn)
                     except Exception:
                         pass
-                _record_indexing_fallback_use(track_key)
+                _record_live_test_use(track_key)
 
                 # Same "Testing..." modal request_indexing_via_session waits on -
                 # Google runs the live fetch/render behind this same modal for

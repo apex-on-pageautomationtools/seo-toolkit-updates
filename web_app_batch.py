@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.19.0"
+APP_VERSION = "4.19.1"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -7197,6 +7197,7 @@ def _indexing_creds():
     return url, key, user
 
 INDEXING_MAX_PER_REQUEST = 10
+LIVE_TEST_MAX_PER_REQUEST = 20
 
 def _check_url_live(u, timeout=10):
     """A dead/broken URL still costs one submission out of the shared daily
@@ -7221,8 +7222,8 @@ def _check_url_live(u, timeout=10):
     except Exception:
         return False
 
-def _prep_indexing_urls(raw_urls):
-    """Dedupe (order-preserving), cap to INDEXING_MAX_PER_REQUEST, and drop
+def _prep_indexing_urls(raw_urls, max_per_request=INDEXING_MAX_PER_REQUEST):
+    """Dedupe (order-preserving), cap to max_per_request, and drop
     anything that doesn't return a real 200 - each of those three things
     protects the shared daily quota from being wasted. Returns
     (urls_to_submit, skipped) where skipped is a list of {"url","message"}."""
@@ -7234,10 +7235,10 @@ def _prep_indexing_urls(raw_urls):
             deduped.append(u)
     dropped_dupes = len(raw_urls) - len(deduped)
 
-    capped = deduped[:INDEXING_MAX_PER_REQUEST]
-    over_limit = deduped[INDEXING_MAX_PER_REQUEST:]
+    capped = deduped[:max_per_request]
+    over_limit = deduped[max_per_request:]
 
-    skipped = [{"url": u, "message": "over_10_per_request_limit"} for u in over_limit]
+    skipped = [{"url": u, "message": f"over_{max_per_request}_per_request_limit"} for u in over_limit]
     to_submit = []
     for u in capped:
         if _check_url_live(u):
@@ -7429,6 +7430,7 @@ def api_indexing_fallback_accounts():
         if domain:
             resp["domain"] = domain
             resp["domain_remaining"] = gsc_audit.indexing_fallback_remaining(domain)
+            resp["live_test_remaining"] = gsc_audit.live_test_remaining(domain)
             best = (_gsc_mapping().get(domain.strip().lower()) or {})
             best_email = (best.get("email") or "").strip().lower()
             if best_email:
@@ -7528,7 +7530,7 @@ def api_indexing_live_test():
     raw_urls = [u.strip() for u in (data.get("urls") or []) if u.strip()]
     if not (email and session_id and domain and raw_urls):
         return jsonify({"error": "email, session_id, domain and urls are all required."}), 400
-    urls, skipped, dropped_dupes = _prep_indexing_urls(raw_urls)
+    urls, skipped, dropped_dupes = _prep_indexing_urls(raw_urls, max_per_request=LIVE_TEST_MAX_PER_REQUEST)
     if not urls:
         return jsonify({"results": skipped, "indexable": 0, "dropped_duplicates": dropped_dupes})
     try:

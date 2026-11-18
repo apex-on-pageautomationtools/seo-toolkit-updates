@@ -3354,17 +3354,17 @@ https://example.com/page-2"></textarea>
           </div>
 
           <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
-            <div style="font-weight:700;font-size:13px;margin-bottom:6px">Live Test URLs (separate from Request
-              Indexing)</div>
+            <div style="font-weight:700;font-size:13px;margin-bottom:6px">Live Test (GSC Connected)</div>
             <p style="color:var(--text-3);font-size:12px;margin:0 0 10px;line-height:1.4">Clicks GSC's own "Test Live
               URL" button for each URL below - shows whether each page is currently indexable, and Google's own
               reason when it isn't (blocked by robots.txt, 404, server error, redirect, noindex, etc.). Nothing is
-              submitted for indexing. Uses a GSC Browser Session, and shares the same ~10/day-per-domain URL
-              Inspection quota as Request Indexing above (Google counts both actions together).</p>
+              submitted for indexing. Uses a GSC Browser Session, with its own separate daily allowance from Request
+              Indexing above (~50/day per domain).</p>
             <div class="field">
-              <label>URLs to test <span class="hint">(one per line)</span></label>
+              <label>URLs to test <span class="hint">(one per line, max 20 per run)</span></label>
               <textarea id="lt-urls" rows="6" placeholder="https://example.com/page-1
-https://example.com/page-2"></textarea>
+https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
+              <div class="hint" id="lt-url-count" style="margin-top:4px">0 / 20 URLs</div>
             </div>
             <div class="field">
               <label>Domain <span class="hint">(must match a property the chosen account has access to)</span></label>
@@ -7618,15 +7618,25 @@ https://example.com/page-2"></textarea>
       }
 
       /* ===================== live test (separate from Request Indexing) ===================== */
+      const LT_MAX_URLS = 20;
+      function ltUpdateUrlCount() {
+        const n = $('lt-urls').value.split('\n').map(s => s.trim()).filter(Boolean).length;
+        const el = $('lt-url-count');
+        if (el) {
+          el.textContent = n + ' / ' + LT_MAX_URLS + ' URLs';
+          el.style.color = n > LT_MAX_URLS ? 'var(--err,#c00)' : '';
+        }
+      }
       let _ltDomTimer = null;
       function ltDomainChanged() {
         clearTimeout(_ltDomTimer);
         _ltDomTimer = setTimeout(() => ltLoadAccounts($('lt-domain').value.trim()), 400);
       }
       async function ltLoadAccounts(domain) {
-        // Reuses the same account-picker endpoint the Request Indexing
-        // fallback above uses - both actions share the same GSC Browser
-        // Session pool and the same per-domain daily quota.
+        // Reuses the same GSC Browser Session account-picker endpoint the
+        // Request Indexing fallback above uses (same session pool), but
+        // Test Live URL has its OWN separate daily quota (see
+        // live_test_remaining below) - not shared with Request Indexing's.
         const sel = $('lt-account');
         try {
           const q = domain ? ('?domain=' + encodeURIComponent(domain)) : '';
@@ -7637,7 +7647,7 @@ https://example.com/page-2"></textarea>
           else { sel.innerHTML = accs.map(a => '<option value="' + esc(a.email) + '|' + esc(a.session_id) + '">' + esc(a.email) + (a.recommended ? ' (recommended - has access)' : '') + '</option>').join(''); }
           const note = $('lt-remaining');
           if (note) {
-            let noteText = (d.domain_remaining !== undefined) ? (d.domain_remaining + '/10 URL Inspection actions left today for ' + d.domain + ' (shared with Request Indexing)') : '';
+            let noteText = (d.live_test_remaining !== undefined) ? (d.live_test_remaining + '/50 Test Live URL actions left today for ' + d.domain) : '';
             if (d.recommended_missing && d.recommended_missing.email) {
               noteText += (noteText ? ' - ' : '') + 'GSC_Config shows ' + d.recommended_missing.email + ' (' + (d.recommended_missing.accessLevel || 'access') +
                 ') actually has access to this domain, but it has no browser session here yet - connect it in the Google Accounts tab for this to work.';
@@ -7651,8 +7661,12 @@ https://example.com/page-2"></textarea>
         const sel = $('lt-account').value;
         if (!domain) { toast('Enter the domain first', 'err'); return; }
         if (!sel) { toast('Pick a GSC account', 'err'); return; }
-        const urls = $('lt-urls').value.split('\n').map(s => s.trim()).filter(Boolean);
+        let urls = $('lt-urls').value.split('\n').map(s => s.trim()).filter(Boolean);
         if (!urls.length) { toast('No URLs to test', 'err'); return; }
+        if (urls.length > LT_MAX_URLS) {
+          toast('Max ' + LT_MAX_URLS + ' URLs per run - only testing the first ' + LT_MAX_URLS, 'err');
+          urls = urls.slice(0, LT_MAX_URLS);
+        }
         const [email, session_id] = sel.split('|');
         const box = $('lt-results');
         box.innerHTML = '<div class="note">Opening a real browser window - log in if prompted, then wait (each URL takes up to ~2 minutes)...</div>';
