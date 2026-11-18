@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.18.26"
+APP_VERSION = "4.19.0"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -7508,6 +7508,56 @@ def api_indexing_fallback_submit():
     app_user = (auth.check_saved_auth().get("email") or "").strip().lower()
     _log_indexing_results(app_user or email, "browser", results)
     return jsonify({"results": results, "submitted": submitted, "dropped_duplicates": dropped_dupes})
+
+@app.route("/api/indexing/live-test", methods=["POST"])
+def api_indexing_live_test():
+    """Click the real GSC UI's "Test Live URL" button for each URL - a
+    separate action from Request Indexing: reports which pages are
+    currently indexable and, for the ones that aren't, Google's own reason
+    (blocked by robots.txt, 404, 5xx, redirect, noindex, etc.) instead of
+    submitting anything for indexing. Uses the same GSC Browser Session /
+    account-picker (/api/indexing/fallback-accounts) as the Request
+    Indexing fallback above, since both draw from the same per-domain
+    browser session pool."""
+    if not _require_tool("indexing"):
+        return jsonify({"error": "You don't have access to Submit for Indexing."}), 403
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip()
+    session_id = (data.get("session_id") or "").strip()
+    domain = to_domain(data.get("domain") or "")
+    raw_urls = [u.strip() for u in (data.get("urls") or []) if u.strip()]
+    if not (email and session_id and domain and raw_urls):
+        return jsonify({"error": "email, session_id, domain and urls are all required."}), 400
+    urls, skipped, dropped_dupes = _prep_indexing_urls(raw_urls)
+    if not urls:
+        return jsonify({"results": skipped, "indexable": 0, "dropped_duplicates": dropped_dupes})
+    try:
+        token = gsc_audit.get_access_token(email)
+        property_url = gsc_audit.resolve_property(token, domain)
+    except Exception as e:
+        mapping = _gsc_mapping().get(domain.strip().lower()) or {}
+        access_level = (mapping.get("accessLevel") or "")
+        if mapping.get("email", "").lower() == email.lower() and "(domain)" in access_level:
+            property_url = f"sc-domain:{domain}"
+        else:
+            return jsonify({"error": f"Could not resolve a GSC property for {domain} on {email}: {e}"}), 400
+
+    def _log(msg):
+        activity(f"[live test] {msg}")
+
+    screenshot_dir = _domain_folder(domain, "livetest")
+    results = gsc_audit.test_live_url_via_session(
+        session_id, property_url, email, urls, domain=domain, log_fn=_log,
+        screenshot_dir=screenshot_dir)
+    for r in results:
+        if r.get("screenshot"):
+            r["screenshot_url"] = f"/api/screenshot/{os.path.basename(r['screenshot'])}"
+            del r["screenshot"]
+    results = skipped + results
+    indexable = sum(1 for r in results if r.get("indexable") is True)
+    activity(f"GSC Live Test: {indexable}/{len(raw_urls)} indexable via {email} "
+             f"({len(skipped)} skipped, {dropped_dupes} duplicate(s) dropped)")
+    return jsonify({"results": results, "indexable": indexable, "dropped_duplicates": dropped_dupes})
 
 # --------------------------------------------------------------------------- #
 # Bulk add-owner - superadmin only. Adds a new user (typically one of the

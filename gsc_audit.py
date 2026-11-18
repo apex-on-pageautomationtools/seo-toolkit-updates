@@ -1742,6 +1742,296 @@ def request_indexing_via_session(session_id, property_url, email, urls,
     return results
 
 
+_LIVE_TEST_INDEXABLE_MARKER = "url is available to google"
+_LIVE_TEST_NOT_INDEXABLE_MARKER = "url is not available to google"
+# Checked in this order (first match wins) against the live-test result
+# panel's text, so the surfaced "reason" is Google's own wording for why a
+# page can't be indexed rather than a vague generic failure.
+_LIVE_TEST_REASON_MARKERS = (
+    "blocked by robots.txt", "blocked due to unauthorized request (401)",
+    "blocked due to access forbidden (403)", "blocked due to other 4xx issue",
+    "server error (5xx)", "redirect error", "page with redirect",
+    "not found (404)", "soft 404", "crawl anomaly", "crawled - currently not indexed",
+    "discovered - currently not indexed", "duplicate without user-selected canonical",
+    "duplicate, google chose different canonical than user",
+    "alternate page with proper canonical tag", "excluded by 'noindex' tag",
+    "excluded by noindex tag", "blocked by page removal tool",
+)
+
+
+def test_live_url_via_session(session_id, property_url, email, urls,
+                               domain=None, browser_pref="edge", log_fn=None,
+                               screenshot_dir=None):
+    """Click "Test Live URL" (NOT "Request Indexing") in the real GSC URL
+    Inspection UI for each URL, via an already-logged-in GSC Browser
+    Session - a separate action from request_indexing_via_session, kept
+    distinct per the team's own request: a way to batch-check real
+    indexability/errors (robots.txt blocks, 404s, 5xx, redirects, noindex,
+    etc.) without submitting anything for indexing.
+
+    Google draws "Test Live URL" from the SAME per-property daily URL
+    Inspection quota as "Request Indexing" (confirmed: GSC's own UI shows
+    the same "exceeded your quota" message for either action) - so this
+    deliberately shares request_indexing_via_session's local 10/day-per-
+    domain tracker rather than keeping a separate counter, to avoid the two
+    tools together quietly blowing past Google's real shared limit.
+
+    Returns a list of {"url", "ok", "indexable", "reason", "message"} dicts,
+    one per URL passed in - "ok" means the tool itself ran without error,
+    "indexable" is True/False/None (None = live test ran but the verdict
+    text wasn't recognized - check the screenshot), "reason" is Google's own
+    wording for why a page isn't indexable (empty when indexable or
+    unknown). Each dict also gets a "screenshot" key (local PNG path) when
+    screenshot_dir is given, captured for EVERY attempt (not just
+    failures/successes) since the result panel's exact wording can vary and
+    a screenshot is the reliable fallback to actually see what GSC said."""
+    if log_fn is None:
+        log_fn = print
+    track_key = (domain or email or "")
+    results = []
+    remaining = indexing_fallback_remaining(track_key)
+    if remaining <= 0:
+        log_fn(f"  {domain or email}: today's URL Inspection allowance (10/day per domain, "
+               f"shared with Request Indexing) is already used.")
+        return [{"url": u, "ok": False, "indexable": None, "reason": "",
+                 "message": "domain_daily_cap_reached"} for u in urls]
+
+    to_attempt = urls[:remaining]
+    skipped = urls[remaining:]
+
+    import engine
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
+    profile_dir = os.path.join(_sessions_dir(), session_id, "chrome_profile")
+    lock = _profile_lock(profile_dir)
+    acquired = lock.acquire(timeout=180)
+    if not acquired:
+        log_fn("  Another capture is using this Google session - timed out waiting.")
+        return [{"url": u, "ok": False, "indexable": None, "reason": "",
+                 "message": "session_busy"} for u in urls]
+
+    driver = None
+    quota_hit = False
+    try:
+        driver = engine.build_driver(
+            profile_dir, proxy=None, headless=False,
+            country="us", extra_extensions=[],
+            logger=log_fn, browser_pref=browser_pref,
+            use_spawn_and_attach=False,
+        )
+        driver.get("https://search.google.com/search-console")
+        time.sleep(3)
+        cur = (driver.current_url or "").lower()
+        if "accounts.google.com" in cur or "/signin" in cur or "servicelogin" in cur:
+            log_fn(f"  {email}: session needs re-login in GSC Browser Sessions.")
+            return [{"url": u, "ok": False, "indexable": None, "reason": "",
+                     "message": "session_expired"} for u in urls] \
+                + [{"url": u, "ok": False, "indexable": None, "reason": "",
+                    "message": "skipped_daily_cap"} for u in skipped]
+
+        base_inspect_url = build_gsc_url("inspect", property_url)
+
+        def _find_inspect_searchbox():
+            try:
+                return driver.execute_script(
+                    "var els=document.querySelectorAll('input');"
+                    "for(var i=0;i<els.length;i++){"
+                    "var ph=(els[i].getAttribute('placeholder')||'').toLowerCase();"
+                    "var al=(els[i].getAttribute('aria-label')||'').toLowerCase();"
+                    "if(ph.indexOf('inspect any url')>-1||al.indexOf('inspect any url')>-1){return els[i];}}"
+                    "return null;")
+            except Exception:
+                return None
+
+        def _find_test_live_url_button():
+            try:
+                return driver.execute_script(
+                    "var els=document.querySelectorAll("
+                    "'span[role=\"button\"],div[role=\"button\"],button,a');"
+                    "for(var i=0;i<els.length;i++){var t=(els[i].innerText||'')"
+                    ".trim().toLowerCase();"
+                    "if(t.indexOf('test live url')>-1 && t.length<=25){return els[i];}}"
+                    "return null;")
+            except Exception:
+                return None
+
+        def _screenshot(url, tag):
+            if not screenshot_dir:
+                return None
+            try:
+                os.makedirs(screenshot_dir, exist_ok=True)
+                safe_url = re.sub(r"[^a-zA-Z0-9]+", "_", url)[:80].strip("_")
+                ss_path = os.path.join(
+                    screenshot_dir,
+                    f"{(domain or email or 'livetest')}_livetest_{tag}_{safe_url}_"
+                    f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+                driver.save_screenshot(ss_path)
+                return ss_path
+            except Exception as e:
+                log_fn(f"  [warn] could not capture live-test screenshot: {e}")
+                return None
+
+        for url in to_attempt:
+            if quota_hit:
+                results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                                 "message": "google_quota_exceeded"})
+                continue
+            try:
+                driver.get(base_inspect_url)
+                box = None
+                for _ in range(8):
+                    box = _find_inspect_searchbox()
+                    if box:
+                        break
+                    time.sleep(1)
+                if not box:
+                    results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                        "message": "Could not find GSC's own 'Inspect any URL' search box - Google may have "
+                        "changed the page layout, or the session needs re-login."})
+                    continue
+                try:
+                    box.click()
+                    box.send_keys(Keys.CONTROL, "a")
+                    box.send_keys(url)
+                    box.send_keys(Keys.RETURN)
+                except Exception as e:
+                    results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                                     "message": f"could not type into search box: {e}"})
+                    continue
+
+                # Same reasoning as request_indexing_via_session: the "Test Live
+                # URL" control only renders once URL Inspection's initial
+                # (cached) lookup finishes, so poll instead of a fixed sleep.
+                btn = None
+                state = None
+                body_text = ""
+                waited = 0
+                while waited < 48:
+                    time.sleep(3); waited += 3
+                    try:
+                        body_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+                    except Exception:
+                        body_text = ""
+                    if any(m in body_text for m in _INDEXING_QUOTA_MARKERS):
+                        state = "quota"; break
+                    if ("not on property" in body_text or "not on the property" in body_text
+                            or "url is not part of" in body_text or "isn't on this property" in body_text):
+                        state = "not_on_property"; break
+                    if ("verify ownership" in body_text or "you don't have access" in body_text
+                            or "you do not have access" in body_text
+                            or "choose a property" in body_text
+                            or "select a property to continue" in body_text):
+                        state = "no_access"; break
+                    try:
+                        btn = _find_test_live_url_button()
+                    except Exception:
+                        btn = None
+                    if btn:
+                        break
+                if state == "quota":
+                    log_fn(f"  {email}: Google's own daily URL Inspection quota is exhausted.")
+                    results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                                     "message": "google_quota_exceeded"})
+                    quota_hit = True
+                    continue
+                if state == "not_on_property":
+                    results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                        "message": "URL is not on the chosen property - the account's property is a different "
+                        "variant (non-www vs www, http vs https, or sc-domain vs URL-prefix). Pick or "
+                        "verify the exact property that covers this URL."})
+                    continue
+                if state == "no_access":
+                    results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                        "message": "This account is not a verified user of this property in Search Console - "
+                        "Test Live URL only works for properties the account has access to."})
+                    continue
+                if not btn:
+                    results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                        "message": "Test Live URL control did not appear within 48s - URL Inspection may still "
+                        "have been loading, the session may need re-login (Google Accounts tab), or "
+                        "Google changed the button layout."})
+                    continue
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", btn)
+                except Exception:
+                    pass
+                try:
+                    btn.click()
+                except Exception:
+                    try:
+                        driver.execute_script("arguments[0].click();", btn)
+                    except Exception:
+                        pass
+                _record_indexing_fallback_use(track_key)
+
+                # Same "Testing..." modal request_indexing_via_session waits on -
+                # Google runs the live fetch/render behind this same modal for
+                # both actions, so the same "don't trust stale leftover text
+                # until it closes" guard applies here.
+                TESTING_MODAL_TEXT = "testing if live url can be indexed"
+                done = False
+                cwaited = 0
+                verdict_text = ""
+                while cwaited < 150:
+                    time.sleep(5); cwaited += 5
+                    try:
+                        verdict_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+                    except Exception:
+                        verdict_text = ""
+                    if TESTING_MODAL_TEXT in verdict_text:
+                        continue
+                    if any(m in verdict_text for m in _INDEXING_QUOTA_MARKERS):
+                        log_fn(f"  {email}: Google's own daily URL Inspection quota is exhausted.")
+                        results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                                         "message": "google_quota_exceeded"})
+                        quota_hit = True; done = True; break
+                    if (_LIVE_TEST_INDEXABLE_MARKER in verdict_text
+                            or _LIVE_TEST_NOT_INDEXABLE_MARKER in verdict_text):
+                        done = True
+                        break
+                if not done:
+                    # Verdict text never showed up in 150s - still record what
+                    # ran, with a screenshot as the fallback evidence.
+                    results.append({"url": url, "ok": True, "indexable": None, "reason": "",
+                        "message": "live test ran - verdict text not detected within 150s, check screenshot",
+                        "screenshot": _screenshot(url, "unknown")})
+                    continue
+                if quota_hit:
+                    continue
+                indexable = _LIVE_TEST_INDEXABLE_MARKER in verdict_text and \
+                    _LIVE_TEST_NOT_INDEXABLE_MARKER not in verdict_text
+                reason = ""
+                if not indexable:
+                    reason = next((m for m in _LIVE_TEST_REASON_MARKERS if m in verdict_text), "")
+                results.append({
+                    "url": url, "ok": True, "indexable": indexable,
+                    "reason": reason,
+                    "message": "indexable" if indexable else (reason or "not indexable - see screenshot"),
+                    "screenshot": _screenshot(url, "ok" if indexable else "error"),
+                })
+            except Exception as e:
+                results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                                 "message": str(e)[:200]})
+        _trim_session_cache(profile_dir)
+    except Exception as e:
+        log_fn(f"  Live test error: {e}")
+        for url in to_attempt[len(results):]:
+            results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                             "message": str(e)[:200]})
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+        lock.release()
+
+    for url in skipped:
+        results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                         "message": "skipped_daily_cap"})
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Bulk-add a new user (typically an Indexing API pool service account) as
 # Owner across many properties, via a GSC Browser Session already logged in
