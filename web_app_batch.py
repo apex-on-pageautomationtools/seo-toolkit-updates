@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.19.1"
+APP_VERSION = "4.19.2"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -7511,18 +7511,103 @@ def api_indexing_fallback_submit():
     _log_indexing_results(app_user or email, "browser", results)
     return jsonify({"results": results, "submitted": submitted, "dropped_duplicates": dropped_dupes})
 
-@app.route("/api/indexing/live-test", methods=["POST"])
-def api_indexing_live_test():
+livetest_state = {"status": "idle", "log": [], "results": [], "error_msg": "", "progress": "",
+                   "domain": "", "email": ""}
+livetest_lock = threading.Lock()
+livetest_stop = threading.Event()
+
+
+def _run_live_test(domain, email, session_id, property_url, urls, skipped, dropped_dupes, raw_count):
+    """Background runner for Live Test - mirrors _run_wayback_submit's
+    state/log/results pattern so the UI can poll real progress (and Stop a
+    run in progress) instead of blocking on one long synchronous request
+    with no feedback until everything finishes."""
+    # skipped entries (from _prep_indexing_urls - over the per-request cap,
+    # or failed the real 200 OK check) are already-finalized result dicts;
+    # only the URLs actually about to be attempted get a "pending" row.
+    skipped_rows = [dict(ok=False, indexable=None, reason="", **s) for s in skipped]
+    with livetest_lock:
+        livetest_state.update({"status": "running", "log": [], "error_msg": "",
+                               "progress": "Starting...", "domain": domain, "email": email,
+                               "results": skipped_rows + [
+                                   {"url": u, "ok": None, "indexable": None, "reason": "",
+                                    "message": "pending"} for u in urls]})
+    livetest_stop.clear()
+    activity(f"GSC Live Test started for {domain} ({len(urls)} URL(s), {len(skipped)} skipped up front)")
+
+    def _log(msg):
+        with livetest_lock:
+            livetest_state["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+            livetest_state["progress"] = msg
+
+    tested = [0]
+
+    def _on_result(r):
+        if r.get("screenshot"):
+            r["screenshot_url"] = f"/api/screenshot/{os.path.basename(r['screenshot'])}"
+            del r["screenshot"]
+        tested[0] += 1
+        with livetest_lock:
+            # Match by URL against the pre-allocated "pending" row so the
+            # table updates in place instead of growing a second list.
+            for row in livetest_state["results"]:
+                if row["url"] == r["url"] and row["message"] == "pending":
+                    row.update(r)
+                    break
+            else:
+                livetest_state["results"].append(r)
+            livetest_state["progress"] = f"Tested {tested[0]}/{len(urls)}: {r['url']}"
+        verdict = "indexable" if r.get("indexable") is True else \
+            (f"not indexable ({r.get('reason') or r.get('message')})" if r.get("indexable") is False
+             else r.get("message", ""))
+        _log(f"  [{tested[0]}/{len(urls)}] {r['url']} -> {verdict}")
+
+    screenshot_dir = _domain_folder(domain, "livetest")
+    try:
+        gsc_audit.test_live_url_via_session(
+            session_id, property_url, email, urls, domain=domain, log_fn=_log,
+            screenshot_dir=screenshot_dir, stop_event=livetest_stop, on_result=_on_result)
+    except Exception as e:
+        with livetest_lock:
+            livetest_state["error_msg"] = str(e)
+        _log(f"Live test error: {e}")
+
+    with livetest_lock:
+        results = livetest_state["results"]
+        indexable = sum(1 for r in results if r.get("indexable") is True)
+        stopped = livetest_stop.is_set()
+        livetest_state["status"] = "stopped" if stopped else "completed"
+    # _log() acquires livetest_lock itself (it's also called from inside
+    # gsc_audit.test_live_url_via_session, which doesn't hold the lock) - so
+    # it must run AFTER the block above releases it, not inside it, or this
+    # thread deadlocks trying to re-acquire a non-reentrant Lock it already
+    # holds (confirmed live: a real run hung forever right here).
+    if stopped:
+        _log("Stopped by user.")
+    else:
+        _log(f"Completed -- {indexable}/{raw_count} indexable "
+             f"({len(skipped)} skipped, {dropped_dupes} duplicate(s) dropped).")
+    activity(f"GSC Live Test: {indexable}/{raw_count} indexable via {email} "
+             f"({len(skipped)} skipped, {dropped_dupes} duplicate(s) dropped)")
+
+
+@app.route("/api/indexing/live-test/start", methods=["POST"])
+def api_indexing_live_test_start():
     """Click the real GSC UI's "Test Live URL" button for each URL - a
     separate action from Request Indexing: reports which pages are
     currently indexable and, for the ones that aren't, Google's own reason
     (blocked by robots.txt, 404, 5xx, redirect, noindex, etc.) instead of
     submitting anything for indexing. Uses the same GSC Browser Session /
     account-picker (/api/indexing/fallback-accounts) as the Request
-    Indexing fallback above, since both draw from the same per-domain
-    browser session pool."""
+    Indexing fallback above. Runs in a background thread (see
+    /api/indexing/live-test/status and /stop) rather than blocking the
+    request - a 20-URL batch at up to ~2min/URL can take 40+ minutes, and
+    the old synchronous version gave no progress and no way to cancel."""
     if not _require_tool("indexing"):
         return jsonify({"error": "You don't have access to Submit for Indexing."}), 403
+    with livetest_lock:
+        if livetest_state["status"] == "running":
+            return jsonify({"error": "A Live Test run is already in progress."}), 400
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip()
     session_id = (data.get("session_id") or "").strip()
@@ -7532,7 +7617,10 @@ def api_indexing_live_test():
         return jsonify({"error": "email, session_id, domain and urls are all required."}), 400
     urls, skipped, dropped_dupes = _prep_indexing_urls(raw_urls, max_per_request=LIVE_TEST_MAX_PER_REQUEST)
     if not urls:
-        return jsonify({"results": skipped, "indexable": 0, "dropped_duplicates": dropped_dupes})
+        with livetest_lock:
+            livetest_state.update({"status": "completed", "log": [], "error_msg": "", "progress": "",
+                                   "domain": domain, "email": email, "results": skipped})
+        return jsonify({"status": "started", "count": 0})
     try:
         token = gsc_audit.get_access_token(email)
         property_url = gsc_audit.resolve_property(token, domain)
@@ -7544,22 +7632,32 @@ def api_indexing_live_test():
         else:
             return jsonify({"error": f"Could not resolve a GSC property for {domain} on {email}: {e}"}), 400
 
-    def _log(msg):
-        activity(f"[live test] {msg}")
+    t = threading.Thread(target=_run_live_test,
+                          args=(domain, email, session_id, property_url, urls, skipped,
+                                dropped_dupes, len(raw_urls)),
+                          daemon=True)
+    t.start()
+    return jsonify({"status": "started", "count": len(urls)})
 
-    screenshot_dir = _domain_folder(domain, "livetest")
-    results = gsc_audit.test_live_url_via_session(
-        session_id, property_url, email, urls, domain=domain, log_fn=_log,
-        screenshot_dir=screenshot_dir)
-    for r in results:
-        if r.get("screenshot"):
-            r["screenshot_url"] = f"/api/screenshot/{os.path.basename(r['screenshot'])}"
-            del r["screenshot"]
-    results = skipped + results
-    indexable = sum(1 for r in results if r.get("indexable") is True)
-    activity(f"GSC Live Test: {indexable}/{len(raw_urls)} indexable via {email} "
-             f"({len(skipped)} skipped, {dropped_dupes} duplicate(s) dropped)")
-    return jsonify({"results": results, "indexable": indexable, "dropped_duplicates": dropped_dupes})
+
+@app.route("/api/indexing/live-test/status")
+def api_indexing_live_test_status():
+    with livetest_lock:
+        results = livetest_state["results"]
+        return jsonify({
+            "status": livetest_state["status"],
+            "log": livetest_state["log"][-200:],
+            "results": results,
+            "indexable": sum(1 for r in results if r.get("indexable") is True),
+            "error_msg": livetest_state["error_msg"],
+            "progress": livetest_state["progress"],
+        })
+
+
+@app.route("/api/indexing/live-test/stop", methods=["POST"])
+def api_indexing_live_test_stop():
+    livetest_stop.set()
+    return jsonify({"status": "stopping"})
 
 # --------------------------------------------------------------------------- #
 # Bulk add-owner - superadmin only. Adds a new user (typically one of the

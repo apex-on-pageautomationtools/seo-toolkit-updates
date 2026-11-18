@@ -1798,7 +1798,7 @@ _LIVE_TEST_REASON_MARKERS = (
 
 def test_live_url_via_session(session_id, property_url, email, urls,
                                domain=None, browser_pref="edge", log_fn=None,
-                               screenshot_dir=None):
+                               screenshot_dir=None, stop_event=None, on_result=None):
     """Click "Test Live URL" (NOT "Request Indexing") in the real GSC URL
     Inspection UI for each URL, via an already-logged-in GSC Browser
     Session - a separate action from request_indexing_via_session, kept
@@ -1819,9 +1819,29 @@ def test_live_url_via_session(session_id, property_url, email, urls,
     unknown). Each dict also gets a "screenshot" key (local PNG path) when
     screenshot_dir is given, captured for EVERY attempt (not just
     failures/successes) since the result panel's exact wording can vary and
-    a screenshot is the reliable fallback to actually see what GSC said."""
+    a screenshot is the reliable fallback to actually see what GSC said.
+
+    stop_event: an optional threading.Event - checked before each URL and
+    periodically inside the 48s/150s wait loops, so a caller running this in
+    a background thread can actually cancel a run in progress instead of
+    just not seeing the final results (a batch of 20 URLs at up to ~2min
+    each can run 40+ minutes with nothing else to interrupt it).
+    on_result: optional callback(result_dict) invoked right after each URL's
+    result is finalized, so a caller can mirror live per-URL progress into
+    its own UI-facing state instead of only getting the full list at the
+    end."""
     if log_fn is None:
         log_fn = print
+
+    def _emit(d):
+        results.append(d)
+        if on_result:
+            try:
+                on_result(d)
+            except Exception:
+                pass
+        return d
+
     track_key = (domain or email or "")
     results = []
     remaining = live_test_remaining(track_key)
@@ -1907,8 +1927,10 @@ def test_live_url_via_session(session_id, property_url, email, urls,
                 return None
 
         for url in to_attempt:
+            if stop_event is not None and stop_event.is_set():
+                break
             if quota_hit:
-                results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                _emit({"url": url, "ok": False, "indexable": None, "reason": "",
                                  "message": "google_quota_exceeded"})
                 continue
             try:
@@ -1920,7 +1942,7 @@ def test_live_url_via_session(session_id, property_url, email, urls,
                         break
                     time.sleep(1)
                 if not box:
-                    results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                    _emit({"url": url, "ok": False, "indexable": None, "reason": "",
                         "message": "Could not find GSC's own 'Inspect any URL' search box - Google may have "
                         "changed the page layout, or the session needs re-login."})
                     continue
@@ -1930,7 +1952,7 @@ def test_live_url_via_session(session_id, property_url, email, urls,
                     box.send_keys(url)
                     box.send_keys(Keys.RETURN)
                 except Exception as e:
-                    results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                    _emit({"url": url, "ok": False, "indexable": None, "reason": "",
                                      "message": f"could not type into search box: {e}"})
                     continue
 
@@ -1942,6 +1964,8 @@ def test_live_url_via_session(session_id, property_url, email, urls,
                 body_text = ""
                 waited = 0
                 while waited < 48:
+                    if stop_event is not None and stop_event.is_set():
+                        break
                     time.sleep(3); waited += 3
                     try:
                         body_text = driver.find_element(By.TAG_NAME, "body").text.lower()
@@ -1963,25 +1987,27 @@ def test_live_url_via_session(session_id, property_url, email, urls,
                         btn = None
                     if btn:
                         break
+                if stop_event is not None and stop_event.is_set():
+                    break
                 if state == "quota":
                     log_fn(f"  {email}: Google's own daily URL Inspection quota is exhausted.")
-                    results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                    _emit({"url": url, "ok": False, "indexable": None, "reason": "",
                                      "message": "google_quota_exceeded"})
                     quota_hit = True
                     continue
                 if state == "not_on_property":
-                    results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                    _emit({"url": url, "ok": False, "indexable": None, "reason": "",
                         "message": "URL is not on the chosen property - the account's property is a different "
                         "variant (non-www vs www, http vs https, or sc-domain vs URL-prefix). Pick or "
                         "verify the exact property that covers this URL."})
                     continue
                 if state == "no_access":
-                    results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                    _emit({"url": url, "ok": False, "indexable": None, "reason": "",
                         "message": "This account is not a verified user of this property in Search Console - "
                         "Test Live URL only works for properties the account has access to."})
                     continue
                 if not btn:
-                    results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                    _emit({"url": url, "ok": False, "indexable": None, "reason": "",
                         "message": "Test Live URL control did not appear within 48s - URL Inspection may still "
                         "have been loading, the session may need re-login (Google Accounts tab), or "
                         "Google changed the button layout."})
@@ -2005,9 +2031,13 @@ def test_live_url_via_session(session_id, property_url, email, urls,
                 # until it closes" guard applies here.
                 TESTING_MODAL_TEXT = "testing if live url can be indexed"
                 done = False
+                stopped = False
                 cwaited = 0
                 verdict_text = ""
                 while cwaited < 150:
+                    if stop_event is not None and stop_event.is_set():
+                        stopped = True
+                        break
                     time.sleep(5); cwaited += 5
                     try:
                         verdict_text = driver.find_element(By.TAG_NAME, "body").text.lower()
@@ -2017,17 +2047,26 @@ def test_live_url_via_session(session_id, property_url, email, urls,
                         continue
                     if any(m in verdict_text for m in _INDEXING_QUOTA_MARKERS):
                         log_fn(f"  {email}: Google's own daily URL Inspection quota is exhausted.")
-                        results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                        _emit({"url": url, "ok": False, "indexable": None, "reason": "",
                                          "message": "google_quota_exceeded"})
                         quota_hit = True; done = True; break
                     if (_LIVE_TEST_INDEXABLE_MARKER in verdict_text
                             or _LIVE_TEST_NOT_INDEXABLE_MARKER in verdict_text):
                         done = True
                         break
+                if stopped:
+                    # The click already happened (counted against quota) -
+                    # still record it, with a screenshot, rather than
+                    # silently dropping a result the user already paid
+                    # quota for.
+                    _emit({"url": url, "ok": True, "indexable": None, "reason": "",
+                        "message": "stopped by user before the verdict was confirmed - check screenshot",
+                        "screenshot": _screenshot(url, "stopped")})
+                    break
                 if not done:
                     # Verdict text never showed up in 150s - still record what
                     # ran, with a screenshot as the fallback evidence.
-                    results.append({"url": url, "ok": True, "indexable": None, "reason": "",
+                    _emit({"url": url, "ok": True, "indexable": None, "reason": "",
                         "message": "live test ran - verdict text not detected within 150s, check screenshot",
                         "screenshot": _screenshot(url, "unknown")})
                     continue
@@ -2038,20 +2077,20 @@ def test_live_url_via_session(session_id, property_url, email, urls,
                 reason = ""
                 if not indexable:
                     reason = next((m for m in _LIVE_TEST_REASON_MARKERS if m in verdict_text), "")
-                results.append({
+                _emit({
                     "url": url, "ok": True, "indexable": indexable,
                     "reason": reason,
                     "message": "indexable" if indexable else (reason or "not indexable - see screenshot"),
                     "screenshot": _screenshot(url, "ok" if indexable else "error"),
                 })
             except Exception as e:
-                results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+                _emit({"url": url, "ok": False, "indexable": None, "reason": "",
                                  "message": str(e)[:200]})
         _trim_session_cache(profile_dir)
     except Exception as e:
         log_fn(f"  Live test error: {e}")
         for url in to_attempt[len(results):]:
-            results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+            _emit({"url": url, "ok": False, "indexable": None, "reason": "",
                              "message": str(e)[:200]})
     finally:
         if driver:
@@ -2062,7 +2101,7 @@ def test_live_url_via_session(session_id, property_url, email, urls,
         lock.release()
 
     for url in skipped:
-        results.append({"url": url, "ok": False, "indexable": None, "reason": "",
+        _emit({"url": url, "ok": False, "indexable": None, "reason": "",
                          "message": "skipped_daily_cap"})
     return results
 

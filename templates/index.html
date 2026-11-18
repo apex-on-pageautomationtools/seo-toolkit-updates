@@ -3377,7 +3377,15 @@ https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
                 <option value="">Loading...</option>
               </select>
             </div>
-            <button class="btn btn-tonal" onclick="ltSubmit()">Test Live URLs via GSC</button>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-tonal" id="btn-lt-start" onclick="ltStart()">Test Live URLs via GSC</button>
+              <button class="btn btn-tonal hidden" id="btn-lt-stop" onclick="ltStop()"
+                style="color:var(--err,#c00)">Stop</button>
+            </div>
+            <div id="lt-status-wrap" class="hidden" style="margin-top:10px">
+              <span class="tag t-yes" id="lt-progress">Starting...</span>
+              <div class="log" id="lt-log" style="height:140px;overflow-y:auto;font-size:12px;margin-top:8px"></div>
+            </div>
             <div id="lt-results"></div>
           </div>
         </section>
@@ -7400,6 +7408,20 @@ https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
       /* ===================== submit for indexing ===================== */
       async function idxInit() {
         idxLoadFallbackAccounts();
+        // If a Live Test run is already in progress (e.g. started, then the
+        // user switched tabs and came back), resume showing its live
+        // progress instead of leaving the UI looking idle.
+        try {
+          const r = await fetch('/api/indexing/live-test/status');
+          const d = await r.json();
+          if (d.status === 'running') {
+            $('lt-status-wrap').classList.remove('hidden');
+            $('btn-lt-start').disabled = true;
+            $('btn-lt-stop').classList.remove('hidden');
+            clearTimeout(_ltPollTimer);
+            ltPoll();
+          }
+        } catch (e) { }
       }
       let _idxLastLeftover = [];
       let _idxLastResults = [];
@@ -7656,7 +7678,51 @@ https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
           }
         } catch (e) { sel.innerHTML = '<option value="">Could not load accounts</option>'; }
       }
-      async function ltSubmit() {
+      let _ltPollTimer = null;
+      function ltStatusText(x) {
+        if (x.message === 'pending') return 'Testing...';
+        if (x.indexable === true) return 'Indexable';
+        if (x.indexable === false) return 'Not indexable' + (x.reason ? ': ' + x.reason : '');
+        return x.message || 'Unknown';
+      }
+      function ltStatusColor(x) {
+        if (x.message === 'pending') return 'var(--text-3)';
+        return x.indexable === true ? 'var(--ok)' : (x.indexable === false ? 'var(--err,#c00)' : 'var(--text-3)');
+      }
+      function ltRenderResults(d) {
+        const box = $('lt-results');
+        const rows = (d.results || []).map(x => '<tr><td style="font-size:11px;padding:3px 6px;word-break:break-word;overflow-wrap:anywhere;white-space:normal">' + esc(x.url) + '</td>'
+          + '<td style="font-size:11px;padding:3px 6px;word-break:break-word;overflow-wrap:anywhere;white-space:normal;color:' + ltStatusColor(x) + '">' + esc(ltStatusText(x))
+          + (x.screenshot_url ? ' <a href="' + esc(x.screenshot_url) + '" target="_blank" rel="noopener">(screenshot)</a>' : '') + '</td></tr>').join('');
+        const total = (d.results || []).length;
+        box.innerHTML = '<div class="note" style="margin:10px 0 6px">' + d.indexable + '/' + total + ' indexable so far.</div>'
+          + '<table style="width:100%;border-collapse:collapse;table-layout:fixed"><colgroup><col style="width:55%"><col style="width:45%"></colgroup><tbody>' + rows + '</tbody></table>';
+      }
+      async function ltPoll() {
+        try {
+          const r = await fetch('/api/indexing/live-test/status');
+          const d = await r.json();
+          $('lt-progress').textContent = d.progress || d.status;
+          $('lt-log').innerHTML = (d.log || []).map(esc).join('<br>');
+          $('lt-log').scrollTop = $('lt-log').scrollHeight;
+          ltRenderResults(d);
+          if (d.status === 'running') {
+            _ltPollTimer = setTimeout(ltPoll, 2500);
+            return;
+          }
+          // Finished (completed/stopped/error) - reset the buttons and refresh
+          // the remaining-quota note.
+          $('btn-lt-start').disabled = false;
+          $('btn-lt-stop').classList.add('hidden');
+          if (d.error_msg) { toast('Live test error: ' + d.error_msg, 'err'); }
+          else if (d.status === 'stopped') { toast('Live test stopped', 'err'); }
+          else { toast('Live test completed', 'ok'); }
+          ltLoadAccounts($('lt-domain').value.trim());
+        } catch (e) {
+          _ltPollTimer = setTimeout(ltPoll, 3000);
+        }
+      }
+      async function ltStart() {
         const domain = $('lt-domain').value.trim();
         const sel = $('lt-account').value;
         if (!domain) { toast('Enter the domain first', 'err'); return; }
@@ -7668,25 +7734,36 @@ https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
           urls = urls.slice(0, LT_MAX_URLS);
         }
         const [email, session_id] = sel.split('|');
-        const box = $('lt-results');
-        box.innerHTML = '<div class="note">Opening a real browser window - log in if prompted, then wait (each URL takes up to ~2 minutes)...</div>';
+        $('lt-results').innerHTML = '';
+        $('lt-status-wrap').classList.remove('hidden');
+        $('lt-progress').textContent = 'Opening a real browser window...';
+        $('lt-log').innerHTML = '';
+        $('btn-lt-start').disabled = true;
+        $('btn-lt-stop').classList.remove('hidden');
         try {
-          const r = await fetch('/api/indexing/live-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, session_id, domain, urls }) });
+          const r = await fetch('/api/indexing/live-test/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, session_id, domain, urls }) });
           const d = await r.json();
-          if (d.error) { box.innerHTML = '<div class="note" style="color:var(--err,#c00)">' + esc(d.error) + '</div>'; return; }
-          const statusText = x => {
-            if (x.indexable === true) return 'Indexable';
-            if (x.indexable === false) return 'Not indexable' + (x.reason ? ': ' + x.reason : '');
-            return x.message || 'Unknown';
-          };
-          const statusColor = x => x.indexable === true ? 'var(--ok)' : (x.indexable === false ? 'var(--err,#c00)' : 'var(--text-3)');
-          let rows = (d.results || []).map(x => '<tr><td style="font-size:11px;padding:3px 6px;word-break:break-word;overflow-wrap:anywhere;white-space:normal">' + esc(x.url) + '</td>'
-            + '<td style="font-size:11px;padding:3px 6px;word-break:break-word;overflow-wrap:anywhere;white-space:normal;color:' + statusColor(x) + '">' + esc(statusText(x))
-            + (x.screenshot_url ? ' <a href="' + esc(x.screenshot_url) + '" target="_blank" rel="noopener">(screenshot)</a>' : '') + '</td></tr>').join('');
-          box.innerHTML = '<div class="note" style="margin-bottom:6px">' + d.indexable + '/' + urls.length + ' indexable via ' + esc(email) + '.</div>'
-            + '<table style="width:100%;border-collapse:collapse;table-layout:fixed"><colgroup><col style="width:55%"><col style="width:45%"></colgroup><tbody>' + rows + '</tbody></table>';
-          ltLoadAccounts($('lt-domain').value.trim());
-        } catch (e) { box.innerHTML = '<div class="note" style="color:var(--err,#c00)">Live test failed.</div>'; }
+          if (d.error) {
+            toast(d.error, 'err');
+            $('btn-lt-start').disabled = false;
+            $('btn-lt-stop').classList.add('hidden');
+            return;
+          }
+          clearTimeout(_ltPollTimer);
+          ltPoll();
+        } catch (e) {
+          toast('Could not start live test', 'err');
+          $('btn-lt-start').disabled = false;
+          $('btn-lt-stop').classList.add('hidden');
+        }
+      }
+      async function ltStop() {
+        $('btn-lt-stop').disabled = true;
+        try {
+          await fetch('/api/indexing/live-test/stop', { method: 'POST' });
+          toast('Stopping after the current URL finishes...', 'ok');
+        } catch (e) { }
+        $('btn-lt-stop').disabled = false;
       }
 
       /* ===================== bulk add owner (superadmin only) ===================== */
