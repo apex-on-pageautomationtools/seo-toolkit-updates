@@ -29,8 +29,14 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+import io
+
 import docx
 from docx.shared import Pt, Inches, RGBColor
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Reuse the existing OpenAI/Gemini/Groq/OpenRouter fallback chain instead of
@@ -487,6 +493,77 @@ def build_json_ld(scraped, suggestions):
 
 
 # --------------------------------------------------------------------------- #
+# Real embedded image + real clickable button (team ask: don't just describe
+# what to insert in text - actually insert it, so the report shows exactly
+# what the finished section looks like). The reference format itself has no
+# embeds (plain text + prnt.sc links), but this tool already diverges from
+# that for placement screenshots (real add_picture instead of a link) - this
+# follows the same precedent rather than fabricating anything new.
+# --------------------------------------------------------------------------- #
+def add_hyperlink(paragraph, url, text, color="FFFFFF", bold=True, underline=False):
+    """python-docx has no native hyperlink support - builds the real
+    w:hyperlink run by hand, pointing at a real external relationship."""
+    part = paragraph.part
+    r_id = part.relate_to(url, RT.HYPERLINK, is_external=True)
+    hyperlink = OxmlElement('w:hyperlink')
+    hyperlink.set(qn('r:id'), r_id)
+
+    run = OxmlElement('w:r')
+    rPr = OxmlElement('w:rPr')
+    if color:
+        c = OxmlElement('w:color')
+        c.set(qn('w:val'), color)
+        rPr.append(c)
+    if bold:
+        rPr.append(OxmlElement('w:b'))
+    if underline:
+        u = OxmlElement('w:u')
+        u.set(qn('w:val'), 'single')
+        rPr.append(u)
+    run.append(rPr)
+    t = OxmlElement('w:t')
+    t.set(qn('xml:space'), 'preserve')
+    t.text = text
+    run.append(t)
+    hyperlink.append(run)
+    paragraph._p.append(hyperlink)
+    return hyperlink
+
+
+def embed_image_from_url(doc, image_url, width_inches=4.0):
+    """Downloads the REAL suggested image and embeds it in the doc, so the
+    report shows the actual image rather than just a link to it. Returns
+    True on success; non-fatal/no-op on any failure (never fabricates a
+    placeholder image)."""
+    r = fetch(image_url, timeout=15)
+    if not r or r.status_code >= 400 or not r.content:
+        return False
+    try:
+        doc.add_picture(io.BytesIO(r.content), width=Inches(width_inches))
+        return True
+    except Exception as e:
+        log(f"   [warn] could not embed image {image_url}: {type(e).__name__}: {e}")
+        return False
+
+
+def add_button(doc, text, url, fill="1F6FD8"):
+    """Renders an actual clickable button (shaded background + a real
+    hyperlink run), not just text describing what to build - centered,
+    bold white text on a colored background, matching the shaded-banner
+    convention already used elsewhere in this app's reports."""
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(6)
+    p.paragraph_format.space_after = Pt(6)
+    add_hyperlink(p, url, f"  {text}  ", color="FFFFFF", bold=True, underline=False)
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:fill'), fill)
+    shd.set(qn('w:val'), 'clear')
+    p._p.get_or_add_pPr().append(shd)
+    return p
+
+
+# --------------------------------------------------------------------------- #
 # .docx assembly - matches the "james" reference format exactly
 # --------------------------------------------------------------------------- #
 SEP = "*" * 43
@@ -543,6 +620,10 @@ def build_docx(out_path, scraped, suggestions, link_pairs, image_url, image_miss
     doc.add_paragraph(f"Featured Image URL: {'Already Given!' if scraped['featured_image'] else MISSING}")
     if image_url:
         doc.add_paragraph(f"Image Suggestion: {image_url}")
+        if embed_image_from_url(doc, image_url):
+            cap = doc.add_paragraph("(real image embedded above, as it would appear on the page)")
+            cap.runs[0].italic = True
+            cap.runs[0].font.size = Pt(9)
     else:
         p = doc.add_paragraph()
         run = p.add_run("Image Suggestion: " + image_missing_note)
@@ -556,6 +637,12 @@ def build_docx(out_path, scraped, suggestions, link_pairs, image_url, image_miss
                       f"text \u201c{cta}\u201d and link it with this page ")
     if link_target:
         doc.add_paragraph(f"Link: {link_target}")
+        if cta:
+            add_button(doc, cta, link_target)
+            cap = doc.add_paragraph("(real clickable button above - click it in Word/Google Docs "
+                                    "to confirm the link)")
+            cap.runs[0].italic = True
+            cap.runs[0].font.size = Pt(9)
     else:
         p = doc.add_paragraph("Link: ")
         run = p.add_run("No confident internal page found automatically - link manually "
