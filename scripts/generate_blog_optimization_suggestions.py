@@ -570,7 +570,7 @@ SEP = "*" * 43
 
 
 def build_docx(out_path, scraped, suggestions, link_pairs, image_url, image_missing_note,
-               screenshot_paths, contact_url, json_ld):
+               screenshot_paths, contact_url, json_ld, provided_images=None):
     doc = docx.Document()
     doc.add_heading("Blog Optimization Suggestions", level=0)
 
@@ -618,7 +618,18 @@ def build_docx(out_path, scraped, suggestions, link_pairs, image_url, image_miss
     doc.add_paragraph("Image Optimization Suggestions-  ")
     doc.add_paragraph("")
     doc.add_paragraph(f"Featured Image URL: {'Already Given!' if scraped['featured_image'] else MISSING}")
-    if image_url:
+    if provided_images:
+        doc.add_paragraph(f"Image Suggestion: Provided by team ({len(provided_images)} image"
+                          f"{'s' if len(provided_images) != 1 else ''})")
+        for path in provided_images:
+            try:
+                doc.add_picture(path, width=Inches(4.0))
+            except Exception as e:
+                log(f"   [warn] could not embed provided image {path}: {type(e).__name__}: {e}")
+        cap = doc.add_paragraph("(real image(s) provided by the team, embedded above)")
+        cap.runs[0].italic = True
+        cap.runs[0].font.size = Pt(9)
+    elif image_url:
         doc.add_paragraph(f"Image Suggestion: {image_url}")
         if embed_image_from_url(doc, image_url):
             cap = doc.add_paragraph("(real image embedded above, as it would appear on the page)")
@@ -701,12 +712,13 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
 
-    target_pages, target_keywords = [], []
+    target_pages, target_keywords, provided_images = [], [], []
     if args.targets and os.path.exists(args.targets):
         with open(args.targets, encoding="utf-8") as f:
             tdata = json.load(f)
         target_pages = tdata.get("target_pages") or []
         target_keywords = tdata.get("target_keywords") or []
+        provided_images = [p for p in (tdata.get("provided_images") or []) if os.path.exists(p)]
 
     log(f"[1/6] Fetching {args.url}...")
     try:
@@ -733,13 +745,17 @@ def main():
     else:
         log("   No confident internal-link target found.")
 
-    log("[4/6] Looking for a reusable real image...")
-    image_url = find_reusable_image(scraped, suggestions.get("topic_keywords") or [])
-    image_missing_note = "" if image_url else "Need to find new image and update"
-    if image_url:
-        log(f"   Found: {image_url}")
+    image_url, image_missing_note = None, ""
+    if provided_images:
+        log(f"[4/6] Using {len(provided_images)} team-provided image(s) instead of auto-detection.")
     else:
-        log("   No matching real image found on the site - flagged for manual sourcing.")
+        log("[4/6] Looking for a reusable real image...")
+        image_url = find_reusable_image(scraped, suggestions.get("topic_keywords") or [])
+        image_missing_note = "" if image_url else "Need to find new image and update"
+        if image_url:
+            log(f"   Found: {image_url}")
+        else:
+            log("   No matching real image found on the site - flagged for manual sourcing.")
 
     screenshot_paths = {}
     if not args.no_capture:
@@ -761,9 +777,9 @@ def main():
     out_file = os.path.join(args.out, f"Blog_Optimization_Suggestions_-_{safe_name}.docx")
     log("[6/6] Writing .docx...")
     build_docx(out_file, scraped, suggestions, link_pairs, image_url, image_missing_note,
-              screenshot_paths, scraped["contact_url"], json_ld)
+              screenshot_paths, scraped["contact_url"], json_ld, provided_images=provided_images)
 
-    for p in screenshot_paths.values():
+    for p in list(screenshot_paths.values()) + provided_images:
         try:
             os.remove(p)
         except Exception:

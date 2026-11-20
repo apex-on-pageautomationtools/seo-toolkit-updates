@@ -8533,7 +8533,7 @@ blogopt_lock = threading.Lock()
 blogopt_stop = threading.Event()
 
 
-def _run_blogopt_report(url, targets_data, no_capture):
+def _run_blogopt_report(url, targets_data, no_capture, provided_images=None):
     with blogopt_lock:
         blogopt_state.update({"status": "running", "log": [], "url": url,
                               "output_file": "", "error_msg": "", "progress": "Starting..."})
@@ -8550,10 +8550,13 @@ def _run_blogopt_report(url, targets_data, no_capture):
     os.makedirs(out_dir, exist_ok=True)
 
     targets_file = None
-    if targets_data and (targets_data.get("target_pages") or targets_data.get("target_keywords")):
+    merged_targets = dict(targets_data or {})
+    if provided_images:
+        merged_targets["provided_images"] = provided_images
+    if merged_targets.get("target_pages") or merged_targets.get("target_keywords") or merged_targets.get("provided_images"):
         targets_file = os.path.join(out_dir, "_targets.json")
         with open(targets_file, "w", encoding="utf-8") as f:
-            json.dump(targets_data, f, ensure_ascii=False)
+            json.dump(merged_targets, f, ensure_ascii=False)
 
     python_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "python", "python.exe")
     script = os.path.join(SCRIPTS_DIR, "generate_blog_optimization_suggestions.py")
@@ -8622,7 +8625,8 @@ def api_blogopt_start():
     with blogopt_lock:
         if blogopt_state["status"] == "running":
             return jsonify({"error": "Already running"}), 400
-    data = request.get_json(silent=True) or {}
+    is_multipart = request.content_type and "multipart/form-data" in request.content_type
+    data = request.form if is_multipart else (request.get_json(silent=True) or {})
     url = (data.get("url") or "").strip()
     if not url:
         return jsonify({"error": "Blog URL required"}), 400
@@ -8631,12 +8635,32 @@ def api_blogopt_start():
     target_pages = [ln.strip() for ln in (data.get("target_pages") or "").splitlines() if ln.strip()]
     target_keywords = [k.strip() for k in (data.get("target_keywords") or "").split(",") if k.strip()]
     no_capture = bool(data.get("no_capture"))
+
+    # Team-supplied image(s) to embed directly - real uploaded files, never a
+    # fabricated/placeholder image. Saved into the same per-domain output
+    # folder the report itself writes into.
+    provided_images = []
+    if is_multipart:
+        out_dir = _domain_folder(to_domain(url), "blogopt")
+        os.makedirs(out_dir, exist_ok=True)
+        allowed_ext = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+        for i, f in enumerate(request.files.getlist("images")):
+            if not f or not f.filename:
+                continue
+            ext = os.path.splitext(f.filename)[1].lower()
+            if ext not in allowed_ext:
+                continue
+            dest = os.path.join(out_dir, f"_provided_image_{i}{ext}")
+            f.save(dest)
+            provided_images.append(dest)
+
     def _bo_status():
         with blogopt_lock:
             return blogopt_state.get("status"), blogopt_state.get("error_msg")
     t = threading.Thread(target=_instrument_report_run,
                          args=("blogopt", url, "", _run_blogopt_report,
-                              (url, {"target_pages": target_pages, "target_keywords": target_keywords}, no_capture),
+                              (url, {"target_pages": target_pages, "target_keywords": target_keywords}, no_capture,
+                               provided_images),
                               _bo_status), daemon=True)
     t.start()
     return jsonify({"started": True})

@@ -3554,6 +3554,12 @@ https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
                 are relevant when no target pages are given above)</span></label>
             <input type="text" id="bo-target-keywords" placeholder="income tax preparation, tax filing dallas" autocomplete="off">
           </div>
+          <div class="field">
+            <label>Provide your own image(s) <span class="hint">(optional - if you already have specific image(s)
+                you want in the report, upload them here and they'll be embedded directly instead of the
+                auto-detected one)</span></label>
+            <input type="file" id="bo-images" accept="image/png,image/jpeg,image/webp,image/gif" multiple>
+          </div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px">
             <input type="checkbox" id="bo-nocapture"> Skip placement screenshots (faster, text-only suggestions)
           </label>
@@ -5914,16 +5920,20 @@ https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
           startReportTimer('ba'); resetToolProgress('ba');
           return;
         } else if (mode === 'blogopt') {
-          p.url = $('bo-url').value.trim();
-          p.target_pages = $('bo-target-pages').value.trim();
-          p.target_keywords = $('bo-target-keywords').value.trim();
-          p.no_capture = $('bo-nocapture').checked;
-          if (!p.url) { toast('Enter a blog URL'); return; }
+          const boUrl = $('bo-url').value.trim();
+          const boImages = $('bo-images').files;
+          if (!boUrl) { toast('Enter a blog URL'); return; }
+          const fdBo = new FormData();
+          fdBo.append('url', boUrl);
+          fdBo.append('target_pages', $('bo-target-pages').value.trim());
+          fdBo.append('target_keywords', $('bo-target-keywords').value.trim());
+          fdBo.append('no_capture', $('bo-nocapture').checked ? '1' : '');
+          for (const img of boImages) fdBo.append('images', img);
           setButtons('starting', 'blogopt');   // instant feedback, before the network round-trip
           $('empty-blogopt').style.display = 'none';
           $('blogopt-active').classList.remove('hidden');
           if ($('bo-log')) $('bo-log').textContent = 'Starting...';
-          const rbo = await fetch('/api/blogopt/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+          const rbo = await fetch('/api/blogopt/start', { method: 'POST', body: fdBo });
           const dbo = await rbo.json();
           if (dbo.error) { toast(dbo.error, 'err'); setButtons('idle', 'blogopt'); $('empty-blogopt').style.display = 'block'; $('blogopt-active').classList.add('hidden'); return; }
           toast('Blog optimization suggestions started');
