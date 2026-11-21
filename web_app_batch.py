@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.21.0"
+APP_VERSION = "4.22.0"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -8555,7 +8555,7 @@ def _run_blogopt_report(url, targets_data, no_capture, provided_images=None, pla
     if provided_images:
         merged_targets["provided_images"] = provided_images
     if any(merged_targets.get(k) for k in ("target_pages", "target_keywords", "provided_images",
-                                           "provided_image_url", "image_location")):
+                                           "provided_image_url", "image_location", "target_pairs")):
         targets_file = os.path.join(out_dir, "_targets.json")
         with open(targets_file, "w", encoding="utf-8") as f:
             json.dump(merged_targets, f, ensure_ascii=False)
@@ -8622,6 +8622,41 @@ def _run_blogopt_report(url, targets_data, no_capture, provided_images=None, pla
             blogopt_state["error_msg"] = str(e)
 
 
+def _parse_blogopt_targets_sheet(file_storage):
+    """Reads a team sheet of target keywords and/or pages. Any cell holding
+    a URL is a target page; any other text cell is a keyword (header words
+    are ignored). A keyword and a URL on the same row are returned as a pair.
+    Returns (pairs, pages, keywords)."""
+    name = (file_storage.filename or "").lower()
+    rows = []
+    if name.endswith(".csv"):
+        text = file_storage.read().decode("utf-8-sig", "replace")
+        rows = list(csv.reader(io.StringIO(text)))
+    elif name.endswith((".xlsx", ".xlsm")):
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(file_storage.read()), read_only=True, data_only=True)
+        for ws in wb.worksheets:
+            rows.extend(list(r) for r in ws.iter_rows(values_only=True))
+    else:
+        raise ValueError("use a .xlsx or .csv file")
+    header_words = {"keyword", "keywords", "target keyword", "target keywords", "url", "urls", "page",
+                    "pages", "target page", "target pages", "target url", "landing page", "link",
+                    "s.no", "sr no", "sr. no.", "no", "#"}
+    pairs, pages, kws = [], [], []
+    for row in rows:
+        cells = [str(c).strip() for c in row if c is not None and str(c).strip()]
+        if any(c.lower() in header_words for c in cells):
+            continue  # a header row: none of its cells are keywords
+        urls = [c for c in cells if _re.match(r"^https?://", c, _re.I)]
+        words = [c for c in cells if c not in urls and c.lower() not in header_words
+                 and not _re.fullmatch(r"[\d.,%\s-]+", c) and len(c) <= 80]
+        pages.extend(urls)
+        kws.extend(words)
+        if urls and words:
+            pairs.append({"keyword": words[0], "url": urls[0]})
+    return pairs, list(dict.fromkeys(pages)), list(dict.fromkeys(kws))
+
+
 @app.route("/api/blogopt/start", methods=["POST"])
 def api_blogopt_start():
     if not _require_tool("blogopt"):
@@ -8638,13 +8673,19 @@ def api_blogopt_start():
         url = "https://" + url
     target_pages = [ln.strip() for ln in (data.get("target_pages") or "").splitlines() if ln.strip()]
     target_keywords = [k.strip() for k in (data.get("target_keywords") or "").split(",") if k.strip()]
-    no_capture = bool(data.get("no_capture"))
+    # Screenshots are opt-in ("Include placement screenshots"); older callers
+    # that still send no_capture keep working.
+    if "include_capture" in data:
+        no_capture = not data.get("include_capture")
+    else:
+        no_capture = bool(data.get("no_capture"))
     platform = (data.get("platform") or "auto").strip().lower()
     if platform not in ("auto", "wordpress", "shopify", "opencart"):
         platform = "auto"
-    image_url = (data.get("image_url") or "").strip()
-    if image_url and not _re.match(r"^https?://", image_url, _re.I):
-        return jsonify({"error": "Image URL must start with http:// or https://"}), 400
+    image_urls = [u.strip() for u in _re.split(r"[\n,]+", data.get("image_url") or "") if u.strip()]
+    if any(not _re.match(r"^https?://", u, _re.I) for u in image_urls):
+        return jsonify({"error": "Every image URL must start with http:// or https://"}), 400
+    image_url = "\n".join(image_urls)
     image_location = (data.get("image_location") or "").strip()[:500]
 
     # Team-supplied image(s) to embed directly - real uploaded files, never a
@@ -8675,13 +8716,27 @@ def api_blogopt_start():
     if content_doc and not (provided_images or image_url):
         return jsonify({"error": "For a post that is not published yet, add the image file(s) or an image URL to insert in the post."}), 400
 
+    # Optional sheet of target keywords / pages (.xlsx or .csv). A row with
+    # both a keyword and a URL is kept as a pair (that keyword -> that page).
+    target_pairs = []
+    sheet = request.files.get("targets_sheet") if is_multipart else None
+    if sheet and sheet.filename:
+        try:
+            pairs, pages, kws = _parse_blogopt_targets_sheet(sheet)
+        except Exception as e:
+            return jsonify({"error": f"Could not read the targets sheet: {e}"}), 400
+        target_pairs = pairs
+        target_pages = list(dict.fromkeys(target_pages + pages))
+        target_keywords = list(dict.fromkeys(target_keywords + kws))
+
     def _bo_status():
         with blogopt_lock:
             return blogopt_state.get("status"), blogopt_state.get("error_msg")
     t = threading.Thread(target=_instrument_report_run,
                          args=("blogopt", url, "", _run_blogopt_report,
                               (url, {"target_pages": target_pages, "target_keywords": target_keywords,
-                                     "provided_image_url": image_url, "image_location": image_location},
+                                     "provided_image_url": image_url, "image_location": image_location,
+                                     "target_pairs": target_pairs},
                                no_capture, provided_images, platform, content_doc),
                               _bo_status), daemon=True)
     t.start()

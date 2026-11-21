@@ -28,8 +28,16 @@ import time
 from datetime import datetime
 from urllib.parse import urljoin, urlparse
 
+import warnings
+
 import requests
 from bs4 import BeautifulSoup
+
+try:  # sitemaps and feeds are read with the HTML parser on purpose
+    from bs4 import XMLParsedAsHTMLWarning
+    warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+except Exception:
+    pass
 
 import docx
 from docx.shared import Inches, RGBColor
@@ -360,6 +368,12 @@ def scrape_blog(url, content_doc=None):
             paragraphs, best_node = found, cand
     if not paragraphs:
         paragraphs = _real_paragraphs(soup)
+    # Keep only the post's own paragraphs - confirmed real case: a store's
+    # "Showroom, gym, testen en advies" block sat in the same container and
+    # got offered as a sentence to link from.
+    in_post = _real_paragraphs(_post_body(best_node))
+    if len(in_post) >= 3:
+        paragraphs = in_post
 
     # Real images inside the post body, with the alt text they have today.
     content_images, seen_src = [], set()
@@ -507,6 +521,20 @@ def _targets_from_page_links(scraped, keywords, max_targets):
     return [{"url": u, "title": t} for _, u, t in scored[:max_targets]]
 
 
+def _is_200_ok(r, url):  # noqa: note requests.Response is falsy for 4xx/5xx
+    """True only for a page that answers 200 at its own address. A page that
+    errors, or that redirects somewhere else, must not be linked to (a
+    http->https, www or trailing-slash hop to the same page is fine)."""
+    if r is None or r.status_code != 200:
+        return False
+
+    def norm(u):
+        u = re.sub(r"^https?://(www\.)?", "", (u or "").lower()).split("#")[0]
+        return u.rstrip("/")
+    final = getattr(r, "url", "") or url
+    return norm(final) == norm(url)
+
+
 def find_related_posts(scraped, keywords, want=2):
     """Two real posts from the same blog that are closest to this post's
     topic, for the Previous / Next (read more) links. Read from the post page
@@ -542,48 +570,58 @@ def find_related_posts(scraped, keywords, want=2):
 
 
 def find_link_targets(scraped, target_pages, target_keywords, topic_keywords, max_targets=2, fetch_cap=12):
-    """Real internal-link / CTA-button targets. Priority:
-    1. Team-supplied target_pages, if given (verified reachable, real URLs).
-    2. Otherwise, crawl the sitemap and pick the best-scoring pages by
-       target_keywords (team-supplied) or the AI's own topic_keywords for
-       this post, fetching just the top candidates' real <title> to confirm
-       relevance before deciding.
-    Returns [{"url":..., "title":...}, ...] - never a fabricated URL; an
-    empty list means no confident real target was found."""
+    """Real internal-link / CTA-button targets:
+    1. Team-supplied target pages, each checked live. Only pages answering
+       200 OK are kept; an error or a redirect is skipped and logged.
+    2. Plus pages found on the site itself (sitemap, or its menu/footer
+       links) that match the post's topic, also 200 OK only.
+    These are CANDIDATES, not orders: pick_link_sentences() links a page only
+    where the post genuinely talks about that page's topic, so a team page
+    with no relevant sentence is left out rather than forced in.
+    Returns [{"url":..., "title":..., "from_team": bool}, ...] - never a
+    fabricated URL."""
+    out, seen = [], {scraped["url"].rstrip("/")}
+    for u in (target_pages or [])[:15]:
+        if u.rstrip("/") in seen:
+            continue
+        seen.add(u.rstrip("/"))
+        r = fetch(u, timeout=12)
+        if _is_200_ok(r, u):
+            t = BeautifulSoup(r.text, "html.parser").find("title")
+            out.append({"url": u, "title": t.get_text(strip=True) if t else u, "from_team": True})
+        else:
+            why = ("no response" if r is None else f"HTTP {r.status_code}" if r.status_code != 200
+                   else f"redirects to {getattr(r, 'url', '')}")
+            log(f"   [warn] target page is not 200 OK ({why}), not linking to it: {u}")
     if target_pages:
-        out = []
-        for u in target_pages[:max_targets]:
-            r = fetch(u, timeout=12)
-            if r and r.status_code < 400:
-                t = BeautifulSoup(r.text, "html.parser").find("title")
-                out.append({"url": u, "title": t.get_text(strip=True) if t else u})
-            else:
-                log(f"   [warn] team-supplied target page not reachable, skipping: {u}")
-        if out:
-            return out
+        log(f"   {len(out)} of {len(target_pages[:15])} team target page(s) are 200 OK.")
 
     keywords = target_keywords or topic_keywords or []
     sitemap_urls = crawl_sitemap(scraped["site_root"])
     if not sitemap_urls:
         log("   No sitemap found - using the pages linked from this site's own menu and footer.")
-        return _targets_from_page_links(scraped, keywords, max_targets)
+        found = _targets_from_page_links(scraped, keywords, max_targets)
+        candidates, words = [f["url"] for f in found], None
+    else:
+        scored = score_candidates(sitemap_urls, scraped["url"], keywords)
+        candidates = [u for score, u in scored if score > 0][:fetch_cap] or [u for _, u in scored[:fetch_cap]]
+        words = _topic_words(keywords, sitemap_urls)
 
-    scored = score_candidates(sitemap_urls, scraped["url"], keywords)
-    candidates = [u for score, u in scored if score > 0][:fetch_cap] or [u for _, u in scored[:fetch_cap]]
-    words = _topic_words(keywords, sitemap_urls)
-
-    out = []
+    auto = 0
     for u in candidates:
+        if auto >= max_targets:
+            break
+        if u.rstrip("/") in seen:
+            continue
+        seen.add(u.rstrip("/"))
         r = fetch(u, timeout=12)
-        if not r or r.status_code >= 400:
+        if not _is_200_ok(r, u):
             continue
         t = BeautifulSoup(r.text, "html.parser").find("title")
         title = t.get_text(strip=True) if t else u
-        title_l = title.lower()
-        if any(w in title_l or w in urlparse(u).path.lower() for w in words):
-            out.append({"url": u, "title": title})
-        if len(out) >= max_targets:
-            break
+        if words is None or any(w in title.lower() or w in urlparse(u).path.lower() for w in words):
+            out.append({"url": u, "title": title, "from_team": False})
+            auto += 1
     return out
 
 
@@ -789,24 +827,33 @@ Images:
     return [str(x).strip() for x in result]
 
 
-def pick_link_sentences(paragraphs, link_targets):
+def pick_link_sentences(paragraphs, link_targets, max_pairs=None, keywords=(), pairs=()):
     """Ask the AI to pick which REAL paragraph(s) should carry an internal
     link to each target, by INDEX only - it never writes new anchor text,
     so "Find with" is always a verbatim sentence from the actual page."""
     if not paragraphs or not link_targets:
         return []
     numbered = "\n".join(f"[{i}] {p}" for i, p in enumerate(paragraphs[:40]))
-    targets_desc = "\n".join(f"- {t['url']} (\"{t['title']}\")" for t in link_targets)
+    max_pairs = max_pairs or len(link_targets)
+    wanted = {p["url"].rstrip("/"): p["keyword"] for p in pairs if p.get("keyword")}
+    targets_desc = "\n".join(
+        f"- {t['url']} (\"{t['title']}\")"
+        + (f" [team's keyword for this page: \"{wanted[t['url'].rstrip('/')]}\"]"
+           if t["url"].rstrip("/") in wanted else "")
+        for t in link_targets)
+    kw_line = (f"Target keywords: {', '.join(keywords)}. When one of these (or the team's keyword for a "
+               "page) appears in a relevant paragraph, use it as the anchor text.\n" if keywords else "")
     prompt = f"""Given these real numbered paragraphs from a blog post, and these real target pages
 on the same site, pick ONE paragraph index per target page that would be a natural
 place to add an internal link to that target (based on topical relevance), and the exact
 words inside that paragraph that should become the link.
 Return ONLY a JSON array of objects:
 [{{"index": <int>, "target_url": "<one of the target URLs above>", "anchor_text": "<2-5 words copied EXACTLY from that paragraph>"}}]
-Pick at most {len(link_targets)} pairs, each with a DIFFERENT paragraph index. If none of the
-paragraphs are a good fit for a target, omit that target. Never invent anchor text: it must
+Pick at most {max_pairs} pairs, each with a DIFFERENT paragraph index and a DIFFERENT target page.
+Do not force a link: only link a page where the paragraph is genuinely about that page's topic, and
+leave a target page out completely if no paragraph fits it. Never invent anchor text: it must
 appear character for character in the chosen paragraph.
-
+{kw_line}
 Paragraphs:
 {numbered}
 
@@ -823,8 +870,12 @@ Target pages:
             target_url = item.get("target_url")
             if not (0 <= idx < len(paragraphs) and any(t["url"] == target_url for t in link_targets)):
                 continue
-            pair = _sentence_with_anchor(paragraphs[idx], item.get("anchor_text") or "")
-            if pair:
+            # The team's own keyword for this page wins as the anchor when the
+            # paragraph really contains it.
+            team_kw = wanted.get((target_url or "").rstrip("/"), "")
+            anchor = team_kw if team_kw and team_kw.lower() in paragraphs[idx].lower() else item.get("anchor_text")
+            pair = _sentence_with_anchor(paragraphs[idx], anchor or "")
+            if pair and len(out) < max_pairs and not any(o["target_url"] == target_url for o in out):
                 out.append({"sentence": pair[0], "anchor": pair[1], "target_url": target_url})
         except Exception:
             continue
@@ -983,8 +1034,9 @@ def fetch_in_browser(url):
 
 
 class _BrowserResponse:
-    def __init__(self, status, text):
+    def __init__(self, status, text, final_url=""):
         self.status_code, self.text, self.content = status, text, text.encode("utf-8", "ignore")
+        self.url = final_url
 
     def json(self):
         return json.loads(self.text)
@@ -1004,12 +1056,12 @@ def _browser_fetch(url):
         res = driver.execute_async_script("""
             var done = arguments[arguments.length - 1];
             fetch(arguments[0], {credentials: 'include'})
-              .then(function (r) { return r.text().then(function (t) { done([r.status, t]); }); })
+              .then(function (r) { return r.text().then(function (t) { done([r.status, t, r.url]); }); })
               .catch(function (e) { done([0, String(e)]); });
         """, url)
         if not res or not res[0]:
             return None
-        return _BrowserResponse(int(res[0]), res[1] or "")
+        return _BrowserResponse(int(res[0]), res[1] or "", res[2] if len(res) > 2 else "")
     except Exception as e:
         log(f"   [warn] browser request failed for {url}: {type(e).__name__}: {e}")
         return None
@@ -1405,7 +1457,7 @@ def build_docx(out_path, profile, scraped, suggestions, link_pairs, image, cta_r
     # ---- Image Optimization
     _line(doc, "Image Optimization Suggestions-  ")
     doc.add_paragraph("")
-    team_image = bool(image["files"] or image["from_team"])
+    team_image = bool(image["files"] or image["from_team"])  # any image the team gave
     if profile["new_image"] or team_image:
         if profile["new_image"]:
             if scraped["from_doc"]:
@@ -1415,21 +1467,23 @@ def build_docx(out_path, profile, scraped, suggestions, link_pairs, image, cta_r
                 _line(doc, "Featured Image Suggestion: Already Given!")
             else:
                 _line(doc, "Featured Image Suggestion: ", MISSING, color=RED)
-        if image["files"]:
-            _line(doc, "Image URL: ")
-            doc.add_paragraph(f"Provided by team ({len(image['files'])} image"
-                              f"{'s' if len(image['files']) != 1 else ''} attached below). "
-                              "Upload it to the site and add it to the post.")
-            for path in image["files"]:
-                _picture(doc, path, width=4.0)
-        elif image["url"]:
-            _line(doc, "Image URL: ")
-            doc.add_paragraph(image["url"])
-        else:
+        many = len(image["items"]) > 1
+        if not image["items"]:
             _line(doc, "Image URL: ", "Need to find new image and update", color=RED)
-        _line(doc, f"Suggested Image Alt: {suggestions.get('image_alt', '')}")
-        if profile["new_image"]:
-            _line(doc, f"Suggested Title Attribute: {suggestions.get('image_title_attr', '')}")
+            _line(doc, f"Suggested Image Alt: {suggestions.get('image_alt', '')}")
+            if profile["new_image"]:
+                _line(doc, f"Suggested Title Attribute: {suggestions.get('image_title_attr', '')}")
+        for n, item in enumerate(image["items"], 1):
+            _line(doc, f"Image {n} URL: " if many else "Image URL: ")
+            if item["file"]:
+                doc.add_paragraph("Provided by team (attached below). Upload it to the site and add it "
+                                  "to the post.")
+                _picture(doc, item["src"], width=4.0)
+            else:
+                doc.add_paragraph(item["src"])
+            _line(doc, f"Suggested Image Alt: {item['alt']}")
+            if profile["new_image"]:
+                _line(doc, f"Suggested Title Attribute: {item['alt'] or suggestions.get('image_title_attr', '')}")
         if profile["cta"]:
             cta = suggestions.get("cta_text", "")
             p = _line(doc, f"Clickable Button: Create a clickable button below the image with the text "
@@ -1511,18 +1565,23 @@ def main():
     os.makedirs(args.out, exist_ok=True)
 
     target_pages, target_keywords, provided_images = [], [], []
-    provided_image_url, image_location = "", ""
+    provided_image_urls, image_location, target_pairs = [], "", []
     if args.targets and os.path.exists(args.targets):
         with open(args.targets, encoding="utf-8") as f:
             tdata = json.load(f)
         target_pages = tdata.get("target_pages") or []
         target_keywords = tdata.get("target_keywords") or []
         provided_images = [p for p in (tdata.get("provided_images") or []) if os.path.exists(p)]
-        provided_image_url = (tdata.get("provided_image_url") or "").strip()
+        provided_image_urls = [u.strip() for u in re.split(r"[\n,]+", tdata.get("provided_image_url") or "")
+                               if u.strip()]
+        target_pairs = [p for p in (tdata.get("target_pairs") or []) if p.get("url")]
+        target_pages = list(dict.fromkeys(target_pages + [p["url"] for p in target_pairs]))
+        target_keywords = list(dict.fromkeys(target_keywords
+                                             + [p["keyword"] for p in target_pairs if p.get("keyword")]))
         image_location = (tdata.get("image_location") or "").strip()
 
     content_doc = args.content_doc if args.content_doc and os.path.exists(args.content_doc) else None
-    if content_doc and not (provided_images or provided_image_url):
+    if content_doc and not (provided_images or provided_image_urls):
         log("[ERROR] For a post that is not published yet, add the image file(s) or an image URL to insert in the post.")
         sys.exit(1)
     if content_doc:
@@ -1559,7 +1618,8 @@ def main():
     link_targets = find_link_targets(scraped, target_pages, target_keywords,
                                      suggestions.get("topic_keywords") or [],
                                      max_targets=profile["links"], fetch_cap=6 + 3 * profile["links"])
-    link_pairs = pick_link_sentences(scraped["paragraphs"], link_targets) if link_targets else []
+    link_pairs = (pick_link_sentences(scraped["paragraphs"], link_targets, profile["links"],
+                                      target_keywords, target_pairs) if link_targets else [])
     if link_pairs:
         log(f"   Found {len(link_pairs)} real internal-link opportunity(ies).")
     else:
@@ -1573,12 +1633,15 @@ def main():
     cta_ref_url = link_targets[0]["url"] if link_targets else scraped["site_root"] + "/"
 
     image = {"files": provided_images, "url": "", "location": image_location,
-             "from_team": bool(provided_image_url)}
-    if provided_images:
-        log(f"[4/6] Using {len(provided_images)} team-provided image(s) instead of auto-detection.")
-    elif provided_image_url:
-        log("[4/6] Using the team-provided image URL instead of auto-detection.")
-        image["url"] = provided_image_url
+             "from_team": bool(provided_image_urls), "items": []}
+    if provided_images or provided_image_urls:
+        if provided_images:
+            log(f"[4/6] Using {len(provided_images)} team-provided image file(s) instead of auto-detection.")
+        if provided_image_urls and provided_images:
+            log(f"   Plus {len(provided_image_urls)} team-provided image URL(s).")
+        elif provided_image_urls:
+            log(f"[4/6] Using {len(provided_image_urls)} team-provided image URL(s) instead of auto-detection.")
+        image["url"] = provided_image_urls[0] if provided_image_urls else ""
     elif profile["new_image"]:
         log("[4/6] Looking for a reusable real image...")
         image["url"] = find_reusable_image(scraped, suggestions.get("topic_keywords") or []) or ""
@@ -1605,13 +1668,17 @@ def main():
             f"({sum(1 for im in existing_images if im['seen'])} read by looking at the image).")
 
     # The image being added: alt text from the picture itself where possible.
-    new_src = provided_images[0] if provided_images else image["url"]
-    if new_src:
-        seen_alt = ai_alt_from_image(scraped, new_src, "", alt_keywords,
-                                     [im["suggested"] for im in existing_images if im.get("suggested")])
-        if seen_alt:
-            suggestions["image_alt"] = seen_alt
-            log("   Alt text for the image being added was written from the image itself.")
+    # Every image being added (files and URLs can both be given, and there
+    # can be several): each gets its own alt text, written from the picture.
+    sources = ([(f, True) for f in provided_images] + [(u, False) for u in provided_image_urls]
+               or ([(image["url"], False)] if image["url"] else []))
+    used_alts = [im["suggested"] for im in existing_images if im.get("suggested")]
+    for src, is_file in sources:
+        alt = ai_alt_from_image(scraped, src, "", alt_keywords, used_alts) or suggestions.get("image_alt", "")
+        used_alts.append(alt)
+        image["items"].append({"src": src, "file": is_file, "alt": alt})
+    if image["items"]:
+        log(f"   {len(image['items'])} image(s) to add, each with its own alt text.")
 
     screenshot_paths = {}
     if not args.no_capture:
@@ -1622,7 +1689,7 @@ def main():
             shots.append(("cta_reference", cta_ref_url, None, False))
             if not content_doc:
                 shots.append(("cta_location", args.url, content_p, True))
-        if not content_doc and (profile["new_image"] or provided_images or provided_image_url):
+        if not content_doc and (profile["new_image"] or provided_images or provided_image_urls):
             shots.append(("image_placement", args.url, "article img, .entry-content img, main img", False))
         if profile["contact_form"] and not scraped["has_contact_form"] and scraped["contact_url"]:
             shots.append(("contact_placement", scraped["contact_url"], "form:has(textarea)||form", False))

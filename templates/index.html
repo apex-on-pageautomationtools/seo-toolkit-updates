@@ -3562,6 +3562,14 @@ https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
             <input type="text" id="bo-target-keywords" placeholder="income tax preparation, tax filing dallas" autocomplete="off">
           </div>
           <div class="field">
+            <label>Target keywords / pages sheet <span class="hint">(optional, .xlsx or .csv - instead of, or as
+                well as, typing them above. A keyword and a URL on the same row are treated as a pair)</span></label>
+            <input type="file" id="bo-targets-sheet" accept=".xlsx,.csv">
+            <div class="note" style="margin-top:6px">Target pages and keywords are never forced into the post.
+              A page is linked only where a sentence is really about it, on a relevant keyword, and only if
+              the page answers 200 OK (errors and redirects are skipped).</div>
+          </div>
+          <div class="field">
             <label>Platform <span class="hint">(the report only includes what that platform's blog editor can
                 do. Shopify has no categories. OpenCart has no category or featured image alt field)</span></label>
             <select id="bo-platform">
@@ -3572,11 +3580,12 @@ https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
             </select>
           </div>
           <div class="field">
-            <label>Image to add to the post <span class="hint">(optional - upload the image(s), or paste the URL
-                of an image already on the site. Leave both empty to let the tool look for one)</span></label>
+            <label>Image(s) to add to the post <span class="hint">(optional - upload one or more images, and/or
+                paste one or more image URLs. Each image gets its own alt text. Leave both empty to let the
+                tool look for one)</span></label>
             <input type="file" id="bo-images" accept="image/png,image/jpeg,image/webp,image/gif" multiple>
-            <input type="text" id="bo-image-url" placeholder="https://example.com/wp-content/uploads/image.jpg"
-              autocomplete="off" style="margin-top:6px">
+            <textarea id="bo-image-url" rows="2" style="margin-top:6px"
+              placeholder="https://example.com/wp-content/uploads/image.jpg (one URL per line for several images)"></textarea>
           </div>
           <div class="field">
             <label>Where the image should go <span class="hint">(optional - e.g. "below the heading Why GMP
@@ -3584,7 +3593,8 @@ https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
             <input type="text" id="bo-image-location" placeholder="below the heading ..." autocomplete="off">
           </div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px">
-            <input type="checkbox" id="bo-nocapture"> Skip placement screenshots (faster, text-only suggestions)
+            <input type="checkbox" id="bo-capture"> Include placement screenshots (slower. Leave unticked
+            for text-only suggestions)
           </label>
           <div class="note">Takes 1-3 minutes depending on the site and whether screenshots are captured.</div>
         </section>
@@ -5953,7 +5963,8 @@ https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
           fdBo.append('url', boUrl);
           fdBo.append('target_pages', $('bo-target-pages').value.trim());
           fdBo.append('target_keywords', $('bo-target-keywords').value.trim());
-          fdBo.append('no_capture', $('bo-nocapture').checked ? '1' : '');
+          fdBo.append('include_capture', $('bo-capture').checked ? '1' : '');
+          if ($('bo-targets-sheet').files[0]) fdBo.append('targets_sheet', $('bo-targets-sheet').files[0]);
           fdBo.append('platform', $('bo-platform').value);
           fdBo.append('image_url', $('bo-image-url').value.trim());
           fdBo.append('image_location', $('bo-image-location').value.trim());
