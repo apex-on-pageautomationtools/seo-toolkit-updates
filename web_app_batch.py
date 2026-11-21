@@ -65,7 +65,7 @@ import generate_reddit_faq_report as reddit_faq
 logging.getLogger("werkzeug").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-APP_VERSION = "4.20.0"
+APP_VERSION = "4.21.0"
 # auth.py has its own APP_VERSION constant (used for the version it reports to the
 # central login sheet's App_Version column) - keep it in sync with the real running
 # version here instead of maintaining two separately-bumped copies, which is exactly
@@ -8533,7 +8533,8 @@ blogopt_lock = threading.Lock()
 blogopt_stop = threading.Event()
 
 
-def _run_blogopt_report(url, targets_data, no_capture, provided_images=None):
+def _run_blogopt_report(url, targets_data, no_capture, provided_images=None, platform="auto",
+                        content_doc=None):
     with blogopt_lock:
         blogopt_state.update({"status": "running", "log": [], "url": url,
                               "output_file": "", "error_msg": "", "progress": "Starting..."})
@@ -8553,18 +8554,21 @@ def _run_blogopt_report(url, targets_data, no_capture, provided_images=None):
     merged_targets = dict(targets_data or {})
     if provided_images:
         merged_targets["provided_images"] = provided_images
-    if merged_targets.get("target_pages") or merged_targets.get("target_keywords") or merged_targets.get("provided_images"):
+    if any(merged_targets.get(k) for k in ("target_pages", "target_keywords", "provided_images",
+                                           "provided_image_url", "image_location")):
         targets_file = os.path.join(out_dir, "_targets.json")
         with open(targets_file, "w", encoding="utf-8") as f:
             json.dump(merged_targets, f, ensure_ascii=False)
 
     python_exe = os.path.join(os.path.dirname(os.path.abspath(__file__)), "python", "python.exe")
     script = os.path.join(SCRIPTS_DIR, "generate_blog_optimization_suggestions.py")
-    cmd = [python_exe, "-u", script, url, "--out", out_dir, "--format", "james"]
+    cmd = [python_exe, "-u", script, url, "--out", out_dir, "--format", "james", "--platform", platform]
     if targets_file:
         cmd.extend(["--targets", targets_file])
     if no_capture:
         cmd.append("--no-capture")
+    if content_doc:
+        cmd.extend(["--content-doc", content_doc])
 
     _log(f"Running: {url}")
 
@@ -8635,14 +8639,29 @@ def api_blogopt_start():
     target_pages = [ln.strip() for ln in (data.get("target_pages") or "").splitlines() if ln.strip()]
     target_keywords = [k.strip() for k in (data.get("target_keywords") or "").split(",") if k.strip()]
     no_capture = bool(data.get("no_capture"))
+    platform = (data.get("platform") or "auto").strip().lower()
+    if platform not in ("auto", "wordpress", "shopify", "opencart"):
+        platform = "auto"
+    image_url = (data.get("image_url") or "").strip()
+    if image_url and not _re.match(r"^https?://", image_url, _re.I):
+        return jsonify({"error": "Image URL must start with http:// or https://"}), 400
+    image_location = (data.get("image_location") or "").strip()[:500]
 
     # Team-supplied image(s) to embed directly - real uploaded files, never a
     # fabricated/placeholder image. Saved into the same per-domain output
     # folder the report itself writes into.
-    provided_images = []
+    provided_images, content_doc = [], None
     if is_multipart:
         out_dir = _domain_folder(to_domain(url), "blogopt")
         os.makedirs(out_dir, exist_ok=True)
+        # Blog content document for a post that isn't published yet - the
+        # report is then built from this text instead of the live page.
+        doc_file = request.files.get("content_doc")
+        if doc_file and doc_file.filename:
+            if not doc_file.filename.lower().endswith(".docx"):
+                return jsonify({"error": "The blog content document must be a .docx file"}), 400
+            content_doc = os.path.join(out_dir, "_content_doc.docx")
+            doc_file.save(content_doc)
         allowed_ext = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
         for i, f in enumerate(request.files.getlist("images")):
             if not f or not f.filename:
@@ -8653,14 +8672,17 @@ def api_blogopt_start():
             dest = os.path.join(out_dir, f"_provided_image_{i}{ext}")
             f.save(dest)
             provided_images.append(dest)
+    if content_doc and not (provided_images or image_url):
+        return jsonify({"error": "For a post that is not published yet, add the image file(s) or an image URL to insert in the post."}), 400
 
     def _bo_status():
         with blogopt_lock:
             return blogopt_state.get("status"), blogopt_state.get("error_msg")
     t = threading.Thread(target=_instrument_report_run,
                          args=("blogopt", url, "", _run_blogopt_report,
-                              (url, {"target_pages": target_pages, "target_keywords": target_keywords}, no_capture,
-                               provided_images),
+                              (url, {"target_pages": target_pages, "target_keywords": target_keywords,
+                                     "provided_image_url": image_url, "image_location": image_location},
+                               no_capture, provided_images, platform, content_doc),
                               _bo_status), daemon=True)
     t.start()
     return jsonify({"started": True})

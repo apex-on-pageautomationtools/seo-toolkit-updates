@@ -3537,12 +3537,19 @@ https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
           </div>
           <p style="color:var(--text-3);font-size:12px;margin:-4px 0 12px;line-height:1.4">Enter a single blog post
             URL - scrapes the real live page, generates AI suggestions grounded in that content (category, tags,
-            title, meta description, headings), finds real internal-link opportunities from the site's sitemap, and
-            writes a .docx in the standard format. Nothing is fabricated - suggestions are grounded in the real page,
-            and a missing image is flagged in red rather than guessed.</p>
+            title, meta description, H1), finds real internal-link opportunities on the site, builds BlogPosting and
+            FAQ schema from the page, and writes a plain .docx (no tables) in one fixed format per platform:
+            WordPress, Shopify or OpenCart. Nothing is fabricated. The post must be published and reachable, and
+            anything missing is flagged in red rather than guessed.</p>
           <div class="field">
             <label>Blog URL</label>
             <input type="text" id="bo-url" placeholder="https://example.com/blog/some-post/" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Blog content document <span class="hint">(optional, .docx - only for a post that is not
+                published yet. Suggestions are then made from this document. Put the post's planned URL above,
+                or just the site's homepage URL. An image file or image URL below is then required)</span></label>
+            <input type="file" id="bo-content-doc" accept=".docx">
           </div>
           <div class="field">
             <label>Target pages <span class="hint">(optional - one URL per line. If given, internal-link suggestions
@@ -3555,10 +3562,26 @@ https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
             <input type="text" id="bo-target-keywords" placeholder="income tax preparation, tax filing dallas" autocomplete="off">
           </div>
           <div class="field">
-            <label>Provide your own image(s) <span class="hint">(optional - if you already have specific image(s)
-                you want in the report, upload them here and they'll be embedded directly instead of the
-                auto-detected one)</span></label>
+            <label>Platform <span class="hint">(the report only includes what that platform's blog editor can
+                do. Shopify has no categories. OpenCart has no category or featured image alt field)</span></label>
+            <select id="bo-platform">
+              <option value="auto">Auto-detect from the page</option>
+              <option value="wordpress">WordPress</option>
+              <option value="shopify">Shopify</option>
+              <option value="opencart">OpenCart</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Image to add to the post <span class="hint">(optional - upload the image(s), or paste the URL
+                of an image already on the site. Leave both empty to let the tool look for one)</span></label>
             <input type="file" id="bo-images" accept="image/png,image/jpeg,image/webp,image/gif" multiple>
+            <input type="text" id="bo-image-url" placeholder="https://example.com/wp-content/uploads/image.jpg"
+              autocomplete="off" style="margin-top:6px">
+          </div>
+          <div class="field">
+            <label>Where the image should go <span class="hint">(optional - e.g. "below the heading Why GMP
+                matters" or "after the second paragraph")</span></label>
+            <input type="text" id="bo-image-location" placeholder="below the heading ..." autocomplete="off">
           </div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px">
             <input type="checkbox" id="bo-nocapture"> Skip placement screenshots (faster, text-only suggestions)
@@ -5922,13 +5945,20 @@ https://example.com/page-2" oninput="ltUpdateUrlCount()"></textarea>
         } else if (mode === 'blogopt') {
           const boUrl = $('bo-url').value.trim();
           const boImages = $('bo-images').files;
-          if (!boUrl) { toast('Enter a blog URL'); return; }
+          if (!boUrl) { toast('Enter the blog URL (or the site URL when uploading a content document)'); return; }
+          if ($('bo-content-doc').files[0] && !boImages.length && !$('bo-image-url').value.trim()) {
+            toast('For a post that is not published yet, add the image file(s) or an image URL to insert in the post.', 'err'); return;
+          }
           const fdBo = new FormData();
           fdBo.append('url', boUrl);
           fdBo.append('target_pages', $('bo-target-pages').value.trim());
           fdBo.append('target_keywords', $('bo-target-keywords').value.trim());
           fdBo.append('no_capture', $('bo-nocapture').checked ? '1' : '');
+          fdBo.append('platform', $('bo-platform').value);
+          fdBo.append('image_url', $('bo-image-url').value.trim());
+          fdBo.append('image_location', $('bo-image-location').value.trim());
           for (const img of boImages) fdBo.append('images', img);
+          if ($('bo-content-doc').files[0]) fdBo.append('content_doc', $('bo-content-doc').files[0]);
           setButtons('starting', 'blogopt');   // instant feedback, before the network round-trip
           $('empty-blogopt').style.display = 'none';
           $('blogopt-active').classList.remove('hidden');
