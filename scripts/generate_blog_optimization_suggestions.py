@@ -652,6 +652,7 @@ Return ONLY a JSON object with exactly these keys:
 - "image_alt": SEO-friendly alt text for the featured image: a short keyword phrase of 2-6 words for the post topic, not a sentence
 - "image_title_attr": suggested title attribute for the featured image
 - "cta_text": a short (3-6 word) call-to-action button label relevant to this post's topic
+- "cta_placement": where on the post to place the CTA button - use a plain text description such as "End of post", "After heading '<exact heading text>'", or "Below the section about <topic>"; never use the word "screenshot"
 
 Existing title: {scraped['existing_title']}
 Existing meta description: {scraped['existing_meta']}
@@ -683,6 +684,7 @@ Post content (real, scraped from the live page):
             "image_alt": "",
             "image_title_attr": "",
             "cta_text": "",
+            "cta_placement": "End of post",
         }
     return result
 
@@ -1391,6 +1393,10 @@ def build_docx(out_path, profile, scraped, suggestions, link_pairs, image, cta_r
     if profile["cta"]:
         # ---- Call to Action Button
         _line(doc, "Suggested Call to Action Button-")
+        cta_btn = suggestions.get("cta_text", "")
+        p = _line(doc, "Button Text: ")
+        _run(p, cta_btn if cta_btn else MISSING, bold=False,
+             color=None if cta_btn else RED)
         p = _line(doc, "Reference URL")
         _run(p, f": {cta_ref_url}", bold=False)
         if screenshot_paths.get("cta_reference"):
@@ -1398,12 +1404,9 @@ def build_docx(out_path, profile, scraped, suggestions, link_pairs, image, cta_r
             _picture(doc, screenshot_paths["cta_reference"])
         else:
             _line(doc, "Screenshot: ", "could not capture automatically", color=RED)
-        if screenshot_paths.get("cta_location"):
-            _line(doc, "Call to Action Button Location:")
-            _picture(doc, screenshot_paths["cta_location"])
-        else:
-            p = _line(doc, "Call to Action Button Location:")
-            _run(p, " at the end of the post, below the last paragraph.", bold=False)
+        cta_place = suggestions.get("cta_placement", "") or "End of post"
+        p = _line(doc, "Call to Action Button Location: ")
+        _run(p, cta_place, bold=False)
         doc.add_paragraph("")
 
         # ---- Contact Us Form
@@ -1687,8 +1690,7 @@ def main():
         shots = []
         if profile["cta"]:
             shots.append(("cta_reference", cta_ref_url, None, False))
-            if not content_doc:
-                shots.append(("cta_location", args.url, content_p, True))
+            # cta_location screenshot removed: placement is now a text description from AI
         if not content_doc and (profile["new_image"] or provided_images or provided_image_urls):
             shots.append(("image_placement", args.url, "article img, .entry-content img, main img", False))
         if profile["contact_form"] and not scraped["has_contact_form"] and scraped["contact_url"]:
